@@ -51,7 +51,7 @@ export function validateBundle(bundle) {
 // Sources first, then records, then observations: foreign keys remain valid at every boundary.
 export function importChunks(bundle,maxBytes=900000) {
   validateBundle(bundle);const chunks=[],encoder=new TextEncoder();
-  for(const [key,arg,limit] of [['sources','p_sources',150],['records','p_records',300],['observations','p_observations',500]]) {
+  for(const [key,arg,limit] of [['sources','p_sources',150],['records','p_records',300],['observations','p_observations',250]]) {
     let batch={p_sources:[],p_records:[],p_observations:[]},size=100;
     for(const row of bundle[key]){const bytes=encoder.encode(JSON.stringify(row)).length+2;if(bytes+100>maxBytes)throw Error('A source row is too large for one import batch.');if(batch[arg].length&&(batch[arg].length>=limit||size+bytes>maxBytes)){chunks.push(batch);batch={p_sources:[],p_records:[],p_observations:[]};size=100;}batch[arg].push(row);size+=bytes;}
     if(batch[arg].length)chunks.push(batch);
@@ -93,13 +93,26 @@ export async function collectPages(call,args={},check=()=>{}) {
 export async function executeImport(bundle,{call,check=()=>{},onProgress=()=>{},cryptoAPI=globalThis.crypto}={}) {
   const chunks=importChunks(bundle),report={sources:0,records:0,observations:0,conflicts:[],completed_batches:0,total_batches:chunks.length,replayed_batches:0,complete:false};
   try {
-    for(let i=0;i<chunks.length;i++){
+    for(let i=0;i<chunks.length;){
       check();onProgress(i+1,chunks.length);const batch=chunks[i],id=await batchID(batch,cryptoAPI);check();
-      const result=await call({...batch,p_batch_id:id});check();
+      let result;
+      try {result=await call({...batch,p_batch_id:id});}
+      catch(error){
+        check();
+        // This database cancellation rolls back the entire request. Network or
+        // permission errors can have different outcomes and must never be retried here.
+        const key=Object.keys(batch).find(k=>batch[k].length),rows=batch[key];
+        if(error?.message!=='canceling statement due to statement timeout'||rows.length<50)throw error;
+        const middle=Math.floor(rows.length/2);
+        const halves=[rows.slice(0,middle),rows.slice(middle)].map(part=>({...batch,[key]:part}));
+        chunks.splice(i,1,...halves);report.total_batches=chunks.length;
+        continue;
+      }
+      check();
       if(!result||!Array.isArray(result.conflicts)||!['sources_inserted','records_inserted','observations_inserted'].every(k=>Number.isSafeInteger(result[k])&&result[k]>=0))throw Error('The import result was not confirmed. Retry the same package to resume safely.');
       if(result.replayed)report.replayed_batches++;
       else {report.sources+=result.sources_inserted;report.records+=result.records_inserted;report.observations+=result.observations_inserted;}
-      report.conflicts=[...new Set([...report.conflicts,...result.conflicts])];report.completed_batches++;
+      report.conflicts=[...new Set([...report.conflicts,...result.conflicts])];report.completed_batches++;i++;
     }
     report.complete=true;return report;
   } catch(error){error.importReport=report;throw error;}

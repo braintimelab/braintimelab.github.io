@@ -1,7 +1,7 @@
 import * as store from '../mouse-data/data-store.js?v=26';
 import {PUBLIC_CONFIG} from '../mouse-data/config.js';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js';
-import {SECTIONS,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=1';
+import {SECTIONS,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=2';
 
 const $=id=>document.getElementById(id), main=$('main'),PAGE=50;
 let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=new Map(),sourceRows=[],selected=null,editAction=null,importing=false,searchTimer=null,listKind=null,accessCheck=null;
