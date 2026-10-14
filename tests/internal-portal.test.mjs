@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {createPortalController} from '../internal/portal.js';
+import {createPortalController, togglePasswordVisibility} from '../internal/portal.js';
+import vm from 'node:vm';
 
 const config = {url: 'https://lab.example', colonyId: 'lab-colony', anonKey: 'public-key'};
 const signedOut = () => ({...config, configured: true, signedIn: false, role: null});
@@ -163,7 +164,7 @@ test('a previous workspace configuration cannot grant access to this lab portal'
   assert.equal(f.controller.getState().phase, 'signed-out');
 });
 
-test('published page starts with tools hidden, accessible labels and no active Reagents link', async () => {
+test('published page starts with tools hidden, accessible labels and a Reagents link behind the membership gate', async () => {
   const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
   assert.match(html, /id="tools-panel" hidden/);
   assert.match(html, /id="account-panel"[^>]* hidden/);
@@ -175,9 +176,88 @@ test('published page starts with tools hidden, accessible labels and no active R
   assert(csp);
   for (const directive of ["default-src 'none'", "script-src 'self'", "style-src 'self'", "img-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'none'", 'connect-src https://njhetwortngnniyrhcfk.supabase.co']) assert(csp.includes(directive));
   assert(!csp.includes("'unsafe-inline'"));
-  const reagentCard = html.match(/<article class="tool-card upcoming"[\s\S]*?<\/article>/)?.[0];
+  const reagentCard = [...html.matchAll(/<article class="tool-card"[\s\S]*?<\/article>/g)].map(match => match[0]).find(card => card.includes('<h3>Reagents</h3>'));
   assert(reagentCard);
-  assert.match(reagentCard, /aria-disabled="true"/);
-  assert(!reagentCard.includes('<a '));
-  assert(!reagentCard.includes('<button'));
+  assert.match(reagentCard, /id="open-reagents"[^>]+href="..\/reagents\/"/);
+  assert.match(reagentCard, /Available/);
+  assert(!reagentCard.includes('aria-disabled'));
+  assert(!html.includes('Coming soon'));
+});
+
+
+test('opening Reagents independently rechecks live access and fails closed after revocation', async () => {
+  let permitted = true;
+  const f = fixture({status: member(), verification: async () => { if (!permitted) throw Error('Membership revoked'); return member(); }});
+  await f.controller.start();
+  permitted = false;
+  await f.controller.openReagents();
+  assert.equal(f.controller.getState().phase, 'signed-out');
+  assert.deepEqual(f.navigation, []);
+  permitted = true;
+  await f.controller.openReagents();
+  assert.deepEqual(f.navigation, [{url: 'https://braintime.example/reagents/', replace: false}]);
+  assert.equal(f.calls.filter(([action]) => action === 'verify').length, 3);
+});
+
+test('a cancelled Reagents check cannot navigate after sign-out or a newer tool request', async () => {
+  const waiting = deferred();
+  let pending = true;
+  const f = fixture({status: member(), verification: () => pending ? waiting.promise : Promise.resolve(member())});
+  const open = f.controller.openReagents();
+  await f.controller.signOut();
+  pending = false;
+  f.setStatus(member());
+  await f.controller.openMouseData();
+  waiting.resolve(member());
+  await open;
+  assert.deepEqual(f.navigation, [{url: 'https://braintime.example/mouse-data/', replace: false}]);
+});
+
+test('setup and recovery sessions cannot open Reagents', async () => {
+  for (const status of [member({role: 'pending', setupRequired: true}), member({passwordRecovery: true})]) {
+    const f = fixture({status});
+    await f.controller.openReagents();
+    assert.deepEqual(f.navigation, []);
+    assert(!f.calls.some(([action]) => action === 'verify'));
+  }
+});
+
+
+test('password visibility is opt-in, accessible, and never reads or modifies the password value', async () => {
+  const input = {type: 'password', get value() { throw Error('The visibility toggle must not read the password'); }, set value(_) { throw Error('The visibility toggle must not change the password'); }};
+  const attributes = new Map(), button = {textContent: 'Show password', setAttribute(name, value) { attributes.set(name, value); }};
+  const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="login-password"[^>]+type="password"/);
+  assert.match(html, /id="show-password"[^>]+type="button"[^>]+aria-controls="login-password"[^>]+aria-pressed="false"/);
+  togglePasswordVisibility(input, button);
+  assert.equal(input.type, 'text');assert.equal(button.textContent, 'Hide password');assert.equal(attributes.get('aria-pressed'), 'true');
+  togglePasswordVisibility(input, button);
+  assert.equal(input.type, 'password');assert.equal(button.textContent, 'Show password');assert.equal(attributes.get('aria-pressed'), 'false');
+});
+
+test('submitting a visible password clears and conceals it before authentication completes', async () => {
+  const waiting = deferred(), elements = new Map(), calls = [];
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {type: id === 'login-password' ? 'password' : '', value: '', textContent: '', hidden: false, dataset: {}, attributes: new Map(), listeners: new Map(),
+      setAttribute(name, value) { this.attributes.set(name, value); }, addEventListener(name, callback) { this.listeners.set(name, callback); }});
+    return elements.get(id);
+  };
+  const document = {hidden: false, getElementById: element, querySelectorAll: () => [], addEventListener() {}};
+  const window = {location: new URL('https://braintime.example/internal/'), addEventListener() {}};
+  const store = {getCloudStatus: signedOut, async signIn(identifier, password) { calls.push({identifier, password}); await waiting.promise; }};
+  const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
+    .replace(/^export /gm, '')
+    .replace(/const \[store, \{PUBLIC_CONFIG\}\] = await Promise\.all\(\[[\s\S]*?\]\);/, 'const store = globalThis.testStore, PUBLIC_CONFIG = globalThis.testConfig;');
+  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+  vm.runInContext(source, context);
+  await context.mountPortal(document, window);
+  element('login-id').value = ' lab.member ';element('login-password').value = 'synthetic-only-password';
+  element('show-password').listeners.get('click')();assert.equal(element('login-password').type, 'text');
+  let prevented = false;
+  const submission = element('sign-in-form').listeners.get('submit')({preventDefault() { prevented = true; }});
+  assert.equal(prevented, true);assert.equal(element('login-password').value, '');assert.equal(element('login-password').type, 'password');
+  assert.equal(element('show-password').textContent, 'Show password');assert.equal(element('show-password').attributes.get('aria-pressed'), 'false');
+  assert.deepEqual(calls, [{identifier: 'lab.member', password: 'synthetic-only-password'}]);
+  assert.ok(![...elements.values()].some(e => e.textContent.includes('synthetic-only-password')));
+  waiting.resolve();await submission;
 });

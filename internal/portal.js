@@ -1,11 +1,18 @@
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
 const CALLBACK_KEYS = ['access_token', 'refresh_token', 'error', 'error_description', 'error_code'];
 
+export function togglePasswordVisibility(input, button, show = input.type === 'password') {
+  input.type = show ? 'text' : 'password';
+  button.textContent = show ? 'Hide password' : 'Show password';
+  button.setAttribute('aria-pressed', String(show));
+}
+
 /** Small view controller. Authentication, refresh and membership stay in the shared store. */
 export function createPortalController({store, config, location, navigate, onState = () => {}}) {
   let generation = 0;
   let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null});
   const appURL = () => new URL('../mouse-data/', location.href).href;
+  const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
     state = Object.freeze({...state, ...update});
     onState(state);
@@ -102,14 +109,18 @@ export function createPortalController({store, config, location, navigate, onSta
     return state;
   }
 
-  async function openMouseData() {
-    await checkAccess();
-    if (state.phase === 'member') navigate(appURL(), {replace: false});
+  async function openTool(url) {
+    const checking = checkAccess();
+    const attempt = generation;
+    await checking;
+    if (attempt === generation && state.phase === 'member') navigate(url, {replace: false});
     return state;
   }
+  const openMouseData = () => openTool(appURL());
+  const openReagents = () => openTool(reagentsURL());
 
   return Object.freeze({
-    start, checkAccess, signIn, signOut, openMouseData,
+    start, checkAccess, signIn, signOut, openMouseData, openReagents,
     requestReset: identifier => sendRequest('reset', () => store.requestPasswordReset(identifier)),
     sendEmailLink: email => sendRequest('email', () => store.requestEmailLink(email, appURL())),
     getState: () => state
@@ -118,7 +129,7 @@ export function createPortalController({store, config, location, navigate, onSta
 
 export async function mountPortal(document, window) {
   const [store, {PUBLIC_CONFIG}] = await Promise.all([
-    import('../mouse-data/data-store.js?v=24'),
+    import('../mouse-data/data-store.js?v=26'),
     import('../mouse-data/config.js')
   ]);
   const element = id => document.getElementById(id);
@@ -149,8 +160,10 @@ export async function mountPortal(document, window) {
     event.preventDefault();
     const password = element('login-password').value;
     element('login-password').value = '';
+    togglePasswordVisibility(element('login-password'), element('show-password'), false);
     await controller.signIn(element('login-id').value.trim(), password);
   });
+  element('show-password').addEventListener('click', () => togglePasswordVisibility(element('login-password'), element('show-password')));
   element('reset-form').addEventListener('submit', event => {
     event.preventDefault();
     void controller.requestReset(element('reset-id').value.trim());
@@ -160,11 +173,13 @@ export async function mountPortal(document, window) {
     void controller.sendEmailLink(element('link-email').value.trim());
   });
   for (const button of document.querySelectorAll('[data-sign-out]')) button.addEventListener('click', () => void controller.signOut());
-  element('open-mouse-data').addEventListener('click', event => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    void controller.openMouseData();
-  });
+  for (const [id, open] of [['open-mouse-data', controller.openMouseData], ['open-reagents', controller.openReagents]]) {
+    element(id).addEventListener('click', event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void open();
+    });
+  }
   const recheck = () => {
     if (!document.hidden && !controller.getState().busy) void controller.checkAccess();
   };

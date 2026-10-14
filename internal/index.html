@@ -9,8 +9,8 @@
   <meta name="theme-color" content="#f7f4e7">
   <title>Internal tools · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
-  <link rel="stylesheet" href="./portal.css?v=1">
-  <script type="module" src="./portal.js?v=1"></script>
+  <link rel="stylesheet" href="./portal.css?v=2">
+  <script type="module" src="./portal.js?v=3"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -45,7 +45,7 @@
           <label for="login-id">ID or email</label>
           <input id="login-id" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
           <label for="login-password">Password</label>
-          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+          <div class="password-entry"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button id="show-password" class="text-button" type="button" aria-controls="login-password" aria-pressed="false">Show password</button></div>
           <button class="button primary" type="submit">Sign in</button>
         </form>
         <details class="alternative">
@@ -92,11 +92,11 @@
           <p>Manage mice, breeding, housing and experiments in the shared colony workspace.</p>
           <a id="open-mouse-data" class="tool-link" href="../mouse-data/">Open Mouse Data <span aria-hidden="true">↗</span></a>
         </article>
-        <article class="tool-card upcoming" aria-disabled="true">
-          <div class="tool-top"><span class="tool-number" aria-hidden="true">02</span><span class="availability">Coming soon</span></div>
+        <article class="tool-card">
+          <div class="tool-top"><span class="tool-number" aria-hidden="true">02</span><span class="availability">Available</span></div>
           <h3>Reagents</h3>
-          <p>A home for the lab’s reagents and supplies.</p>
-          <span class="unavailable">In preparation</span>
+          <p>Find reagents, record use and review supplies, sources and safety information.</p>
+          <a id="open-reagents" class="tool-link" href="../reagents/">Open Reagents <span aria-hidden="true">↗</span></a>
         </article>
       </div>
     </section>
