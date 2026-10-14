@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://njhetwortngnniyrhcfk.supabase.co; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="theme-color" content="#f7f4e7">
+  <title>Internal tools · Braintime Laboratory</title>
+  <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
+  <link rel="stylesheet" href="./portal.css?v=1">
+  <script type="module" src="./portal.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="../" aria-label="Braintime Laboratory home">
+      <img src="../mouse-data/icons/braintime-mark.png" width="46" height="46" alt="">
+      <span>Braintime<small>Laboratory</small></span>
+    </a>
+    <nav aria-label="Main navigation"><a href="../">Back to lab home <span aria-hidden="true">↗</span></a></nav>
+  </header>
+
+  <main id="main" class="portal">
+    <div class="intro">
+      <p class="eyebrow">For lab members</p>
+      <h1>Internal tools</h1>
+      <p class="intro-copy">A shared workspace for the everyday work of the lab.</p>
+    </div>
+
+    <p id="portal-status" class="status" role="status" aria-live="polite">Checking your session…</p>
+
+    <section id="sign-in-panel" class="sign-in-layout" hidden aria-labelledby="sign-in-heading">
+      <div class="access-note">
+        <div class="rule" aria-hidden="true"></div>
+        <h2>Welcome back.</h2>
+        <p>Use your Braintime ID or registered email to open the lab’s tools.</p>
+        <p class="small">Need an account? Ask the lab owner to register your email, then complete <a href="../mouse-data/#settings">first-time setup</a>.</p>
+      </div>
+      <div class="sign-in-card">
+        <h2 id="sign-in-heading">Lab sign-in</h2>
+        <button id="discard-session" class="text-button" type="button" data-sign-out hidden>Sign out of this session</button>
+        <form id="sign-in-form">
+          <label for="login-id">ID or email</label>
+          <input id="login-id" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
+          <label for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button primary" type="submit">Sign in</button>
+        </form>
+        <details class="alternative">
+          <summary>Forgot password?</summary>
+          <form id="reset-form">
+            <p class="small">We’ll send a reset link to your registered email.</p>
+            <label for="reset-id">ID or registered email</label>
+            <input id="reset-id" name="identifier" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
+            <button class="button secondary" type="submit">Send reset link</button>
+            <p id="reset-status" class="form-status small" role="status"></p>
+          </form>
+        </details>
+        <details class="alternative">
+          <summary>Sign in with an email link</summary>
+          <form id="email-link-form">
+            <p class="small">The link opens Mouse Data on the device you use to read your email.</p>
+            <label for="link-email">Registered email</label>
+            <input id="link-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required>
+            <button class="button secondary" type="submit">Send sign-in link</button>
+            <p id="email-link-status" class="form-status small" role="status"></p>
+          </form>
+        </details>
+      </div>
+    </section>
+
+    <section id="account-panel" class="account-panel" hidden aria-labelledby="account-heading">
+      <div>
+        <h2 id="account-heading">Complete your account</h2>
+        <p id="account-message">Finish setting up your ID and password to open the lab tools.</p>
+        <a class="button primary" href="../mouse-data/#settings" id="account-link">Continue account setup</a>
+      </div>
+      <button class="text-button" type="button" data-sign-out>Sign out</button>
+    </section>
+
+    <section id="tools-panel" hidden aria-labelledby="tools-heading">
+      <div class="tools-heading">
+        <div><p class="eyebrow">Your workspace</p><h2 id="tools-heading">Lab tools</h2></div>
+        <div class="account"><span id="member-identity"></span><button class="text-button" type="button" data-sign-out>Sign out</button></div>
+      </div>
+      <div class="tool-grid">
+        <article class="tool-card">
+          <div class="tool-top"><span class="tool-number" aria-hidden="true">01</span><span class="availability">Available</span></div>
+          <h3>Mouse Data</h3>
+          <p>Manage mice, breeding, housing and experiments in the shared colony workspace.</p>
+          <a id="open-mouse-data" class="tool-link" href="../mouse-data/">Open Mouse Data <span aria-hidden="true">↗</span></a>
+        </article>
+        <article class="tool-card upcoming" aria-disabled="true">
+          <div class="tool-top"><span class="tool-number" aria-hidden="true">02</span><span class="availability">Coming soon</span></div>
+          <h3>Reagents</h3>
+          <p>A home for the lab’s reagents and supplies.</p>
+          <span class="unavailable">In preparation</span>
+        </article>
+      </div>
+    </section>
+
+    <noscript><p class="status">Enable JavaScript to sign in to the lab tools. You can still visit the <a href="../">public lab homepage</a>.</p></noscript>
+  </main>
+  <footer class="site-footer"><span>Braintime Laboratory</span><span>Internal use only</span></footer>
+</body>
+</html>

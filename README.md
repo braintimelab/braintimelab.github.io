@@ -1,32 +1,35 @@
-# LocomotorBox
+# Braintime Lab
 
-LocomotorBox is a set of Arduino software and GUI interface for running 10 Locomotor-Boxes with pre-set schedules.
+Public lab website: **https://braintimelab.github.io/**
 
-### Prerequisites
+- Public research, members, publications, lectures and resources recreate the official [TMU lab website](https://braintime.tmu.edu.tw/), as retrieved on 2026-10-15.
+- [Internal tools](https://braintimelab.github.io/internal/) verifies Supabase Auth and active lab membership before presenting tools.
+- [Braintime Mouse Data](https://braintimelab.github.io/mouse-data/) uses the existing private colony. Static files contain no animal data, member directory, private Sheet exports or server secrets.
+- Reagents is a coming-soon tool; no reagent data has been imported here.
 
-The following Arduino software is used: Arduino 1.8.7
+GitHub Pages publishes the root of `master`. `.nojekyll` prevents Jekyll processing. The earlier LocomotorBox code remains in its original paths; its documentation is in [LOCOMOTORBOX.md](LOCOMOTORBOX.md). The old site is recoverable from commit `076f724` and the `before-lab-homepage-2026-10-15` tag.
 
-The following Python versions are used: Python 3.7.0, Pyserial 3.4
+## Update Mouse Data
 
-The LcomotorBox (LocoBox) GUI interface has been optimized for Windows, macOS, and Linux (tested on Ubuntu).
+The app source remains in [JihwanMyung/braintime-mouse-data](https://github.com/JihwanMyung/braintime-mouse-data). From this checkout:
 
-### Installation
+```
+node scripts/sync-mouse-app.mjs /absolute/path/to/colony-app
+node --test tests/*.test.mjs
+```
 
-Download Arduino .ino file and Python3 .py file. Upload .ino to Arduino microcontroller using Arduino software.
-Run Python GUI interface by double-clicking the .py file or on command-line using python3.
+The script copies only the app's explicit publication allowlist to a clean temporary package, runs its credential/asset checks, and synchronizes those approved assets into `mouse-data/`. It refuses unexpected files and does not push. Review the diff and publish the exact reviewed files. Never copy the private reconstruction workspace into this repository.
 
-## Deployment
+## Authentication and transition
 
-This software system requires Arduino Mega 2560 for controlling 10 boxes and a digital slot extension (custom-made). Each box requires 1 PIR sensor (digital input) and 1 relay switch.
+Production Supabase Auth Site URL and `USER_MANAGEMENT_APP_URL` are `https://braintimelab.github.io/mouse-data/`. Exact new root and `index.html` callbacks are allowed. Keep the previous personal app root and `index.html` callbacks available for already-issued links during the transition. The previous deployment shows a moved notice and retains local-export/password-recovery access; it never copies credentials or local records to the new origin.
 
-## Authors
+`internal/` and `mouse-data/` share same-origin, same-tab session storage. The tools portal uses the app's existing Auth code and a live membership check, without pulling colony records. Private-data access is enforced by Supabase, not by hidden links or `robots.txt`. Do not add untrusted third-party scripts to either the public website or internal tools. Browser sessions and installed app shortcuts from the old domain do not migrate automatically.
 
-* Jihwan Myung - initial work and further development
-* Vuong Truong - further development on Python GUI interface
+## Local preview
 
-## Acknowledgments
+```
+python3 -m http.server 8790 --bind 127.0.0.1
+```
 
-Yufen (Janice) Huang helped with improving box design. Vuong Truong and Ying-Ling Shen helped with soldering electrical components. Niall Duncan and Tzu-Yu Hsu contributed financially to support initial purchase of boxes and prototyping materials.
-This work was supported by Taiwan Ministry of Science and Technology (MOST) grants (107-2311-B-038-001-MY2, 107-2410-H-038-004-MY2).
-
-See braintimelab for main branch.
+Local previews can verify presentation and mocked authorization tests; username sign-in/reset use the configured production origin. Authenticate on the deployed HTTPS site for live use. Sending real invitations or reset emails requires a verified transactional mail sender in Supabase; ordinary member delivery is not enabled merely by publishing this website.

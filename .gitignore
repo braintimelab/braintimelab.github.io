@@ -1,0 +1,13 @@
+.DS_Store
+node_modules/
+.env
+.env.*
+__pycache__/
+*.xlsx
+*.sqlite
+*.sqlite3
+*credentials*.json
+*service-account*.json
+*.pem
+colony-backup*.json
+dataset*.json
