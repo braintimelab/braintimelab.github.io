@@ -4,7 +4,8 @@ import {createWorkbookXlsx} from '../mouse-data/workbook-export.js';
 import {SECTIONS,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=1';
 
 const $=id=>document.getElementById(id), main=$('main'),PAGE=50;
-let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=new Map(),sourceRows=[],selected=null,editAction=null,importing=false,searchTimer=null,listKind=null;
+let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=new Map(),sourceRows=[],selected=null,editAction=null,importing=false,searchTimer=null,listKind=null,accessCheck=null;
+const importControls=new Map();
 let filters={query:'',category:'',status:'',location:''},offset=0,historySource='',historyQuery='',historyOffset=0;
 const section=()=>{const key=location.hash.slice(1).split('/')[0];return SECTIONS.some(s=>s[0]===key)?key:'inventory';};
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
@@ -16,8 +17,16 @@ function raw(value){if(value==null)return '<span class="muted">Not recorded</spa
 function stats(){const s=stockStats(items);return `<div class="stats">${[['Listed items',s.listed],['Need stock check',s.needsCheck],['Safety flagged',s.dangerous],['Past expiry date',s.expired]].map(([k,v])=>`<div class="stat"><span>${k}</span><strong>${v.toLocaleString()}</strong></div>`).join('')}</div>`;}
 function options(values,current,blank){return `<option value="">${esc(blank)}</option>`+values.map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(label(v))}</option>`).join('');}
 function pager(start,total,action='page'){return `<div class="pagination"><span>${total?`${start+1}–${Math.min(start+PAGE,total)} of ${total.toLocaleString()}`:'No records'}</span><div><button data-action="${action}" data-offset="${Math.max(0,start-PAGE)}" ${start===0?'disabled':''}>← Previous</button> <button data-action="${action}" data-offset="${start+PAGE}" ${start+PAGE>=total?'disabled':''}>Next →</button></div></div>`;}
+function setImporting(value){
+ importing=value;
+ if(value){
+  for(const control of [$('refresh'),$('import-file'),$('import-confirm'),...document.querySelectorAll('[data-section], [data-action="choose-import"], [data-action="access-save"]')]){
+   if(control&&!importControls.has(control)){importControls.set(control,control.disabled);control.disabled=true;}
+  }
+ }else{for(const [control,disabled] of importControls)control.disabled=disabled;importControls.clear();}
+}
 function resetPrivate(){
- member=false;permissions={};items=[];records.clear();sourceRows=[];selected=null;editAction=null;importing=false;listKind=null;viewGeneration++;clearTimeout(searchTimer);
+ setImporting(false);member=false;permissions={};items=[];records.clear();sourceRows=[];selected=null;editAction=null;importing=false;listKind=null;viewGeneration++;clearTimeout(searchTimer);
  filters={query:'',category:'',status:'',location:''};offset=0;historySource='';historyQuery='';historyOffset=0;
  $('editor').close();$('edit-fields').innerHTML='';$('edit-title').textContent='';$('edit-error').textContent='';$('import-file').value='';
  $('navigation').innerHTML='';$('identity').textContent='';$('sign-out').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
@@ -43,7 +52,8 @@ function signInView(message=''){
  $('login-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),pw=f.get('password');e.currentTarget.elements.password.value='';const attempt=++generation;status('Signing in…');try{await store.signIn(text(f.get('identifier')).trim(),pw);if(attempt===generation)await start();}catch(err){if(attempt===generation)status(err.message,true);}});
  status(message,!!message);
 }
-async function start(){
+async function start({force=false}={}){
+ if(importing&&!force)return;
  const attempt=++generation;resetPrivate();
  try{const c=store.getCloudStatus();if(!c.configured||c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)store.configureCloud(PUBLIC_CONFIG);
   const current=store.getCloudStatus();if(!current.signedIn){signInView();return;}
@@ -54,6 +64,20 @@ async function start(){
   const loaded=await collect('list',{p_kind:'item'});if(attempt!==generation)return;items=loaded;items.forEach(r=>records.set(r.id,r));status();await render();
  }catch(err){if(attempt!==generation)return;resetPrivate();signInView(err.message);}
 }
+// Returning to the tab must not advance the shared Auth generation while an
+// import RPC is in flight. The access RPC checks live membership and permissions.
+async function revalidateImportAccess(){
+ if(!importing)return start();
+ if(accessCheck?.generation===generation)return accessCheck.promise;
+ const g=generation,check=fence();
+ const pending=(async()=>{
+  try{const access=await rpc('access');check();if(!access?.permissions||JSON.stringify(access.permissions)!==JSON.stringify(permissions))throw Error('Your access changed. Reopen Reagents.');}
+  catch(error){if(g===generation)accessFailure(error);}
+ })();
+ accessCheck={generation:g,promise:pending};
+ try{await pending;}finally{if(accessCheck?.promise===pending)accessCheck=null;}
+}
+function returnToApp(){if(!document.hidden)return importing?revalidateImportAccess():start();}
 async function render(){if(!member)return;clearTimeout(searchTimer);listKind=null;nav();const v=++viewGeneration;selected=null;main.innerHTML='<div class="empty">Loading…</div>';try{
  const s=section();if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
  if(s==='history'){await historyView(v);return;}if(s==='settings'){await settingsView(v);return;}await recordList(v,s);
@@ -111,14 +135,14 @@ function replaceRecord(r){records.set(r.id,r);if(r.kind==='item'){const i=items.
 async function exportRows(kind='item'){const check=fence();status('Preparing export…');const fresh=await collect('list',{p_kind:kind,...(kind==='item'?{}:{p_query:filters.query})});check();const rows=kind==='item'?filterItems(fresh,{...filters,dangerous:section()==='safety'}):fresh;if(!rows.length)throw Error('There are no matching records to export.');download(createWorkbookXlsx({title:'Braintime Reagents',sheets:[{name:label(kind),rows:exportTable(rows)}]}),`Braintime-Reagents-${kind}-${new Date().toISOString().slice(0,10)}.xlsx`);status(`Exported ${rows.length} records within your access.`);}
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function chooseImport(file){
- if(!file||!member||!permissions.can_import)return;const check=fence(),v=viewGeneration;
+ if(!file||importing||!member||!permissions.can_import)return;const check=fence(),v=viewGeneration;
  if(file.size>150*1024*1024)throw Error('Import package exceeds 150 MB. Split the reviewed package first.');
  const contents=await file.text();check();if(v!==viewGeneration)return;const bundle=JSON.parse(contents),counts=validateBundle(bundle);
  $('import-preview').innerHTML=`<div class="upload-preview"><p><strong>${esc(file.name)}</strong></p><p>${counts.sources} sources · ${counts.items} inventory items · ${counts.records} total records · ${counts.observations.toLocaleString()} source rows</p><p>${counts.privateSources} owner-only sources. Existing edited records will be kept and reported as conflicts.</p><button class="primary" id="import-confirm">Import reviewed package</button></div>`;
  $('import-confirm').addEventListener('click',()=>{try{check();if(v!==viewGeneration)return;void runImport(bundle);}catch{}});
 }
 async function runImport(bundle){
- if(importing||!member||!permissions.can_import)return;const check=fence(),g=generation,v=viewGeneration;importing=true;$('import-confirm').disabled=true;
+ if(importing||!member||!permissions.can_import)return;const check=fence(),g=generation,v=viewGeneration;setImporting(true);
  let report;
  try{
   report=await executeImport(bundle,{call:args=>rpc('import',args),check,onProgress:(i,n)=>status(`Importing ${i} of ${n} batches…`)});check();
@@ -131,18 +155,19 @@ async function runImport(bundle){
   report=error.importReport||report;
   if(report){download(new Blob([JSON.stringify({...report,error:error.message},null,2)],{type:'application/json'}),'Braintime-Reagents-partial-import-report.json');status(`Import stopped after ${report.completed_batches} of ${report.total_batches} confirmed batches. Completed batches remain saved. Retry the same package to resume safely. ${error.message}`,true);}
   else status(error.message,true);
- }finally{if(g===generation){importing=false;if(v===viewGeneration&&$('import-confirm'))$('import-confirm').disabled=false;}}
+ }finally{if(g===generation)setImporting(false);}
 }
 
 $('edit-form').addEventListener('submit',async e=>{e.preventDefault();if(!member||!editAction||$('save').disabled)return;const g=generation,action=editAction;$('save').disabled=true;$('edit-error').textContent='';const values=Object.fromEntries(new FormData(e.currentTarget));for(const check of e.currentTarget.querySelectorAll('input[type=checkbox]'))values[check.name]=check.checked;try{await action(values);}catch(err){if(g===generation)$('edit-error').textContent=err.message;}finally{if(g===generation)$('save').disabled=false;}});
-document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.hasAttribute('data-close')){b.closest('dialog').close();return;}if(b.dataset.section){if(importing)return;location.hash=b.dataset.section;return;}const a=b.dataset.action;if(!a||!member)return;const g=generation;try{
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.hasAttribute('data-close')){b.closest('dialog').close();return;}if(b.dataset.section){if(importing)return;location.hash=b.dataset.section;return;}const a=b.dataset.action;if(!a||!member||importing)return;const g=generation;try{
  const r=records.get(b.dataset.id);switch(a){case'open':await detail(b.dataset.id);break;case'back':await render();break;case'edit':editRecord(r);break;case'use':if(r)useRecord(r);break;case'safety-edit':if(r)editSafety(r);break;case'new-item':editRecord();break;case'new-record':editRecord(null,b.dataset.kind);break;case'new-safety':editRecord(null,'safety');break;case'all-safety':offset=0;await recordList(++viewGeneration,'safety','safety');break;case'page':offset=Number(b.dataset.offset);if(listKind)await recordList(++viewGeneration,section(),listKind);else await render();break;case'changes-page':if(selected)await detailPage(selected.id,'changes',Number(b.dataset.offset));break;case'observations-page':if(selected)await detailPage(selected.id,'observations',Number(b.dataset.offset));break;case'history-page':historyOffset=Number(b.dataset.offset);await historyView(++viewGeneration);break;case'source':historySource=b.dataset.source;historyQuery='';historyOffset=0;location.hash='history';if(section()==='history')await historyView(++viewGeneration);break;case'export-items':await exportRows();break;case'export-records':await exportRows(b.dataset.kind);break;case'export-history':{const check=fence();status('Preparing permitted history…');const access=(await rpc('access')).permissions;const sources=await collect('sources'),rows=await collect('observations',{p_source_id:historySource||null,p_query:historyQuery});check();if(JSON.stringify(access)!==JSON.stringify(permissions)){const error=Error('Your history access changed. Refresh before exporting.');accessFailure(error);throw error;}download(new Blob([JSON.stringify({exported_at:new Date().toISOString(),access:permissions,sources,observations:rows},null,2)],{type:'application/json'}),'Braintime-Reagents-history.json');status(`Exported ${rows.length.toLocaleString()} permitted source rows.`);break;}case'choose-import':$('import-file').click();break;case'access-save':{const row=b.closest('tr');await rpc('set_access',{p_user_id:b.dataset.id,p_can_write:row.querySelector('[name=write]').checked,p_can_manage_safety:row.querySelector('[name=safety]').checked});status('Reagents permissions saved.');await settingsView(++viewGeneration);break;}}
  }catch(err){if(g===generation)status(err.message,true);}});
 $('help').addEventListener('click',()=>$('help-dialog').showModal());$('refresh').addEventListener('click',()=>void start());$('sign-out').addEventListener('click',async()=>{const g=++generation;resetPrivate();try{await store.signOut();}finally{if(g===generation){signInView();$('sign-out').hidden=true;}}});
 $('import-file').addEventListener('change',e=>{const g=generation;void chooseImport(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
-window.addEventListener('hashchange',()=>{offset=0;filters={query:'',category:'',status:'',location:''};void render();});
-window.addEventListener('storage',e=>{if(e.key===null||['mouse-colony.cloud.v1','mouse-colony.config.v1','mouse-colony.session.v1'].includes(e.key))void start();});
+window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:''};void render();});
+window.addEventListener('storage',e=>{if(e.key===null||['mouse-colony.cloud.v1','mouse-colony.config.v1','mouse-colony.session.v1'].includes(e.key))void start({force:true});});
 // Revalidate on return from another tab. Never keep private content after an access failure.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)void start();});
-window.addEventListener('pageshow',e=>{if(e.persisted)void start();});
+document.addEventListener('visibilitychange',returnToApp);
+window.addEventListener('focus',()=>{if(importing)return returnToApp();});
+window.addEventListener('pageshow',e=>{if(e.persisted)return returnToApp();});
 await start();
