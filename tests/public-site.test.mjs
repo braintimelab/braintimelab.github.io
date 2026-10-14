@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile,stat,readdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'..');
-const pages=['index.html','members.html','previous-members.html','publications.html','lectures.html','resources.html','internal/index.html'];
+const pages=['index.html','members.html','previous-members.html','publications.html','lectures.html','resources.html','join.html','internal/index.html'];
 test('public pages have a complete local navigation and no remote executable resources',async()=>{
  for(const page of pages){const text=await readFile(resolve(root,page),'utf8');assert.match(text,/<meta\b(?=[^>]*\bname=["']referrer["'])(?=[^>]*\bcontent=["']no-referrer["'])[^>]*>/i);assert.match(text,/<h1[ >]/);
   for(const match of text.matchAll(/(?:src|href)="([^"]+)"/g)){

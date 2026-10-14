@@ -3,6 +3,7 @@
 Public lab website: **https://braintimelab.github.io/**
 
 - Public research, members, publications, lectures and resources recreate the official [TMU lab website](https://braintime.tmu.edu.tw/), as retrieved on 2026-10-15.
+- [Why join Braintime?](https://braintimelab.github.io/join.html) adapts Jihwan's original illustrated PDF into an accessible web story. The PDF is retained; the interactive clocks use illustrative 23-, 24- and 25-hour periods, not measured data. Motion can be paused and respects reduced-motion preferences.
 - [Internal tools](https://braintimelab.github.io/internal/) verifies Supabase Auth and active lab membership before presenting tools.
 - [Braintime Mouse Data](https://braintimelab.github.io/mouse-data/) uses the existing private colony. Static files contain no animal data, member directory, private Sheet exports or server secrets.
 - [Braintime Reagents](https://braintimelab.github.io/reagents/) provides a signed-in workspace for inventory, usage, source history and safety records. Publishing the app does not import reagent source data; that is a separate owner-only operation.
