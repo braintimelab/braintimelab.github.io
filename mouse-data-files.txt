@@ -1,4 +1,6 @@
 .nojekyll
+access-activity.js
+access-logs.js
 account-acronym.js
 account-setup.js
 animal-sheet-export.js
