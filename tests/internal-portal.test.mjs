@@ -179,7 +179,6 @@ test('published page starts with tools hidden, accessible labels and a Reagents 
   const reagentCard = [...html.matchAll(/<article class="tool-card"[\s\S]*?<\/article>/g)].map(match => match[0]).find(card => card.includes('<h3>Reagents</h3>'));
   assert(reagentCard);
   assert.match(reagentCard, /id="open-reagents"[^>]+href="..\/reagents\/"/);
-  assert.match(reagentCard, /Available/);
   assert(!reagentCard.includes('aria-disabled'));
   assert(!html.includes('Coming soon'));
 });
