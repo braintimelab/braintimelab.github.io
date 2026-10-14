@@ -59,3 +59,8 @@
   .navigation-ready .site-nav{width:100%;right:0}
   .menu-button{min-width:90px;font-size:.86rem;gap:8px}
 }
+
+/* Use the first project’s caption scale for every project reference block. */
+.project-references{font-size:.83rem;line-height:1.65}
+.project-references a{font-size:inherit}
+.project-references strong{font-size:.85rem}
