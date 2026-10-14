@@ -64,9 +64,7 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
 .account-panel { margin-top: 40px; padding: 30px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: flex; justify-content: space-between; gap: 30px; align-items: start; }
 .account-panel p { color: var(--muted); max-width: 510px; }
 .text-button { color: var(--blue-dark); padding: 8px 0; background: none; border: 0; font-size: 13px; text-decoration: underline; text-underline-offset: .2em; min-height: 44px; white-space: nowrap; }
-.tools-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 52px; margin-bottom: 24px; }
-.tools-heading .eyebrow { margin-bottom: 6px; }
-.tools-heading h2 { margin-bottom: 0; }
+.tools-heading { display: flex; align-items: center; justify-content: flex-end; gap: 20px; margin-top: 52px; margin-bottom: 24px; }
 .account { display: flex; flex-direction: column; align-items: end; font-size: 13px; overflow-wrap: anywhere; }
 .account span { color: var(--muted); }
 .account .text-button { min-height: 35px; }
@@ -79,9 +77,8 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
 .tool-card p { font-size: 14px; color: var(--muted); margin-bottom: 28px; max-width: 350px; }
 .tool-link { display: flex; gap: 20px; align-items: center; justify-content: space-between; min-height: 44px; margin-top: auto; font-size: 14px; text-decoration: none; font-weight: 550; border-top: 1px solid var(--line); padding-top: 16px; }
 .tool-link:hover { text-decoration: underline; }
-.tool-links { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
+.tool-links { display: flex; flex-direction: column; align-items: stretch; gap: 0; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
 .tool-links .tool-link { gap: 6px; justify-content: flex-start; margin-top: 0; border: 0; padding-top: 0; }
-.tool-separator { color: var(--muted); }
 .document-links { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
 .document-links li + li { border-top: 1px solid var(--line); }
 .document-links .tool-link { margin: 0; padding: 10px 0; border: 0; }
@@ -108,7 +105,6 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
   .sign-in-card { padding: 26px; }
   .tool-grid { grid-template-columns: 1fr; }
   .tools-heading { align-items: flex-start; margin-top: 36px; }
-  .tools-heading h2 { font-size: 24px; }
   .account { max-width: 52%; }
   .tool-card { padding: 26px; min-height: 180px; }
   .account-panel { flex-direction: column; padding: 26px; gap: 12px; }

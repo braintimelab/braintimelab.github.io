@@ -7,9 +7,9 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://njhetwortngnniyrhcfk.supabase.co; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="theme-color" content="#f7f4e7">
-  <title>Internal tools · Braintime Laboratory</title>
+  <title>Lab tools · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
-  <link rel="stylesheet" href="./portal.css?v=4">
+  <link rel="stylesheet" href="./portal.css?v=5">
   <script type="module" src="./portal.js?v=3"></script>
 </head>
 <body>
@@ -24,8 +24,8 @@
 
   <main id="main" class="portal">
     <div class="intro">
-      <p class="eyebrow">For lab members</p>
-      <h1>Internal tools</h1>
+      <p class="eyebrow">For internal use only</p>
+      <h1 id="tools-heading">Lab tools</h1>
     </div>
 
     <p id="portal-status" class="status" role="status" aria-live="polite">Checking your session…</p>
@@ -80,7 +80,6 @@
 
     <section id="tools-panel" hidden aria-labelledby="tools-heading">
       <div class="tools-heading">
-        <div><h2 id="tools-heading">Lab tools</h2></div>
         <div class="account"><span id="member-identity"></span><button class="text-button" type="button" data-sign-out>Sign out</button></div>
       </div>
       <div class="tool-grid">
@@ -89,7 +88,6 @@
           <h3>Mouse Data</h3>
           <div class="tool-links">
             <a id="open-mouse-data" class="tool-link" href="../mouse-data/">Mouse Data</a>
-            <span class="tool-separator" aria-hidden="true">|</span>
             <a class="tool-link" href="https://docs.google.com/spreadsheets/d/16oQS0J7M3P8cMWu54wVk93QAVnboEgxoGGOD4enbXs4/edit?gid=1717598677#gid=1717598677" target="_blank" rel="noopener noreferrer">Animal Sheets <span aria-hidden="true">↗</span><span class="visually-hidden"> (opens in a new tab)</span></a>
           </div>
         </article>
@@ -98,7 +96,6 @@
           <h3>Reagents</h3>
           <div class="tool-links">
             <a id="open-reagents" class="tool-link" href="../reagents/">Reagents</a>
-            <span class="tool-separator" aria-hidden="true">|</span>
             <a class="tool-link" href="https://docs.google.com/spreadsheets/d/1NMeu9jIhEHmmNNMp9jn78gGS_PrhlYfzxOZCIXGfaks/edit" target="_blank" rel="noopener noreferrer">Reagent Sheets <span aria-hidden="true">↗</span><span class="visually-hidden"> (opens in a new tab)</span></a>
           </div>
         </article>
