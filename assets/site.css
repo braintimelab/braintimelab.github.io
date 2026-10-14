@@ -64,3 +64,6 @@
 .project-references{font-size:.83rem;line-height:1.65}
 .project-references a{font-size:inherit}
 .project-references strong{font-size:.85rem}
+
+/* Publication years use the same text scale as the publication-index sentence. */
+.publications-page .section-nav a,.publications-page .publication-year h2{font-size:inherit}
