@@ -16,3 +16,5 @@
   .member-portrait { width: 115px; }
   .member-section-nav { gap: 12px 24px; margin-top: 20px; }
 }
+
+.member-bio p.profile-note { font-size: .9rem; color: var(--muted); }
