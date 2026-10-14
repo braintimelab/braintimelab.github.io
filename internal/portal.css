@@ -70,7 +70,7 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
 .account { display: flex; flex-direction: column; align-items: end; font-size: 13px; overflow-wrap: anywhere; }
 .account span { color: var(--muted); }
 .account .text-button { min-height: 35px; }
-.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
 .tool-card { display: flex; flex-direction: column; padding: 30px; min-height: 190px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; }
 .tool-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .tool-number { font-size: 14px; font-weight: 550; color: var(--blue-dark); }
@@ -82,6 +82,9 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
 .tool-links { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
 .tool-links .tool-link { gap: 6px; justify-content: flex-start; margin-top: 0; border: 0; padding-top: 0; }
 .tool-separator { color: var(--muted); }
+.document-links { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+.document-links li + li { border-top: 1px solid var(--line); }
+.document-links .tool-link { margin: 0; padding: 10px 0; border: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .upcoming { background: transparent; }
 .upcoming .availability { color: var(--muted); background: #ebe8dc; }
