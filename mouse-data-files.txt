@@ -14,6 +14,7 @@ breeding-summary.js
 cage-history.js
 cage-label.js
 cage-movement.js
+cage-observations.js
 cage-sheet.js
 cage-summary-options.js
 cage-summary.js
