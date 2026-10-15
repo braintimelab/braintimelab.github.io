@@ -1,8 +1,10 @@
 export const SECTIONS = Object.freeze([
-  ['inventory','▦','Inventory'],['safety','⚠','Dangerous chemicals'],['usage','◷','Usage'],
-  ['orders','☷','Orders'],['vendors','⌂','Vendors'],['equipment','⚙','Equipment'],
+  ['orders','☷','Orders'],['inventory','▦','Inventory'],['safety','⚠','Dangerous chemicals'],['usage','◷','Usage'],
+  ['vendors','⌂','Vendors'],['equipment','⚙','Equipment'],
   ['history','↶','History'],['review','⚑','Review'],['settings','☰','Settings']
 ]);
+export const canReviewHistory = permissions => ['owner','manager'].includes(permissions?.role);
+export const visibleSections = permissions => SECTIONS.filter(([id])=>!['history','review'].includes(id)||canReviewHistory(permissions));
 export const STATUSES = ['listed_current','in_stock','low_stock','depleted','out_of_stock','ordered','disposed','unverified','historical'];
 export const labels = {listed_current:'Listed in current sheet',in_stock:'In stock',low_stock:'Low stock',depleted:'Used up',out_of_stock:'Out of stock',ordered:'Ordered',disposed:'Disposed',unverified:'Needs verification',historical:'Historical',open:'Open',resolved:'Resolved',complete:'Complete',pending:'Pending'};
 export const text = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);

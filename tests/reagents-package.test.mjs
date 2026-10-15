@@ -14,7 +14,7 @@ async function fixture(t) {
   return {source,destinationRoot};
 }
 
-test('packaging copies exactly five explicit web files and never traverses source data',async t=>{
+test('packaging copies only the explicit web allowlist and never traverses source data',async t=>{
   const f=await fixture(t);
   await mkdir(join(f.source,'private'));await writeFile(join(f.source,'private','export.json'),'PRIVATE-TEST-ROW');
   await writeFile(join(f.source,'web','private-export.json'),'PRIVATE-TEST-ROW');
