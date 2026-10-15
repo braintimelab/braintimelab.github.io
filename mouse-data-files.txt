@@ -50,6 +50,7 @@ lab-members.js
 lac-fee-model.js
 lac-fees.js
 litter-summary.js
+local-backup.js
 locobox-export.js
 locobox-label.js
 locobox-model.js
