@@ -1,4 +1,4 @@
-import {MANAGER_PERMISSION_LABELS} from './permissions.js?v=93';
+import {MANAGER_PERMISSION_LABELS} from './permissions.js?v=94';
 /* Owner-only monitoring UI. The server authorizes every action and records BB activity. */
 const mounts=new WeakMap(),permissionKeys=Object.keys(MANAGER_PERMISSION_LABELS);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

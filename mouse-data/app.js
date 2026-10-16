@@ -1,51 +1,52 @@
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=93';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=93';
-import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=93';
-import { renderMouseReview } from './mouse-review-view.js?v=93';
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=93';
-import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=93';
-import * as store from './data-store.js?v=93';
-import * as model from './model.js?v=93';
-import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=93';
-import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=93';
-import { renderStrainManagement } from './strain-management.js?v=93';
-import { summarizeLitters } from './litter-summary.js?v=93';
-import { summarizeOverview } from './overview-summary.js?v=93';
-import { summarizeCages } from './cage-summary.js?v=93';
-import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=93';
-import { summarizeBreeding } from './breeding-summary.js?v=93';
-import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=93';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=93';
-import * as history from './history-index.js?v=93';
-import { renderUserManagement } from './user-management.js?v=93';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=93';
-import { renderAccessLogs } from './access-logs.js?v=93';
-import { createAccessActivity } from './access-activity.js?v=93';
-import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=93';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=93';
-import { sortRooms, compareRooms } from './room-order.js?v=93';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=93';
-import { prepareMouseCageSheetEdit } from './cage-observations.js?v=93';
-import { renderCageLabelEditor } from './cage-label.js?v=93';
-import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=93';
-import { renderAccountAcronym } from './account-acronym.js?v=93';
-import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=93';
-import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=93';
-import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=93';
-import { renderBreedingPlanner } from './breeding-planner.js?v=93';
-import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=93';
-import { buildFamilyGenotypes } from './family-genotypes.js?v=93';
-import { renderCryopreservation } from './cryopreservation.js?v=93';
-import { renderExperiments, experimentHelpHTML } from './experiments.js?v=93';
-import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=93';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=93';
-import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=93';
-import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=93';
-import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=93';
-import { protocolsForEntity } from './iacuc-model.js?v=93';
-import { renderExportCenter } from './export-center.js?v=93';
-import { datasetFromLocalBackup } from './local-backup.js?v=93';
-import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=93';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=94';
+import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=94';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=94';
+import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=94';
+import { renderMouseReview } from './mouse-review-view.js?v=94';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=94';
+import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=94';
+import * as store from './data-store.js?v=94';
+import * as model from './model.js?v=94';
+import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=94';
+import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=94';
+import { renderStrainManagement } from './strain-management.js?v=94';
+import { summarizeLitters } from './litter-summary.js?v=94';
+import { summarizeOverview } from './overview-summary.js?v=94';
+import { summarizeCages } from './cage-summary.js?v=94';
+import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=94';
+import { summarizeBreeding } from './breeding-summary.js?v=94';
+import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=94';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=94';
+import * as history from './history-index.js?v=94';
+import { renderUserManagement } from './user-management.js?v=94';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=94';
+import { renderAccessLogs } from './access-logs.js?v=94';
+import { createAccessActivity } from './access-activity.js?v=94';
+import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=94';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=94';
+import { sortRooms, compareRooms } from './room-order.js?v=94';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=94';
+import { prepareMouseCageSheetEdit } from './cage-observations.js?v=94';
+import { renderCageLabelEditor } from './cage-label.js?v=94';
+import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=94';
+import { renderAccountAcronym } from './account-acronym.js?v=94';
+import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=94';
+import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=94';
+import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=94';
+import { renderBreedingPlanner } from './breeding-planner.js?v=94';
+import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=94';
+import { buildFamilyGenotypes } from './family-genotypes.js?v=94';
+import { renderCryopreservation } from './cryopreservation.js?v=94';
+import { renderExperiments, experimentHelpHTML } from './experiments.js?v=94';
+import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=94';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=94';
+import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=94';
+import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=94';
+import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=94';
+import { protocolsForEntity } from './iacuc-model.js?v=94';
+import { renderExportCenter } from './export-center.js?v=94';
+import { datasetFromLocalBackup } from './local-backup.js?v=94';
+import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=94';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -686,7 +687,7 @@ async function validateEditorCageManager(draft,context,accountContext){
  }
 }
 
-async function saveDraft(event){event.preventDefault();if(busy||!editor)return;if(editor.mouseReview&&editor.mouseReview.datasetAtOpen!==dataset){showToast('Data changed. Reopen this entry from Review.',true);return;}if(editor.context!==cageSheetContext()){showToast('Account changed. Reopen this record.',true);return;}const editorContext=editor,accountContext=cageSheetContext(),{draft,validation}=showDraft();if(validation.errors.length)return;busy=true;$('save-record').disabled=true;try{await validateEditorCageManager(draft,editorContext,accountContext);if(editor!==editorContext||accountContext!==cageSheetContext())throw new Error('Account or editor changed. Reopen the record.');if(editor.mouseReview&&editor.mouseReview.datasetAtOpen!==dataset)throw new Error('Data changed. Reopen this entry from Review.');if(editor.registration?.newborn&&draft.lineage_basis)draft.lineage_basis={...draft.lineage_basis,confirmed_in_editor:true};const review=editor.mouseReview?attachMouseReviewResolution(dataset,draft,editor.mouseReview.issue.id,{confirmed:$('confirm-mouse-review')?.checked===true,mouseSid:editor.id||null}):null;if(review)Object.assign(draft,review.draft);let next=editor.type==='mice'&&!editor.id?clone(finalizeMouseRegistration(dataset,draft,editor.registration,{identity:editor.identity})):clone(dataset);const cfg=entity[editor.type];applyMouseReviewResolution(next,review?.resolutionRecord);draft.app_modified_at=now();if(!editor.id)draft.app_created_at=now();const index=next.tables[editor.type].findIndex(r=>String(r[cfg.id])===String(editor.id));if(editor.id&&index>=0)next.tables[editor.type][index]=draft;else next.tables[editor.type].push(draft);if(editor.type==='mice'&&((!editor.id&&draft.cage_sid)||String(editor.record.cage_sid||'')!==String(draft.cage_sid||''))){if(!$('cage-change-date').value)throw new Error('Choose an effective housing change date.');const event=makeCageEvent(draft,editor.id?editor.record.cage_sid:null,$('cage-change-date').value,'Recorded through mouse editor');const check=model.validateRecord('husbandry_events',event,next,null);if(check.errors?.length)throw new Error(check.errors.join('\n'));next.tables.husbandry_events.push(event)}if(editor.type==='cages'&&[...Object.values(housingKeys),'room','rack','location'].some(key=>String(draft[key]||'')!==String(editor.record[key]||''))){const event=model.buildCageLocationEvent(draft,editor.id?editor.record:null,$('cage-change-date').value,dataset,'Recorded through cage editor');const check=model.validateRecord('husbandry_events',event,next,null);if(check.errors?.length)throw new Error(check.errors.join('\n'));next.tables.husbandry_events||=[];next.tables.husbandry_events.push(event)}if(editor.type==='mice'){const dated=applyCageEntryStartDates(dataset,next,{at:now(),entryDate:$('cage-change-date').value||undefined});if(dated!==next&&!canEditRecords('housing'))throw new Error('Housing edit permission is required to set a cage start date.');next=dated;}await store.saveDataset(next,{readDependencies:[...(editor.type==='mice'?[...mouseRegistrationDependencies(dataset,draft,editor.registration,editor.id?editor.record:null),...(editor.identityDependencies||[]),...(review?.readDependencies||[])]:[]),...cageStartReadDependencies(dataset,next)]});dataset=await store.loadDataset();await refreshCloud();$('record-dialog').close();const t=editor.type,id=draft[cfg.id],fromCage=Boolean(editor.registration);editor=null;fromCage?navigate('cages'):navigate(t,id);showToast(cloud.mode==='cloud'?'Record saved to the shared colony.':'Record saved in this browser.')}catch(error){try{await refreshCloud()}catch{}$('form-errors').hidden=false;$('form-errors').textContent=error.message||String(error)}finally{busy=false;$('save-record').disabled=false}}
+async function saveDraft(event){event.preventDefault();if(busy||!editor)return;if(editor.mouseReview&&editor.mouseReview.datasetAtOpen!==dataset){showToast('Data changed. Reopen this entry from Review.',true);return;}if(editor.context!==cageSheetContext()){showToast('Account changed. Reopen this record.',true);return;}const editorContext=editor,accountContext=cageSheetContext(),{draft,validation}=showDraft();if(validation.errors.length)return;busy=true;$('save-record').disabled=true;try{await validateEditorCageManager(draft,editorContext,accountContext);if(editor!==editorContext||accountContext!==cageSheetContext())throw new Error('Account or editor changed. Reopen the record.');if(editor.mouseReview&&editor.mouseReview.datasetAtOpen!==dataset)throw new Error('Data changed. Reopen this entry from Review.');if(editor.registration?.newborn&&draft.lineage_basis)draft.lineage_basis={...draft.lineage_basis,confirmed_in_editor:true};const review=editor.mouseReview?attachMouseReviewResolution(dataset,draft,editor.mouseReview.issue.id,{confirmed:$('confirm-mouse-review')?.checked===true,mouseSid:editor.id||null}):null;if(review)Object.assign(draft,review.draft);let next=editor.type==='mice'&&!editor.id?clone(finalizeMouseRegistration(dataset,draft,editor.registration,{identity:editor.identity})):clone(dataset);const cfg=entity[editor.type];applyMouseReviewResolution(next,review?.resolutionRecord);draft.app_modified_at=now();if(!editor.id)draft.app_created_at=now();const index=next.tables[editor.type].findIndex(r=>String(r[cfg.id])===String(editor.id));if(editor.id&&index>=0)next.tables[editor.type][index]=draft;else next.tables[editor.type].push(draft);if(editor.type==='mice'&&((!editor.id&&draft.cage_sid)||String(editor.record.cage_sid||'')!==String(draft.cage_sid||''))){if(!$('cage-change-date').value)throw new Error('Choose an effective housing change date.');const event=makeCageEvent(draft,editor.id?editor.record.cage_sid:null,$('cage-change-date').value,'Recorded through mouse editor');const check=model.validateRecord('husbandry_events',event,next,null);if(check.errors?.length)throw new Error(check.errors.join('\n'));next.tables.husbandry_events.push(event)}if(editor.type==='cages'&&[...Object.values(housingKeys),'room','rack','location'].some(key=>String(draft[key]||'')!==String(editor.record[key]||''))){const event=model.buildCageLocationEvent(draft,editor.id?editor.record:null,$('cage-change-date').value,dataset,'Recorded through cage editor');const check=model.validateRecord('husbandry_events',event,next,null);if(check.errors?.length)throw new Error(check.errors.join('\n'));next.tables.husbandry_events||=[];next.tables.husbandry_events.push(event)}if(editor.type==='mice'){const dated=applyCageEntrainmentAdoptions(dataset,applyCageEntryStartDates(dataset,next,{at:now(),entryDate:$('cage-change-date').value||undefined}));if(dated!==next&&!canEditRecords('housing'))throw new Error('Housing edit permission is required to save cage dates and entrainment.');next=dated;}await store.saveDataset(next,{readDependencies:[...(editor.type==='mice'?[...mouseRegistrationDependencies(dataset,draft,editor.registration,editor.id?editor.record:null),...(editor.identityDependencies||[]),...(review?.readDependencies||[])]:[]),...cageStartReadDependencies(dataset,next),...cageEntrainmentReadDependencies(dataset,next)]});dataset=await store.loadDataset();await refreshCloud();$('record-dialog').close();const t=editor.type,id=draft[cfg.id],fromCage=Boolean(editor.registration);editor=null;fromCage?navigate('cages'):navigate(t,id);showToast(cloud.mode==='cloud'?'Record saved to the shared colony.':'Record saved in this browser.')}catch(error){try{await refreshCloud()}catch{}$('form-errors').hidden=false;$('form-errors').textContent=error.message||String(error)}finally{busy=false;$('save-record').disabled=false}}
 async function confirmAction(title,body,label='Continue'){return new Promise(resolve=>{$('confirm-title').textContent=title;$('confirm-content').innerHTML=body;$('confirm-accept').textContent=label;const dialog=$('confirm-dialog');const close=value=>{dialog.close();resolve(value)};$('confirm-accept').onclick=()=>close(true);$('confirm-cancel').onclick=()=>close(false);dialog.oncancel=event=>{event.preventDefault();close(false)};dialog.showModal()})}
 async function importDataset(file){if(cachedPreview||startupLoading||historyLoadState){showToast('Synchronizing. Editing is paused.');return;}if(!file)return;try{if(file.size>100*1024*1024)throw new Error('This JSON is larger than 100 MB. Use a reconstructed dataset, not a raw-cell archive.');const parsed=await datasetFromLocalBackup(JSON.parse(await file.text()));const normalized=model.normalizeDataset(parsed);const okay=await confirmAction('Import into this browser?',`<p class="subtle">${esc(file.name)}</p>${kv(editableTypes.map(t=>[titles[t],normalized.tables[t]?.length||0]))}<p class="subtle" style="margin-top:18px">This replaces the local working copy and switches to Local only. It does not upload to the cloud. Export a backup first if this browser has unsaved or unshared work.</p>`,'Import locally');if(!okay)return;await store.saveDataset(normalized,{localOnly:true});clearCageSheetDrafts();cageDate='';dataset=await store.loadDataset();cloudReady=true;await refreshCloud();navigate('overview');showToast('Imported locally. Nothing was uploaded.')}catch(error){showToast(error.message||String(error),true)}finally{$('import-file').value=''}}
 function downloadExport(blob,filename){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),60000)}

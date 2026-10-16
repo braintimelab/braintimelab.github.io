@@ -1,16 +1,16 @@
-import {clearHistoryIndex} from './history-index.js?v=93';
-import { projectLocoboxExport } from './locobox-export.js?v=93';
-import { PUBLIC_CONFIG } from './config.js?v=93';
-import { validateManagerPermissions } from './permissions.js?v=93';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=93';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=93';
+import {clearHistoryIndex} from './history-index.js?v=94';
+import { projectLocoboxExport } from './locobox-export.js?v=94';
+import { PUBLIC_CONFIG } from './config.js?v=94';
+import { validateManagerPermissions } from './permissions.js?v=94';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=94';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=94';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
 const SOURCE_PROJECTION_VERSION=2;
 // Keep aligned with colony_private.managed_location_keys(). Raw Sheet blocks
 // can include financial cells and must never enter a restricted cache or save.
-const MANAGED_LOCATION_KEYS=new Set(['location_id','room_id','rack_id','label','row','column','capacity','locobox_id','active','state','manager','manager_acronym','notes','app_created_at','app_updated_at','app_modified_at','app_archived_at','archived','record_origin','evidence_status','requires_review','source_current','source_last_seen_at','source_snapshot_date','source_label_conflict','source_manager_name','source_manager_acronym','source_manager_status','source_observed_mouse_sids','source_observed_cage_sids','source_candidate_mouse_sids','source_candidate_cage_sids','source_unresolved_explicit_mouse_sids','source_observed_tags','source_cage_observation','cage_start']);
+const MANAGED_LOCATION_KEYS=new Set(['location_id','room_id','rack_id','label','row','column','capacity','locobox_id','active','state','manager','manager_acronym','notes','app_created_at','app_updated_at','app_modified_at','app_archived_at','archived','record_origin','evidence_status','requires_review','source_current','source_last_seen_at','source_snapshot_date','source_label_conflict','source_manager_name','source_manager_acronym','source_manager_status','source_observed_mouse_sids','source_observed_cage_sids','source_candidate_mouse_sids','source_candidate_cage_sids','source_unresolved_explicit_mouse_sids','source_observed_tags','source_cage_observation','cage_start','cage_entrainment']);
 const MANAGED=Object.keys(ID_FIELDS);
 const clone=value=>structuredClone(value);
 let feeVisibility=null,feeVisibilityContext=null;
@@ -437,7 +437,12 @@ function validLocationCageStart(value,locationId){
  let anchor;try{anchor=JSON.parse(value.source_fingerprint);}catch{return false;}
  return Array.isArray(anchor)&&anchor.length===4&&text(anchor[0],1,240)&&anchor[0]===locationId&&(anchor[1]===null||typeof anchor[1]==='string'&&/^[A-Z]{1,3}[1-9]\d{0,5}$/.test(anchor[1]))&&(anchor[2]===null||text(anchor[2],1,240))&&date(anchor[3])&&(anchor[2]!==null||anchor[1]===null&&anchor[3]===null);
 }
-function managedLocationPayload(payload){return payload&&typeof payload==='object'&&!Array.isArray(payload)&&Object.keys(payload).every(key=>MANAGED_LOCATION_KEYS.has(key))&&(!Object.hasOwn(payload,'source_cage_observation')||payload.source_cage_observation===null||validCageObservation(payload.source_cage_observation))&&(!Object.hasOwn(payload,'cage_start')||validLocationCageStart(payload.cage_start,payload.location_id));}
+function validLocationCageEntrainment(value,locationId){
+ const date=v=>typeof v==='string'&&/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+ const scheme=v=>typeof v==='string'&&(['LD','DD','DL','LL','LDLD','SP','SP1','SP2','LP','LP1','LP2','T23','T24','T25'].includes(v)||/^T\d+(?:\.\d+)?$/.test(v)&&Number(v.slice(1))>0&&Number(v.slice(1))<=1000&&'T'+Number(v.slice(1))===v);
+ return value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===3&&['schemaVersion','entries','source_fingerprint'].every(k=>Object.hasOwn(value,k))&&value.schemaVersion===1&&Array.isArray(value.entries)&&value.entries.length>0&&value.entries.length<=1000&&value.entries.every((row,i)=>row&&typeof row==='object'&&!Array.isArray(row)&&Object.keys(row).length===2&&Object.hasOwn(row,'date')&&Object.hasOwn(row,'scheme')&&date(row.date)&&scheme(row.scheme)&&(i===0||value.entries[i-1].date<row.date))&&validLocationCageStart({schemaVersion:1,basis:'manual',date:null,source_fingerprint:value.source_fingerprint},locationId);
+}
+function managedLocationPayload(payload){return payload&&typeof payload==='object'&&!Array.isArray(payload)&&Object.keys(payload).every(key=>MANAGED_LOCATION_KEYS.has(key))&&(!Object.hasOwn(payload,'source_cage_observation')||payload.source_cage_observation===null||validCageObservation(payload.source_cage_observation))&&(!Object.hasOwn(payload,'cage_start')||validLocationCageStart(payload.cage_start,payload.location_id))&&(!Object.hasOwn(payload,'cage_entrainment')||validLocationCageEntrainment(payload.cage_entrainment,payload.location_id));}
 function currentRestrictedCache(data,mark,policy){
  return data?.source_archive_restricted===true&&data.source_projection_version===SOURCE_PROJECTION_VERSION&&mark?.source_projection_version===SOURCE_PROJECTION_VERSION&&mark.estimate===policy.estimate&&mark.actual===policy.actual&&(data.tables?.locations||[]).every(managedLocationPayload);
 }

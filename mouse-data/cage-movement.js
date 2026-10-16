@@ -1,6 +1,7 @@
 /* Pure physical cage movements. SIDs and source observations never change. */
-import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=93';
-import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=93';
+import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=94';
+import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=94';
+import {cageEntrainmentForCard,cageEntrainmentLinkChanges} from './cage-entrainment.js?v=94';
 const startFields=start=>start.basis==='unknown'?{}:{start_date:start.date,cage_start:{schemaVersion:1,basis:start.basis,date:start.date,...(start.evidence.length?{evidence:structuredClone(start.evidence)}:{})}};
 const present=v=>v!==null&&v!==undefined&&v!=='';
 const active=r=>r&&!r.app_archived_at&&!r.archived;
@@ -64,7 +65,7 @@ export function planCageMove(dataset,cageSid,destinationLocationId,options={}){
  if(!occupied.length){
   const changes=movement(cage,destination),assignment=positionManager(destination);
   if(options.linkSourcePosition===true&&!Object.hasOwn(cage,'manager')&&Object.hasOwn(assignment,'manager'))changes.push({...cell(cage,'manager',assignment.manager),positionManager:{locationId:destination.location_id}});
-  if(options.linkSourcePosition===true)changes.push(...cageStartLinkChanges(dataset,cage,destination));
+  if(options.linkSourcePosition===true)changes.push(...cageStartLinkChanges(dataset,cage,destination),...cageEntrainmentLinkChanges(dataset,cage,destination));
   return {...common,kind:'move',changes,summary:`Move cage ${id} from ${source?.label||'off rack'} to ${destination.label}. Its tag becomes ${destination.label}.`};
  }
  if(!source)throw new Error(`Position ${destination.label} is occupied. Choose an empty position for a cage that is off the rack.`);
@@ -202,14 +203,14 @@ function slotGroup(dataset,locationId,{checkOtherPositions=true,readContext=null
  // that could now accidentally match a newly imported animal.
  if(existing?.schemaVersion===1&&Array.isArray(existing.unresolved_rows))card.unresolved_rows=structuredClone(existing.unresolved_rows);
  const animals=[...known.values()].map(({row,mouse})=>({mouseSid:row.mouseSid,tag:row.sourceTag||row.tag,sourceCell:row.sourceCell,matchStatus:row.matchStatus,identity:mouseIdentity(mouse),cageSid:mouse.cage_sid??null})).sort((a,b)=>a.mouseSid.localeCompare(b.mouseSid));
- const start=resolveCageStart(dataset,{position,cage,mice}),snapshot={locationId,roomId:position.room_id,rackId:position.rack_id,label:position.label,cageSid:cage?.cage_sid??null,animals,observation,card,start,manager:positionManager(position)};
- return {position,cage,rows,moveRows:[...known.values()].map(({row})=>row),animals,card,start,snapshot};
+ const start=resolveCageStart(dataset,{position,cage,mice}),entrainment=cageEntrainmentForCard(dataset,{position,cage,mice}),snapshot={locationId,roomId:position.room_id,rackId:position.rack_id,label:position.label,cageSid:cage?.cage_sid??null,animals,observation,card,start,entrainment,manager:positionManager(position)};
+ return {position,cage,rows,moveRows:[...known.values()].map(({row})=>row),animals,card,start,entrainment,snapshot};
 }
 const slotCreation=(group,destination,id)=>{
  const source=group.position,record=createdCage(destination,id);delete record.manager;
  const observation=group.card.observation,literalManager=observation.managerName||source.source_manager_name||source.source_manager_acronym;
  const manager=Object.hasOwn(source,'manager')?positionManager(source):typeof literalManager==='string'&&literalManager.trim()?{manager:literalManager.trim()}:{};
- return {...record,cage_sheet_source_location_id:group.card.source_location_id,cage_sheet_card:structuredClone(group.card),...manager,...startFields(group.start)};
+ return {...record,cage_sheet_source_location_id:group.card.source_location_id,cage_sheet_card:structuredClone(group.card),...manager,...startFields(group.start),...(group.entrainment?{cage_entrainment:structuredClone(group.entrainment)}:{})};
 };
 const changeIdentity=change=>Object.fromEntries(['type','id','field','base','value','mouseMove','sourceMatch','sourceFill','overrideSource','sourceCage','wholeCageFill'].filter(key=>Object.hasOwn(change,key)).map(key=>[key,change[key]]));
 function buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds={},readContext=null){
@@ -230,7 +231,7 @@ function buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds
  }
  const changes=[],newCages=[],finalCages=(dataset.tables.cages||[]).map(c=>({...c}));
  groups.forEach((group,i)=>{
-  if(group.cage){const moves=movement(group.cage,targets[i]);changes.push(...moves);if(!same(group.cage.cage_sheet_card,group.card))changes.push({...cell(group.cage,'cage_sheet_card',group.card),wholeCageFill:true});if(!same(group.cage.cage_sheet_source_location_id,group.card.source_location_id))changes.push({...cell(group.cage,'cage_sheet_source_location_id',group.card.source_location_id),wholeCageFill:true});if(!Object.hasOwn(group.cage,'cage_start')&&blank(group.cage.start_date))for(const [field,value] of Object.entries(startFields(group.start)))if(!same(group.cage[field],value))changes.push({...cell(group.cage,field,value),wholeCageFill:true});const value=finalCages.find(c=>c.cage_sid===group.cage.cage_sid);Object.assign(value,{location_id:targets[i].location_id,cage_tag:targets[i].label,room_id:targets[i].room_id,rack_id:targets[i].rack_id});group.targetCageSid=String(group.cage.cage_sid);}
+  if(group.cage){const moves=movement(group.cage,targets[i]);changes.push(...moves);if(!same(group.cage.cage_sheet_card,group.card))changes.push({...cell(group.cage,'cage_sheet_card',group.card),wholeCageFill:true});if(!same(group.cage.cage_sheet_source_location_id,group.card.source_location_id))changes.push({...cell(group.cage,'cage_sheet_source_location_id',group.card.source_location_id),wholeCageFill:true});if(!Object.hasOwn(group.cage,'cage_start')&&blank(group.cage.start_date))for(const [field,value] of Object.entries(startFields(group.start)))if(!same(group.cage[field],value))changes.push({...cell(group.cage,field,value),wholeCageFill:true});if(group.entrainment&&!same(group.cage.cage_entrainment,group.entrainment))changes.push({...cell(group.cage,'cage_entrainment',structuredClone(group.entrainment)),wholeCageFill:true});const value=finalCages.find(c=>c.cage_sid===group.cage.cage_sid);Object.assign(value,{location_id:targets[i].location_id,cage_tag:targets[i].label,room_id:targets[i].room_id,rack_id:targets[i].rack_id});group.targetCageSid=String(group.cage.cage_sid);}
   else{
    const id=textId(newCageIds[group.position.location_id],'new cage SID');
    if(finalCages.some(c=>String(c.cage_sid)===id)||newCages.some(c=>c.cage_sid===id))throw new Error('The new cage SID is already registered. Choose a new SID.');
@@ -293,7 +294,7 @@ function projectedCages(dataset,changes,readContext=null){
  const creations=drafts.filter(c=>c?.type==='cages'&&c.field==='$create'),seen=new Set();
  for(const change of creations){
   const id=textId(change.id,'new cage SID'),value=change.value;
-  if(seen.has(id)||change.base!==null||!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(field=>!createdCageFields.includes(field)&&!['manager','start_date','cage_start','cage_sheet_card'].includes(field))||createdCageFields.some(field=>!Object.hasOwn(value,field))||value.cage_sid!==id)throw new Error('The new cage draft is invalid. Choose the destination again.');seen.add(id);
+  if(seen.has(id)||change.base!==null||!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(field=>!createdCageFields.includes(field)&&!['manager','start_date','cage_start','cage_sheet_card','cage_entrainment'].includes(field))||createdCageFields.some(field=>!Object.hasOwn(value,field))||value.cage_sid!==id)throw new Error('The new cage draft is invalid. Choose the destination again.');seen.add(id);
   const ctx=context(projected),position=positionWithManagerDraft(ctx.location(textId(value.location_id,'destination position'),{destination:true}),drafts);
   const source=change.sourceCage?positionWithManagerDraft(ctx.location(textId(change.sourceCage.locationId,'source position'),{destination:true}),drafts):null;
   const existing=(projected.tables.cages||[]).find(row=>String(row.cage_sid)===id),replayed=existing&&Object.entries(value).every(([field,entry])=>same(existing[field],entry));
@@ -376,6 +377,12 @@ export function getMouseMoveReadDependencies(dataset,changes){
  // source position remains a read dependency even when it is not the final slot.
  for(const change of drafts.filter(c=>c.positionStart)){
   for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:change.positionStart.locationId}))deps.set(dep.type+':'+dep.id,dep);
+ }
+ for(const change of drafts.filter(c=>c.positionEntrainment)){
+  for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:change.positionEntrainment.locationId}))deps.set(dep.type+':'+dep.id,dep);
+ }
+ for(const change of drafts.filter(c=>c.sourceEntrainment)){
+  for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:change.sourceEntrainment.locationId}))deps.set(dep.type+':'+dep.id,dep);
  }
  for(const change of drafts.filter(c=>c.positionManager)){
   for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:change.positionManager.locationId}))deps.set(dep.type+':'+dep.id,dep);
