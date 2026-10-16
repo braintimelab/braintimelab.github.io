@@ -70,7 +70,7 @@ export function ageWeeks(dob,asOf=todayTaipei()){
 const override=(mouse,key)=>mouse?.cage_sheet_overrides?.[key]===true;
 const historical=row=>row?.history_read_only===true||row?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(row?.record_origin||'');
 const currentPosition=position=>active(position)&&position.source_current!==false&&!historical(position)&&Boolean(text(position.location_id));
-const currentCage=(cage,dataset)=>active(cage)&&!historical(cage)&&!cage._derived&&(!/^(Ended|Inactive)$/i.test(cage.state||'')||(dataset?.tables?.mice||[]).some(m=>active(m)&&m.state==='Stock'&&text(m.cage_sid)===text(cage.cage_sid)));
+const currentCage=(cage,stockCages)=>active(cage)&&!historical(cage)&&!cage._derived&&(!/^(Ended|Inactive)$/i.test(cage.state||'')||stockCages.has(text(cage.cage_sid)));
 function savedCard(cage){
  const card=cage?.cage_sheet_card;
  if(!object(card)||card.schemaVersion!==1||!text(card.source_location_id))return null;
@@ -79,27 +79,40 @@ function savedCard(cage){
  const unresolved_rows=(Array.isArray(card.unresolved_rows)?card.unresolved_rows:[]).filter(object).map(row=>({sourceCell:validCell(row.sourceCell)?text(row.sourceCell):null,tag:text(row.tag),reason:text(row.reason)||'unlinked'})).filter(row=>row.tag);
  return {source_location_id:text(card.source_location_id),observation,unresolved_rows};
 }
+/** An ephemeral read context for one immutable view. Build once per render or
+ * operation, never retain across record edits or a fresh import. Historical cages
+ * are indexed once rather than joining the whole colony for every visible row. */
+export function createCageObservationContext(dataset){
+ const tables=dataset?.tables||{},mice=(tables.mice||[]).filter(active),stockCages=new Set(mice.filter(m=>m.state==='Stock').map(m=>text(m.cage_sid)));
+ const firstIndex=(rows,key)=>{const map=new Map();for(const row of rows||[]){const id=text(row?.[key]);if(!map.has(id))map.set(id,row);}return map;};
+ const locations=firstIndex(tables.locations,'location_id'),miceById=firstIndex(mice,'mouse_sid'),cagesById=firstIndex((tables.cages||[]).filter(active),'cage_sid');
+ const currentCages=(tables.cages||[]).filter(c=>currentCage(c,stockCages)),cards=new Map(),placed=new Map(),claims=new Map(),observations=new Map();
+ const card=cage=>{if(!cards.has(cage))cards.set(cage,savedCard(cage));return cards.get(cage);};
+ for(const cage of currentCages){const saved=card(cage);if(!saved)continue;for(const [map,id] of [[placed,text(cage.location_id)],[claims,saved.source_location_id]]){const rows=map.get(id)||[];rows.push(cage);map.set(id,rows);}}
+ return {dataset,mice,stockCages,currentCages,locations,miceById,cagesById,placed,claims,card,
+  observation:position=>{if(!observations.has(position))observations.set(position,cageObservations(position));return observations.get(position);},identities:null};
+}
+const readContext=(dataset,context)=>context?.dataset===dataset?context:createCageObservationContext(dataset);
 /** A saved physical card travels with its cage; imported source grids stay intact. */
-export function cageCardObservation(dataset,item={}){
- const position=item.position||{},id=text(position.location_id),cages=(dataset?.tables?.cages||[]).filter(c=>currentCage(c,dataset));
- if(dataset?.history_projection?.read_only===true)return {source_location_id:id||null,observation:cageObservations(position),unresolved_rows:[]};
- const placed=cages.filter(c=>text(c.location_id)===id&&savedCard(c));
- const cage=item.cage||(placed.length===1?placed[0]:null),card=savedCard(cage);
+export function cageCardObservation(dataset,item={},context=null){
+ const ctx=readContext(dataset,context),position=item.position||{},id=text(position.location_id);
+ if(dataset?.history_projection?.read_only===true)return {source_location_id:id||null,observation:ctx.observation(position),unresolved_rows:[]};
+ const placed=ctx.placed.get(id)||[],cage=item.cage||(placed.length===1?placed[0]:null),card=ctx.card(cage);
  if(card)return card;
- const observation=cageObservations(position);
+ const observation=ctx.observation(position),claims=ctx.claims.get(id)||[];
  // Only the moved snapshot is claimed. A later import at the vacated position
  // may contain a new card, which must remain visible for review.
- if(dataset?.history_projection?.read_only!==true&&id&&cages.some(c=>{const saved=savedCard(c);return saved?.source_location_id===id&&JSON.stringify(saved.observation)===JSON.stringify(observation);}))return {source_location_id:id,observation:empty(),unresolved_rows:[]};
+ if(id&&claims.some(c=>JSON.stringify(ctx.card(c).observation)===JSON.stringify(observation)))return {source_location_id:id,observation:empty(),unresolved_rows:[]};
  return {source_location_id:id||null,observation,unresolved_rows:[]};
 }
 /** Resolve an explicit source-cell proof after its physical card has moved. */
-export function cageSheetSourceRows(dataset,sourceLocationId){
- const position=(dataset?.tables?.locations||[]).find(p=>text(p.location_id)===text(sourceLocationId));
+export function cageSheetSourceRows(dataset,sourceLocationId,context=null){
+ const ctx=readContext(dataset,context),position=ctx.locations.get(text(sourceLocationId));
  if(!position)return [];
- const claims=(dataset?.tables?.cages||[]).filter(c=>currentCage(c,dataset)&&savedCard(c)?.source_location_id===text(sourceLocationId));
- const rows=claims.flatMap(cage=>cageSheetAnimals(dataset,{position,sourceProofCage:cage}));
- const raw=cageObservations(position);
- if(!claims.some(cage=>JSON.stringify(savedCard(cage).observation)===JSON.stringify(raw)))rows.push(...cageSheetAnimals(dataset,{position,rawSourceProof:true}));
+ const claims=ctx.claims.get(text(sourceLocationId))||[];
+ const rows=claims.flatMap(cage=>cageSheetAnimals(dataset,{position,sourceProofCage:cage},ctx));
+ const raw=ctx.observation(position);
+ if(!claims.some(cage=>JSON.stringify(ctx.card(cage).observation)===JSON.stringify(raw)))rows.push(...cageSheetAnimals(dataset,{position,rawSourceProof:true},ctx));
  return rows;
 }
 // Only sanitized observations enter this fingerprint. Capture timestamps are
@@ -109,20 +122,35 @@ const observationFingerprint=(position,animal,observations)=>JSON.stringify([
  text(position.location_id),animal.sourceCell,animal.tag,animal.note,animal.dateOfBirth,
  animal.earMark,animal.sex,animal.requiresReview,observations.startedDate
 ]);
-function linkedMice(mice,position,animal,observations){
- if(!currentPosition(position)||!animal.sourceCell)return [];
- const fingerprint=observationFingerprint(position,animal,observations);
- return mice.filter(mouse=>!historical(mouse)&&Array.isArray(mouse.cage_sheet_source_links)&&mouse.cage_sheet_source_links.some(link=>
-  object(link)&&link.schema_version===1&&link.mouse_sid===text(mouse.mouse_sid)&&link.location_id===text(position.location_id)&&link.source_cell===animal.sourceCell&&link.source_fingerprint===fingerprint));
+const sourceLinkKey=(locationId,sourceCell,fingerprint)=>JSON.stringify([locationId,sourceCell,fingerprint]);
+const reviewKey=(locationId,sourceCell,tag,dob,gender)=>JSON.stringify([locationId,sourceCell,tag,dob||null,gender||null]);
+function identityIndexes(ctx){
+ if(ctx.identities)return ctx.identities;
+ const identifiers=new Map(),linked=new Map(),reviewed=new Map(),add=(map,key,value)=>{const entries=map.get(key)||[];if(!entries.includes(value))entries.push(value);map.set(key,entries);};
+ for(const mouse of ctx.mice){
+  const tag=text(mouse.physical_tag),id=text(mouse.mouse_sid);if(!id)continue;
+  const values=tag?[{value:tag,requiresDob:false,alias:false}]:[];
+  if(/[-\s][MF]$/.test(tag)&&/^\d+$/.test(id))values.push({value:tag+id,requiresDob:false,alias:false});
+  if(shorthand(tag)&&sex(mouse.sex)&&/^\d+$/.test(id))values.push({value:`${tag}-${sex(mouse.sex)[0]}${id}`,requiresDob:true,alias:false});
+  if(Array.isArray(mouse.physical_tag_aliases))for(const alias of mouse.physical_tag_aliases)if(typeof alias==='string'&&text(alias))values.push({value:alias,requiresDob:true,alias:true});
+  for(const {value,requiresDob,alias} of values){const key=identifierKey(value),matches=identifiers.get(key)||[],existing=matches.find(m=>m.mouse===mouse);if(existing){existing.alias||=alias;existing.requiresDob&&=requiresDob;}else matches.push({mouse,requiresDob,alias});identifiers.set(key,matches);}
+  if(!historical(mouse)&&Array.isArray(mouse.cage_sheet_source_links))for(const link of mouse.cage_sheet_source_links){
+   if(object(link)&&link.schema_version===1&&link.mouse_sid===id)add(linked,sourceLinkKey(link.location_id,link.source_cell,link.source_fingerprint),mouse);
+  }
+  if(Array.isArray(mouse.animal_sheet_review_links))for(const link of mouse.animal_sheet_review_links){
+   const checked=link?.reviewed_mouse;if(!object(link)||link.schema_version!==1||!object(checked)||text(checked.physical_tag)!==tag||date(checked.date_of_birth)!==date(mouse.date_of_birth)||sex(checked.sex)!==sex(mouse.sex)||!Array.isArray(link.source_refs))continue;
+   for(const ref of link.source_refs)if(object(ref)&&ref.kind==='current_position')add(reviewed,reviewKey(ref.record_id,ref.source_cell,ref.tag,ref.date_of_birth,ref.sex),mouse);
+  }
+ }
+ ctx.identities={identifiers,linked,reviewed};return ctx.identities;
 }
-function reviewedMice(mice,position,animal){
+function linkedMice(ctx,position,animal,observations){
  if(!currentPosition(position)||!animal.sourceCell)return [];
- return mice.filter(mouse=>Array.isArray(mouse.animal_sheet_review_links)&&mouse.animal_sheet_review_links.some(link=>{
-  const reviewed=link?.reviewed_mouse;
-  return object(link)&&link.schema_version===1&&object(reviewed)&&
-   text(reviewed.physical_tag)===text(mouse.physical_tag)&&date(reviewed.date_of_birth)===date(mouse.date_of_birth)&&sex(reviewed.sex)===sex(mouse.sex)&&
-   Array.isArray(link.source_refs)&&link.source_refs.some(ref=>object(ref)&&ref.kind==='current_position'&&ref.record_id===text(position.location_id)&&ref.source_cell===animal.sourceCell&&ref.tag===animal.tag&&(ref.date_of_birth||null)===(animal.dateOfBirth||null)&&(ref.sex||null)===(animal.sex||null));
- }));
+ return identityIndexes(ctx).linked.get(sourceLinkKey(text(position.location_id),animal.sourceCell,observationFingerprint(position,animal,observations)))||[];
+}
+function reviewedMice(ctx,position,animal){
+ if(!currentPosition(position)||!animal.sourceCell)return [];
+ return identityIndexes(ctx).reviewed.get(reviewKey(text(position.location_id),animal.sourceCell,animal.tag,animal.dateOfBirth,animal.sex))||[];
 }
 /** Retain deliberate Mouse-editor values and already verified cage links.
  * This is a pure record transformation; source positions and assignments never
@@ -139,10 +167,10 @@ export function prepareMouseCageSheetEdit(dataset,before,after){
  // Stable SID uniqueness is required before retaining a prior verification.
  if(mice.filter(mouse=>active(mouse)&&text(mouse.mouse_sid)===id).length!==1)return result;
  const original={...dataset,tables:{...dataset.tables,mice:mice.map(mouse=>text(mouse.mouse_sid)===id?before:mouse)}};
- const positions=(dataset?.tables?.locations||[]).filter(currentPosition),matches=[];
+ const positions=(dataset?.tables?.locations||[]).filter(currentPosition),matches=[],context=createCageObservationContext(original);
  for(const position of positions){
   if(positions.filter(other=>text(other.location_id)===text(position.location_id)).length!==1)continue;
-  const card=cageCardObservation(original,{position}),observations=card.observation,sourcePosition={...position,location_id:card.source_location_id},rows=cageSheetAnimals(original,{position});
+  const card=cageCardObservation(original,{position},context),observations=card.observation,sourcePosition={...position,location_id:card.source_location_id},rows=cageSheetAnimals(original,{position},context);
   for(const row of rows.filter(row=>row.matchStatus==='matched'&&row.mouseSid===id)){
    const animal=observations.animals.find(animal=>animal.sourceCell===row.sourceCell&&animal.tag===(row.sourceTag||row.tag));
    if(animal)matches.push({schema_version:1,mouse_sid:id,location_id:card.source_location_id,source_cell:animal.sourceCell,source_tag:animal.tag,source_fingerprint:observationFingerprint(sourcePosition,animal,observations)});
@@ -161,28 +189,16 @@ function managedRow(mouse,locationId){
 }
 /** Join only literal unique identifiers. Numeric suffixes and genotype
  * similarity never establish identity, and source rows never move cages. */
-export function cageSheetAnimals(dataset,item={}){
- const physicalPosition=item.position||{},card=item.rawSourceProof?{source_location_id:text(physicalPosition.location_id),observation:cageObservations(physicalPosition),unresolved_rows:[]}:cageCardObservation(dataset,{...item,cage:item.sourceProofCage||item.cage}),locationId=card.source_location_id||null;
- const position={...((dataset?.tables?.locations||[]).find(p=>text(p.location_id)===locationId)||physicalPosition),location_id:locationId};
+export function cageSheetAnimals(dataset,item={},context=null){
+ const ctx=readContext(dataset,context),physicalPosition=item.position||{},card=item.rawSourceProof?{source_location_id:text(physicalPosition.location_id),observation:ctx.observation(physicalPosition),unresolved_rows:[]}:cageCardObservation(dataset,{...item,cage:item.sourceProofCage||item.cage},ctx),locationId=card.source_location_id||null;
+ const position={...(ctx.locations.get(locationId)||physicalPosition),location_id:locationId};
  const physicalLocationId=text(item.sourceProofCage?.location_id)||text(physicalPosition.location_id)||null;
- const observations=card.observation,mice=(dataset?.tables?.mice||[]).filter(active),index=new Map();
- for(const mouse of mice){
-  const tag=text(mouse.physical_tag),id=text(mouse.mouse_sid);if(!id)continue;
-  const identifiers=tag?[{value:tag,requiresDob:false,alias:false}]:[];
-  if(/[-\s][MF]$/.test(tag)&&/^\d+$/.test(id))identifiers.push({value:tag+id,requiresDob:false,alias:false});
-  if(shorthand(tag)&&sex(mouse.sex)&&/^\d+$/.test(id))identifiers.push({value:`${tag}-${sex(mouse.sex)[0]}${id}`,requiresDob:true,alias:false});
-  if(Array.isArray(mouse.physical_tag_aliases))for(const alias of mouse.physical_tag_aliases)if(typeof alias==='string'&&text(alias))identifiers.push({value:alias,requiresDob:true,alias:true});
-  for(const {value,requiresDob,alias} of identifiers){
-   const key=identifierKey(value),matches=index.get(key)||[],existing=matches.find(m=>m.mouse===mouse);
-   if(existing){existing.alias||=alias;existing.requiresDob&&=requiresDob;}else matches.push({mouse,requiresDob,alias});
-   index.set(key,matches);
-  }
- }
+ const observations=card.observation,index=identityIndexes(ctx).identifiers;
  const sourceByTag=new Map();for(const animal of observations.animals){const key=identifierKey(animal.tag),same=sourceByTag.get(key)||[];same.push(animal);sourceByTag.set(key,same);}
  const rows=observations.animals.map(animal=>{
   const key=identifierKey(animal.tag),entries=animal.sourceCell?index.get(key)||[]:[];
-  const reviewed=dataset?.history_projection?.read_only===true?[]:reviewedMice(mice,position,animal);
-  const retained=dataset?.history_projection?.read_only===true?[]:linkedMice(mice,position,animal,observations);
+  const reviewed=dataset?.history_projection?.read_only===true?[]:reviewedMice(ctx,position,animal);
+  const retained=dataset?.history_projection?.read_only===true?[]:linkedMice(ctx,position,animal,observations);
   const possible=[...new Set([...entries.map(entry=>entry.mouse),...retained])];
   // Reused tag aliases identify a DOB cohort, not the animal whose SID happens
   // to resemble the suffix. An override or old link cannot select another cohort.
@@ -200,9 +216,9 @@ export function cageSheetAnimals(dataset,item={}){
   return {...animal,tag:mouse&&(reviewed.length||override(mouse,'physical_tag')||entries.some(entry=>entry.mouse===mouse&&entry.alias))?managedRow(mouse,locationId).tag:animal.tag,sourceTag:animal.tag,mouseSid:mouse?text(mouse.mouse_sid):null,dateOfBirth:take('date_of_birth',animal.dateOfBirth,mouse?date(mouse.date_of_birth):null),earMark:take('ear_mark',animal.earMark,mouse?text(mouse.ear_mark)||null:null),note:mouse&&(reviewed.length||override(mouse,'comment'))?text(mouse.comment):animal.note||text(mouse?.comment),sourceNote:animal.note,sex:reviewed.length&&mouse?sex(mouse.sex):animal.sex||sex(mouse?.sex),locationId,matchStatus:status};
  }).filter(row=>{
   if(row.matchStatus!=='matched')return true;
-  const mouse=mice.find(m=>text(m.mouse_sid)===row.mouseSid);
+  const mouse=ctx.miceById.get(row.mouseSid);
   if(!override(mouse,'cage_sid'))return true;
-  const assigned=(dataset.tables.cages||[]).find(c=>active(c)&&text(c.cage_sid)===text(mouse.cage_sid));
+  const assigned=ctx.cagesById.get(text(mouse.cage_sid));
   // A deliberate transfer supersedes the old grid display, while the imported
   // observation remains intact for history and review. Never hide an uncertain match.
   return Boolean(assigned&&physicalLocationId&&text(assigned.location_id)===physicalLocationId);
@@ -213,7 +229,7 @@ export function cageSheetAnimals(dataset,item={}){
  });
   // Registering a cage for one explicitly transferred animal must not erase
   // other literal occupants, nor silently assign them to the new cage.
-  if(savedCard(item.cage)||locationId&&text(item.cage.cage_sheet_source_location_id)===locationId){
+  if(ctx.card(item.cage)||locationId&&text(item.cage.cage_sheet_source_location_id)===locationId){
    const residentIds=new Set(residents.map(row=>row.mouseSid));
    return [...residents,...rows.filter(row=>!row.mouseSid||!residentIds.has(row.mouseSid))];
   }

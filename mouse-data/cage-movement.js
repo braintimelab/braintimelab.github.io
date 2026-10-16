@@ -1,6 +1,6 @@
 /* Pure physical cage movements. SIDs and source observations never change. */
-import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows} from './cage-observations.js?v=86';
-import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=87';
+import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=88';
+import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=88';
 const startFields=start=>start.basis==='unknown'?{}:{start_date:start.date,cage_start:{schemaVersion:1,basis:start.basis,date:start.date,...(start.evidence.length?{evidence:structuredClone(start.evidence)}:{})}};
 const present=v=>v!==null&&v!==undefined&&v!=='';
 const active=r=>r&&!r.app_archived_at&&!r.archived;
@@ -28,6 +28,15 @@ function context(dataset){
   return position;
  }
  return {cage,location,oldPosition,occupants,hasCurrentResidents:id=>currentResidents.has(String(id))};
+}
+// One fresh immutable operation may inspect many source positions. Keep its
+// indexes local to that operation; never reuse them across a Save or import.
+const movementReadContexts=new WeakSet();
+function movementReadContext(dataset,readContext=null){
+ if(readContext?.dataset===dataset&&movementReadContexts.has(readContext))return readContext;
+ const observations=createCageObservationContext(dataset),mice=new Map();for(const mouse of dataset?.tables?.mice||[]){const id=String(mouse.mouse_sid);if(!mice.has(id))mice.set(id,mouse);}const reads={dataset,observations,mice};let housing,strictMice;
+ Object.defineProperties(reads,{housing:{get:()=>housing??=context(dataset)},strictMice:{get:()=>strictMice??=index(dataset?.tables?.mice,'mouse_sid')}});
+ movementReadContexts.add(reads);return reads;
 }
 const cell=(cage,field,value)=>({type:'cages',id:String(cage.cage_sid),field,base:cage[field]??null,value});
 const movement=(cage,position)=>[cell(cage,'location_id',position?.location_id??null),...(position?[cell(cage,'cage_tag',position.label)]:[])].filter(c=>(c.base??null)!==(c.value??null));
@@ -87,12 +96,12 @@ const mouseIdentity=mouse=>Object.fromEntries(identityFields.map(field=>[field,m
 const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
 const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value+'T00:00:00Z'))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 
-function mouseMoveContext(dataset,mouseSid,targetCageSid,{sourceMatch=null,targetDataset=dataset}={}){
+function mouseMoveContext(dataset,mouseSid,targetCageSid,{sourceMatch=null,targetDataset=dataset,readContext=null,targetReadContext=null}={}){
  if(dataset?.history_projection?.read_only===true)throw new Error('Historical cage views are read only. Return to current cages before moving a mouse.');
- const tables=dataset?.tables||{},mice=index(tables.mice,'mouse_sid'),ctx=context(dataset),mouse=mice.get(textId(mouseSid,'mouse SID'));
+ const reads=movementReadContext(dataset,readContext),tables=dataset?.tables||{},mice=reads.strictMice,ctx=reads.housing,mouse=mice.get(textId(mouseSid,'mouse SID'));
  if(!active(mouse)||mouse?._derived||historical(mouse)||mouse.state!=='Stock')throw new Error(`Mouse ${mouseSid} is missing, archived or not a current registered Stock animal.`);
  const checkCage=(id,{destination=false}={})=>{
-  const data=destination?targetDataset:dataset,tables=data.tables||{},ctx=context(data),cage=ctx.cage(textId(id,'cage SID'));
+  const data=destination?targetDataset:dataset,tables=data.tables||{},ctx=movementReadContext(data,data===dataset?reads:targetReadContext).housing,cage=ctx.cage(textId(id,'cage SID'));
   if(historical(cage)||destination&&!/^(Active|Occupied)$/i.test(cage.state||'')&&!ctx.hasCurrentResidents(id))throw new Error(`Cage ${id} is not a current active registered cage.`);
   const position=ctx.oldPosition(cage);
   if(position){
@@ -112,7 +121,7 @@ function mouseMoveContext(dataset,mouseSid,targetCageSid,{sourceMatch=null,targe
   textId(sourceMatch.locationId,'source position');
   if(!(mouse.cage_sid===targetCageSid&&mouse.cage_sheet_overrides?.cage_sid===true)){
    const position=ctx.location(sourceMatch.locationId,{destination:true});
-   sourceObservation=cageSheetSourceRows(dataset,sourceMatch.locationId).find(row=>row.matchStatus==='matched'&&row.mouseSid===mouseSid&&(row.sourceTag||row.tag)===sourceMatch.tag&&row.sourceCell===sourceMatch.sourceCell);
+   sourceObservation=cageSheetSourceRows(dataset,sourceMatch.locationId,reads.observations).find(row=>row.matchStatus==='matched'&&row.mouseSid===mouseSid&&(row.sourceTag||row.tag)===sourceMatch.tag&&row.sourceCell===sourceMatch.sourceCell);
    if(historical(position)||!sourceObservation)throw new Error('Animal match changed. Reload the sheet before moving this mouse.');
   }
  }
@@ -127,8 +136,8 @@ const sourceFieldValues=row=>({ear_mark:row?.earMark??null,date_of_birth:row?.da
 const blank=value=>value===null||value===undefined||typeof value==='string'&&!value.trim();
 
 /** Stage a registered mouse's explicit cage assignment, without changing any record. */
-export function planMouseMove(dataset,mouseSid,destinationCageSid,{sourceCageSid,effectiveDate=null,sourceMatch=null,targetDataset=dataset}={}){
- const id=textId(mouseSid,'mouse SID'),destination=textId(destinationCageSid,'destination cage SID'),{mouse,source,target,sourceObservation}=mouseMoveContext(dataset,id,destination,{sourceMatch,targetDataset}),old=mouse.cage_sid??null;
+export function planMouseMove(dataset,mouseSid,destinationCageSid,{sourceCageSid,effectiveDate=null,sourceMatch=null,targetDataset=dataset,readContext=null,targetReadContext=null}={}){
+ const id=textId(mouseSid,'mouse SID'),destination=textId(destinationCageSid,'destination cage SID'),{mouse,source,target,sourceObservation}=mouseMoveContext(dataset,id,destination,{sourceMatch,targetDataset,readContext,targetReadContext}),old=mouse.cage_sid??null;
  if(sourceCageSid!==undefined&&!same(sourceCageSid,old))throw new Error('This animal is not currently assigned to the displayed source cage. Reload and review its identity before moving it.');
  if(effectiveDate!==null&&!validDate(effectiveDate))throw new Error('Choose a valid effective move date (YYYY-MM-DD).');
  const common={mouse_sid:id,source_cage_sid:old,destination_cage_sid:destination,warnings:[],readDependencies:movementDependencies(dataset,{mouse,source,target},sourceMatch)};
@@ -157,25 +166,25 @@ export function planMouseMoveToPosition(dataset,mouseSid,locationId,{cageSid,...
 // A physical card can move before every source animal has a verified SID.
 // Keep unresolved rows as literal card evidence and move only current unique
 // matches plus the cage's already registered residents.
-function slotGroup(dataset,locationId,{checkOtherPositions=true}={}){
+function slotGroup(dataset,locationId,{checkOtherPositions=true,readContext=null}={}){
  if(dataset?.history_projection?.read_only===true)throw new Error('Historical cage views are read only.');
- const ctx=context(dataset),position=ctx.location(textId(locationId,'cage position'),{destination:true});
+ const reads=movementReadContext(dataset,readContext),ctx=reads.housing,position=ctx.location(textId(locationId,'cage position'),{destination:true});
  const t=dataset.tables||{},rack=(t.racks||[]).find(r=>r.rack_id===position.rack_id),room=(t.rooms||[]).find(r=>r.room_id===position.room_id);
  if([position,rack,room].some(historical))throw new Error('Historical positions cannot be moved.');
  const occupants=ctx.occupants(locationId);if(occupants.length>1)throw new Error(`Position ${position.label} has multiple current cages.`);
  const cage=occupants[0]||null;
  if(cage){ctx.cage(String(cage.cage_sid));ctx.oldPosition(cage);if(historical(cage)||! /^(Active|Occupied)$/i.test(cage.state||'')&&!ctx.hasCurrentResidents(cage.cage_sid))throw new Error('Choose a current active cage.');}
  const mice=(t.mice||[]).filter(m=>active(m)&&m.state==='Stock'&&cage&&String(m.cage_sid)===String(cage.cage_sid));
- const cardSource=cageCardObservation(dataset,{position,cage}),observation=cardSource.observation;
- const rows=cageSheetAnimals(dataset,{position,cage,mice}),counts=new Map(),residents=new Set(mice.map(m=>String(m.mouse_sid)));
+ const cardSource=cageCardObservation(dataset,{position,cage},reads.observations),observation=cardSource.observation;
+ const rows=cageSheetAnimals(dataset,{position,cage,mice},reads.observations),counts=new Map(),residents=new Set(mice.map(m=>String(m.mouse_sid)));
  for(const row of rows)if(row.mouseSid)counts.set(row.mouseSid,(counts.get(row.mouseSid)||0)+1);
  const elsewhere=new Set();
  if(checkOtherPositions&&rows.some(row=>row.mouseSid&&!residents.has(row.mouseSid)))for(const other of (t.locations||[]).filter(p=>active(p)&&p.source_current!==false&&!historical(p)&&p.location_id!==locationId)){
-  for(const row of cageSheetAnimals(dataset,{position:other}))if(row.mouseSid)elsewhere.add(row.mouseSid);
+  for(const row of cageSheetAnimals(dataset,{position:other},reads.observations))if(row.mouseSid)elsewhere.add(row.mouseSid);
  }
  const known=new Map(),unresolved=[];
  for(const row of rows){
-  const mouse=row.mouseSid?(t.mice||[]).find(m=>String(m.mouse_sid)===row.mouseSid):null;
+  const mouse=row.mouseSid?reads.mice.get(row.mouseSid):null;
   const isResident=Boolean(mouse&&residents.has(row.mouseSid));
   const eligible=mouse&&['matched','registered'].includes(row.matchStatus)&&active(mouse)&&mouse.state==='Stock'&&!mouse._derived&&!historical(mouse)&&(isResident||counts.get(row.mouseSid)===1&&!elsewhere.has(row.mouseSid));
   if(eligible&&!known.has(row.mouseSid))known.set(row.mouseSid,{row,mouse});
@@ -203,11 +212,11 @@ const slotCreation=(group,destination,id)=>{
  return {...record,cage_sheet_source_location_id:group.card.source_location_id,cage_sheet_card:structuredClone(group.card),...manager,...startFields(group.start)};
 };
 const changeIdentity=change=>Object.fromEntries(['type','id','field','base','value','mouseMove','sourceMatch','sourceFill','overrideSource','sourceCage','wholeCageFill'].filter(key=>Object.hasOwn(change,key)).map(key=>[key,change[key]]));
-function buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds={}){
- const source=slotGroup(dataset,sourceLocationId);
+function buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds={},readContext=null){
+ const reads=movementReadContext(dataset,readContext),source=slotGroup(dataset,sourceLocationId,{readContext:reads});
  if(!source.cage&&!source.rows.length)throw new Error('This position is empty. Choose a cage to move.');
  if(sourceLocationId===destinationLocationId)return {kind:'noop',changes:[],summary:`Cage is already at ${source.position.label}.`};
- const destination=slotGroup(dataset,destinationLocationId);
+ const destination=slotGroup(dataset,destinationLocationId,{readContext:reads});
  const groups=[source,...(destination.cage||destination.rows.length?[destination]:[])],targets=[destination.position,source.position],assignments=new Map();
  for(const group of groups)for(const animal of group.animals){const owners=assignments.get(animal.mouseSid)||[];owners.push(group);assignments.set(animal.mouseSid,owners);}
  for(const [mouseSid,owners] of assignments)if(owners.length>1){
@@ -229,11 +238,11 @@ function buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds
    changes.push({type:'cages',id,field:'$create',base:null,value,sourceCage:{locationId:group.position.location_id}});
   }
  });
- const projected={...dataset,tables:{...dataset.tables,cages:[...finalCages,...newCages]}};
+ const projected={...dataset,tables:{...dataset.tables,cages:[...finalCages,...newCages]}},targetReads=movementReadContext(projected);
  for(const group of groups)for(const row of group.moveRows){
   const match=row.matchStatus==='matched'?{locationId:row.locationId||group.card.source_location_id,tag:row.sourceTag||row.tag,sourceCell:row.sourceCell}:null;
   const mouse=(dataset.tables.mice||[]).find(m=>String(m.mouse_sid)===row.mouseSid);
-  if(!group.cage||String(mouse.cage_sid||'')!==group.targetCageSid)changes.push(...planMouseMove(dataset,row.mouseSid,group.targetCageSid,{sourceMatch:match,targetDataset:projected}).changes);
+  if(!group.cage||String(mouse.cage_sid||'')!==group.targetCageSid)changes.push(...planMouseMove(dataset,row.mouseSid,group.targetCageSid,{sourceMatch:match,targetDataset:projected,readContext:reads,targetReadContext:targetReads}).changes);
   else if(match){
    const mouse=(dataset.tables.mice||[]).find(m=>String(m.mouse_sid)===row.mouseSid);
    for(const [field,value] of Object.entries(sourceFieldValues(row)))if(blank(mouse[field])&&!blank(value)&&mouse.cage_sheet_overrides?.[field]!==true)changes.push({type:'mice',id:row.mouseSid,field,base:mouse[field]??null,value,sourceMatch:match,overrideSource:true,wholeCageFill:true});
@@ -252,7 +261,7 @@ export function cageSlotMoveEligibility(dataset,locationId){
 export function planCageSlotMove(dataset,sourceLocationId,destinationLocationId,{newCageIds={}}={}){
  return buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds);
 }
-function validateSlotMoveDrafts(dataset,drafts){
+function validateSlotMoveDrafts(dataset,drafts,readContext=null){
  const proofs=[...new Map(drafts.filter(c=>c.cageSlotMove).map(c=>[JSON.stringify(c.cageSlotMove),c.cageSlotMove])).values()];
  for(const proof of proofs){
   if(!proof||proof.schemaVersion!==1||!Array.isArray(proof.groups)||proof.groups.length!==2||!proof.newCageIds||typeof proof.newCageIds!=='object'||Array.isArray(proof.newCageIds))throw new Error('The whole-cage move guard is invalid.');
@@ -261,7 +270,7 @@ function validateSlotMoveDrafts(dataset,drafts){
    return c.field==='$create'?record&&Object.entries(c.value).every(([key,value])=>same(record[key],value)):record&&same(record[c.field],c.value);
   });
   if(complete)continue;
-  let fresh;try{fresh=buildSlotMove(dataset,proof.sourceLocationId,proof.destinationLocationId,proof.newCageIds);}catch{throw new Error('The cage occupants or source details changed. Reload before moving the whole cage.');}
+  let fresh;try{fresh=buildSlotMove(dataset,proof.sourceLocationId,proof.destinationLocationId,proof.newCageIds,readContext);}catch{throw new Error('The cage occupants or source details changed. Reload before moving the whole cage.');}
   if(!same(fresh.changes[0]?.cageSlotMove,proof))throw new Error('The cage occupants or source details changed. Reload before moving the whole cage.');
   const expected=fresh.changes.map(changeIdentity),actual=associated.map(changeIdentity);
   if(expected.length!==actual.length||expected.some(change=>!actual.some(candidate=>same(candidate,change))))throw new Error('The whole-cage move is incomplete. Reload and move the complete cage again.');
@@ -269,7 +278,7 @@ function validateSlotMoveDrafts(dataset,drafts){
  if(drafts.some(c=>(c.sourceCage||c.wholeCageFill||c.type==='cages'&&['cage_sheet_card','cage_sheet_source_location_id'].includes(c.field))&&!c.cageSlotMove))throw new Error('Source cage registration requires a complete whole-cage move.');
 }
 
-function projectedCages(dataset,changes){
+function projectedCages(dataset,changes,readContext=null){
  const drafts=Array.from(changes||[]),cageChanges=drafts.filter(c=>c?.type==='cages'&&['location_id','cage_tag'].includes(c.field));
  let projected=dataset;
  if(cageChanges.length){
@@ -288,7 +297,7 @@ function projectedCages(dataset,changes){
   const ctx=context(projected),position=positionWithManagerDraft(ctx.location(textId(value.location_id,'destination position'),{destination:true}),drafts);
   const source=change.sourceCage?positionWithManagerDraft(ctx.location(textId(change.sourceCage.locationId,'source position'),{destination:true}),drafts):null;
   const existing=(projected.tables.cages||[]).find(row=>String(row.cage_sid)===id),replayed=existing&&Object.entries(value).every(([field,entry])=>same(existing[field],entry));
-  const sourceGroup=source?slotGroup(dataset,source.location_id):null,guardedCard=change.cageSlotMove?.groups?.find(group=>group.locationId===source?.location_id)?.card;
+  const sourceGroup=source?slotGroup(dataset,source.location_id,{readContext}):null,guardedCard=change.cageSlotMove?.groups?.find(group=>group.locationId===source?.location_id)?.card;
   const expected=replayed?value:source?slotCreation({...sourceGroup,...(guardedCard?{card:guardedCard}:{})},position,id):createdCage(position,id),fields=Object.keys(expected);
   if(historical(position)||Object.keys(value).length!==fields.length||fields.some(field=>!Object.hasOwn(value,field)||!same(value[field],expected[field])))throw new Error('The destination changed. Reload before creating its cage.');
   const occupants=ctx.occupants(position.location_id);
@@ -300,15 +309,15 @@ function projectedCages(dataset,changes){
 }
 
 /** Validate staged mouse moves against fresh records; unrelated field edits remain mergeable. */
-export function validateMouseMoveDrafts(dataset,changes){
- const drafts=Array.from(changes||[]);validateSlotMoveDrafts(dataset,drafts);const projected=projectedCages(dataset,drafts);
+export function validateMouseMoveDrafts(dataset,changes,readContext=null){
+ const reads=movementReadContext(dataset,readContext),drafts=Array.from(changes||[]);validateSlotMoveDrafts(dataset,drafts,reads);const projected=projectedCages(dataset,drafts,reads),targetReads=movementReadContext(projected,reads);
  const seen=new Set();
  for(const change of drafts){
   if(change?.type!=='mice'||change.field!=='cage_sid')continue;
   const proof=change.mouseMove,id=textId(change.id,'mouse SID'),destination=textId(change.value,'destination cage SID');
   if(seen.has(id))throw new Error(`Mouse ${id} has multiple staged cage moves. Keep one destination before saving.`);seen.add(id);
   if(!proof||proof.schemaVersion!==1||proof.mouseSid!==id||proof.destinationCageSid!==destination||!Object.hasOwn(proof,'sourceCageSid')||!same(proof.sourceCageSid,change.base)||!proof.identity||typeof proof.identity!=='object'||Array.isArray(proof.identity)||Object.keys(proof.identity).length!==identityFields.length||identityFields.some(field=>!Object.hasOwn(proof.identity,field))||proof.effectiveDate!==null&&!validDate(proof.effectiveDate))throw new Error('The staged mouse move has no valid identity guard. Reload and choose the move again.');
-  const {mouse,sourceObservation}=mouseMoveContext(dataset,id,destination,{sourceMatch:change.sourceMatch,targetDataset:projected});
+  const {mouse,sourceObservation}=mouseMoveContext(dataset,id,destination,{sourceMatch:change.sourceMatch,targetDataset:projected,readContext:reads,targetReadContext:targetReads});
   const alreadyApplied=mouse.cage_sid===destination&&mouse.cage_sheet_overrides?.cage_sid===true;
   if(identityFields.some(field=>{
    if(same(mouse[field],proof.identity[field]))return false;
@@ -336,9 +345,9 @@ function movementDependencies(dataset,{mouse,source,target},sourceMatch){
 
 /** Fresh no-op dependencies must join the same atomic save as changed records. */
 export function getMouseMoveReadDependencies(dataset,changes){
- const drafts=Array.from(changes||[]);validateMouseMoveDrafts(dataset,drafts);const projected=projectedCages(dataset,drafts),deps=new Map();
+ const reads=movementReadContext(dataset),drafts=Array.from(changes||[]);validateMouseMoveDrafts(dataset,drafts,reads);const projected=projectedCages(dataset,drafts,reads),targetReads=movementReadContext(projected,reads),deps=new Map();
  for(const change of drafts.filter(c=>c.type==='mice'&&c.field==='cage_sid')){
-  const records=mouseMoveContext(dataset,change.id,change.value,{sourceMatch:change.sourceMatch,targetDataset:projected});
+  const records=mouseMoveContext(dataset,change.id,change.value,{sourceMatch:change.sourceMatch,targetDataset:projected,readContext:reads,targetReadContext:targetReads});
   for(const dep of movementDependencies(projected,records,change.sourceMatch))if((dataset.tables[dep.type]||[]).some(row=>String(row[{mice:'mouse_sid',cages:'cage_sid',locations:'location_id',racks:'rack_id',rooms:'room_id'}[dep.type]])===dep.id))deps.set(dep.type+':'+dep.id,dep);
  }
  // Whole-cage moves depend on both the old path and the destination path, too.
@@ -353,8 +362,7 @@ export function getMouseMoveReadDependencies(dataset,changes){
  // Whole-card proof checks include every group animal and both physical slots.
  // Current source positions are read guards because a duplicate sighting would
  // invalidate a source-only group even when its own slot is unchanged.
- for(const change of drafts.filter(c=>c.cageSlotMove)){
-  const proof=change.cageSlotMove;
+ for(const proof of new Map(drafts.filter(c=>c.cageSlotMove).map(c=>[JSON.stringify(c.cageSlotMove),c.cageSlotMove])).values()){
   for(const group of proof.groups){
    for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:group.locationId}))deps.set(dep.type+':'+dep.id,dep);
    if(group.card?.source_location_id)for(const dep of movementDependencies(dataset,{mouse:{},source:null,target:null},{locationId:group.card.source_location_id}))deps.set(dep.type+':'+dep.id,dep);

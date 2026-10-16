@@ -51,6 +51,7 @@ icons/icon.svg
 index.html
 lab-members.js
 lac-fee-model.js
+lac-fee-occupancy.js
 lac-fees.js
 litter-summary.js
 local-backup.js

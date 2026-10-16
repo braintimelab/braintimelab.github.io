@@ -1,12 +1,12 @@
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=87';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=88';
 import { sortRooms } from './room-order.js?v=24';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
 import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=76';
 import { lightClock } from './husbandry.js?v=83';
-import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=86';
+import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=88';
 import { cageBreedingLayout } from './mouse-registration.js?v=83';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=87';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=88';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};
@@ -20,14 +20,16 @@ const noteColor=value=>noteColors.includes(value)?value:'green';
 const currentOverrides=r=>r?.cage_sheet_overrides&&typeof r.cage_sheet_overrides==='object'&&!Array.isArray(r.cage_sheet_overrides)?r.cage_sheet_overrides:{};
 const projectionCages=data=>{const occupied=new Set((data.tables.mice||[]).filter(m=>active(m)&&m.state==='Stock').map(m=>String(m.cage_sid)));return (data.tables.cages||[]).filter(c=>active(c)&&(occupied.has(String(c.cage_sid))||/^(Active|Occupied)$/i.test(c.state||''))).sort((a,b)=>String(a.cage_tag||a.cage_sid).localeCompare(String(b.cage_tag||b.cage_sid),undefined,{numeric:true}));};
 let renderSequence=0;
-let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),message:'',error:false};
+let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),message:'',error:false};
 
-export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),message:'',error:false};}
+export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),message:'',error:false};}
 export function hasCageSheetDrafts(){return state.drafts.size>0;}
 
 /** Apply only explicit edits to fresh records. Unrelated remote edits survive. */
 export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Date().toISOString()}={}){
-  const changes=Array.from(drafts),conflicts=[],updates=new Map();
+  const changes=Array.from(drafts),conflicts=[],updates=new Map(),observationContext=createCageObservationContext(dataset);
+  const beforeIndexes=new Map(Object.entries(keys).map(([type,key])=>{const index=new Map();for(const row of dataset.tables[type]||[]){const id=String(row[key]);if(!index.has(id))index.set(id,row);}return [type,index];}));
+  const beforeRecord=(type,id)=>beforeIndexes.get(type)?.get(String(id));
   validateCageStartDrafts(dataset,changes,{at});
   if(changes.some(change=>change.field==='cage_start')&&(!canEdit('cages')||!canEdit('locations')))throw new Error('Housing edit permission is required to edit the cage start date.');
   if(changes.some(c=>c.type==='mice'&&c.field==='cage_sid')&&(!canEdit('mice')||!canEdit('cages')||!canEdit('locations')))throw new Error('Mouse and housing edit permission is required to move mice.');
@@ -49,7 +51,7 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
     const current=record(fresh,type,id);
     if(!active(current))throw new Error(`${type} ${id} is missing or archived. Reload the sheet.`);
     if(change.sourceMatch&&!(field==='cage_sid'&&equal(current[field],value))&&!((change.sourceFill===true||change.wholeCageFill===true)&&equal(current[field],value)&&currentOverrides(current)[field]===true)){
-      const match=change.sourceMatch,rows=cageSheetSourceRows(dataset,match.locationId);
+      const match=change.sourceMatch,rows=cageSheetSourceRows(dataset,match.locationId,observationContext);
       if(!rows.some(row=>row.mouseSid===String(id)&&(row.sourceTag||row.tag)===match.tag&&row.sourceCell===match.sourceCell))throw new Error('Animal match changed. Reload the sheet before editing this mouse.');
     }
     if(!equal(current[field],base)&&!equal(current[field],value)){conflicts.push(`${type} ${id}: ${field.replaceAll('_',' ')}`);continue;}
@@ -106,15 +108,16 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
   }
   // Saving a changed slot also fences concurrent occupancy edits at that slot.
   // Source observations remain intact; an already applied retry changes nothing.
+  const finalCages=new Map();for(const cage of tables.cages||[])if(!finalCages.has(String(cage.cage_sid)))finalCages.set(String(cage.cage_sid),cage);
   const affectedPositions=new Set(),rememberPosition=id=>{if(id)affectedPositions.add(String(id));};
   for(const cage of tables.cages||[]){
-    const before=record(dataset,'cages',cage.cage_sid);
+    const before=beforeRecord('cages',cage.cage_sid);
     if(!before||!equal(before.location_id,cage.location_id)){rememberPosition(before?.location_id);rememberPosition(cage.location_id);}
   }
   for(const mouse of tables.mice||[]){
-    const before=record(dataset,'mice',mouse.mouse_sid);
+    const before=beforeRecord('mice',mouse.mouse_sid);
     if(!before||equal(before.cage_sid,mouse.cage_sid))continue;
-    rememberPosition(record(dataset,'cages',before.cage_sid)?.location_id);rememberPosition(record({tables},'cages',mouse.cage_sid)?.location_id);
+    rememberPosition(beforeRecord('cages',before.cage_sid)?.location_id);rememberPosition(finalCages.get(String(mouse.cage_sid))?.location_id);
     for(const change of changes)if(change.type==='mice'&&String(change.id)===String(mouse.mouse_sid)&&change.field==='cage_sid')rememberPosition(change.sourceMatch?.locationId);
   }
   if(affectedPositions.size){
@@ -137,10 +140,63 @@ export function renderCageSheet(host,dataset,hooks={}){
   const importTitle=()=>state.drafts.size?'Save or discard changes before importing.':'Animal sheet → Mouse Data';
   const canMoveMice=()=>canEdit('mice')&&canEdit('cages')&&canEdit('locations');
   const compact=hooks.layout!=='detailed';
-  function preview(){const tables={...dataset.tables,cages:[...(dataset.tables.cages||[])]};for(const d of state.drafts.values())if(d.type==='cages'&&d.field==='$create'&&!tables.cages.some(c=>String(c.cage_sid)===String(d.id)))tables.cages.push({...d.value});for(const type of ['cages','mice','locations'])tables[type]=(tables[type]||[]).map(r=>{const edits=[...state.drafts.values()].filter(d=>d.type===type&&d.field!=='$create'&&String(d.id)===String(r[keys[type]]));if(!edits.length)return r;const next={...r};for(const d of edits)next[d.field]=d.value;if(type==='mice'){if(edits.some(d=>d.field==='cage_sid')){next.cage_tag=(tables.cages||[]).find(c=>String(c.cage_sid)===String(next.cage_sid))?.cage_tag||null;next.cage_sheet_overrides={...currentOverrides(next),cage_sid:true};}const fields=edits.filter(d=>['comment','ear_mark','date_of_birth'].includes(d.field));if(fields.length)next.cage_sheet_overrides={...currentOverrides(next),...Object.fromEntries(fields.map(d=>[d.field,true]))};}if(type==='cages'&&edits.some(d=>d.field==='location_id')){const p=(tables.locations||[]).find(p=>p.location_id===next.location_id);next.room_id=p?.room_id||null;next.rack_id=p?.rack_id||null;next.room=null;next.rack=null;next.location=p?.label||null;}return next;});const moved=new Set([...state.drafts.values()].filter(d=>d.type==='cages'&&d.field==='location_id'&&!equal(d.base,d.value)).map(d=>String(d.id)));tables.mice=(tables.mice||[]).map(m=>active(m)&&m.state==='Stock'&&moved.has(String(m.cage_sid))?{...m,cage_tag:(tables.cages||[]).find(c=>String(c.cage_sid)===String(m.cage_sid))?.cage_tag||null,cage_sheet_overrides:{...currentOverrides(m),cage_sid:true}}:m);return {...dataset,tables};}
+  let cachedPreview=null,cachedDataset=null,cachedDrafts=[];
+  function preview(){
+    const drafts=[...state.drafts.values()];
+    if(!drafts.length)return dataset;
+    if(cachedDataset===dataset&&drafts.length===cachedDrafts.length&&drafts.every((draft,i)=>draft===cachedDrafts[i]))return cachedPreview;
+    const tables={...dataset.tables},edits=new Map();
+    for(const d of drafts){const key=JSON.stringify([d.type,String(d.id)]),group=edits.get(key)||[];group.push(d);edits.set(key,group);}
+    for(const type of ['cages','locations','mice']){
+      const source=tables[type]||[],created=drafts.filter(d=>d.type===type&&d.field==='$create'&&!source.some(r=>String(r[keys[type]])===String(d.id)));
+      tables[type]=[...source,...created.map(d=>d.value)].map(r=>{
+        const changes=(edits.get(JSON.stringify([type,String(r[keys[type]])]))||[]).filter(d=>d.field!=='$create');if(!changes.length)return r;
+        const next={...r};for(const d of changes)next[d.field]=d.value;
+        if(type==='mice'){
+          if(changes.some(d=>d.field==='cage_sid')){next.cage_tag=(tables.cages||[]).find(c=>String(c.cage_sid)===String(next.cage_sid))?.cage_tag||null;next.cage_sheet_overrides={...currentOverrides(next),cage_sid:true};}
+          const fields=changes.filter(d=>['comment','ear_mark','date_of_birth'].includes(d.field));if(fields.length)next.cage_sheet_overrides={...currentOverrides(next),...Object.fromEntries(fields.map(d=>[d.field,true]))};
+        }
+        if(type==='cages'&&changes.some(d=>d.field==='location_id')){const p=(tables.locations||[]).find(p=>p.location_id===next.location_id);next.room_id=p?.room_id||null;next.rack_id=p?.rack_id||null;next.room=null;next.rack=null;next.location=p?.label||null;}
+        return next;
+      });
+    }
+    const moved=new Set(drafts.filter(d=>d.type==='cages'&&d.field==='location_id'&&!equal(d.base,d.value)).map(d=>String(d.id))),cages=new Map(tables.cages.map(c=>[String(c.cage_sid),c]));
+    if(moved.size)tables.mice=tables.mice.map(m=>active(m)&&m.state==='Stock'&&moved.has(String(m.cage_sid))?{...m,cage_tag:cages.get(String(m.cage_sid))?.cage_tag||null,cage_sheet_overrides:{...currentOverrides(m),cage_sid:true}}:m);
+    cachedDataset=dataset;cachedDrafts=drafts;cachedPreview={...dataset,tables};return cachedPreview;
+  }
   let viewDataset=preview(),inlineEditor=null,startEditorKey=null,drag=null,suppressMouseClickUntil=0;
   const dragPlans=new Map();
-  const registeredCage=id=>{const cage=record(viewDataset,'cages',id),resident=(viewDataset.tables.mice||[]).some(m=>active(m)&&m.state==='Stock'&&String(m.cage_sid)===String(id));return active(cage)&&!cage._derived&&!cage.history_read_only&&!cage.source_historical&&(resident||/^(Active|Occupied)$/i.test(cage.state||''))?cage:null;};
+  let observationContext,viewIndexes,stockCages,movementStockCages,occupantsByPosition,movementIntegrityError,positionOptions,readDataset=null;
+  const historical=r=>r?.history_read_only===true||r?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(r?.record_origin||'');
+  const viewRecord=(type,id)=>viewIndexes?.get(type)?.get(String(id));
+  function prepareReadContext(){
+    if(readDataset===viewDataset)return false;
+    observationContext=createCageObservationContext(viewDataset);viewIndexes=new Map();movementIntegrityError='';
+    for(const [type,key] of Object.entries({...keys,rooms:'room_id',racks:'rack_id'})){
+      const index=new Map();for(const row of viewDataset.tables[type]||[]){const id=String(row[key]);if(index.has(id)&&type!=='mice')movementIntegrityError=`Duplicate ${key} ${id}; review the database before moving cages.`;if(!index.has(id))index.set(id,row);}viewIndexes.set(type,index);
+    }
+    stockCages=observationContext.stockCages;
+    movementStockCages=new Set((viewDataset.tables.mice||[]).filter(m=>active(m)&&!historical(m)&&!m._derived&&m.state==='Stock'&&m.cage_sid!==null&&m.cage_sid!==undefined&&m.cage_sid!=='').map(m=>String(m.cage_sid)));
+    occupantsByPosition=new Map();for(const c of viewDataset.tables.cages||[]){if(!active(c)||/^(Ended|Inactive)$/i.test(c.state||'')&&!movementStockCages.has(String(c.cage_sid)))continue;const id=String(c.location_id||''),rows=occupantsByPosition.get(id)||[];rows.push(c);occupantsByPosition.set(id,rows);}
+    positionOptions=[['','Unassigned'],...(dataset.tables.locations||[]).filter(p=>active(p)&&p.source_current!==false).map(p=>[String(p.location_id),`${viewRecord('rooms',p.room_id)?.name||p.room_id||''} / ${viewRecord('racks',p.rack_id)?.name||p.rack_id||''} / ${p.label||p.location_id}`])];
+    readDataset=viewDataset;return true;
+  }
+  prepareReadContext();
+  const registeredCage=id=>{const cage=viewRecord('cages',id);return active(cage)&&!cage._derived&&!cage.history_read_only&&!cage.source_historical&&(stockCages.has(String(id))||/^(Active|Occupied)$/i.test(cage.state||''))?cage:null;};
+  // Presentation checks only housing. Identity/source proofs are revalidated by
+  // the movement planner on drag/drop and again against fresh data on Save.
+  function housingMoveReason(position,cage){
+    if(movementIntegrityError)return movementIntegrityError;
+    const id=String(position?.location_id||''),room=viewRecord('rooms',position?.room_id),rack=viewRecord('racks',position?.rack_id);
+    if(!active(position))return `Position ${id} is missing or archived.`;
+    if(!active(room)||!active(rack)||String(rack.room_id||'')!==String(room.room_id))return `Position ${id} needs an active room and a rack in that room.`;
+    if([position,room,rack].some(historical))return 'Historical positions cannot be moved.';
+    if(typeof position.label!=='string'||!position.label.trim())return `Position ${id} needs a label before it can name a cage.`;
+    const occupants=occupantsByPosition.get(id)||[];if(occupants.length>1)return `Position ${position.label} has multiple current cages.`;
+    const occupant=occupants[0];if(occupant&&(historical(occupant)||occupant._derived||! /^(Active|Occupied)$/i.test(occupant.state||'')&&!movementStockCages.has(String(occupant.cage_sid))))return 'Choose a current active cage.';
+    if(cage)for(const field of ['room_id','rack_id'])if(cage[field]!==null&&cage[field]!==undefined&&cage[field]!==''&&String(cage[field])!==String(position[field]))return `Cage ${cage.cage_sid} has inconsistent ${field.replace('_',' ')} and position references. Review them before moving it.`;
+    return '';
+  }
   const animalRows=new Map(),asOf=hooks.selectedDate||todayTaipei();
   function canMoveCage(id){return Boolean(registeredCage(id)&&!state.drafts.has(draftKey('cages',id,'$create')));}
   function verifySlotSource(source){
@@ -153,8 +209,8 @@ export function renderCageSheet(host,dataset,hooks={}){
     const newCageIds={};for(const id of [source,destination]){if(!state.newCageIds.has(id))state.newCageIds.set(id,'CAGE-'+crypto.randomUUID());newCageIds[id]=state.newCageIds.get(id);}
     return planCageSlotMove(viewDataset,source,destination,{newCageIds});
   }
-  const movableSlots=new Map(),cageRowsCache=new Map(),cageLayoutCache=new Map(),newMouseTargets=new Map(),startDateTargets=new Map();
-  const cageRows=item=>{const key=JSON.stringify([item.position?.location_id||item.locationId,item.cageId||item.cage?.cage_sid]);if(!cageRowsCache.has(key))cageRowsCache.set(key,cageSheetAnimals(viewDataset,item));return cageRowsCache.get(key);};
+  const movableSlots=new Map(),cageRowsCache=new Map(),cageLayoutCache=new Map(),cageStartCache=new Map(),detailTargets=new Map(),lazyGroups=new Map(),newMouseTargets=new Map(),startDateTargets=new Map();
+  const cageRows=item=>{const key=JSON.stringify([item.position?.location_id||item.locationId,item.cageId||item.cage?.cage_sid]);if(!cageRowsCache.has(key))cageRowsCache.set(key,cageSheetAnimals(viewDataset,item,observationContext));return cageRowsCache.get(key);};
   const itemKey=item=>JSON.stringify([item.position?.location_id||item.locationId||'',item.cageId||item.cage?.cage_sid||'']);
   function cageLayout(item){
     const key=itemKey(item);
@@ -194,15 +250,16 @@ export function renderCageSheet(host,dataset,hooks={}){
     const position=item.position;
     return Boolean(active(position)&&position.location_id&&position.source_current!==false&&!position.history_read_only&&!position.source_historical);
   }
+  const cageStart=item=>{const key=itemKey(item);if(!cageStartCache.has(key))cageStartCache.set(key,resolveCageStart(viewDataset,item,{asOf}));return cageStartCache.get(key);};
   function startDateControl(item){
-    const started=resolveCageStart(viewDataset,item,{asOf}),date=started.date,key=itemKey(item),elapsed=ageWeeks(date,asOf);
+    const started=cageStart(item),date=started.date,key=itemKey(item),elapsed=ageWeeks(date,asOf);
     startDateTargets.set(key,item);
     const label=date?`<time datetime="${esc(date)}">${esc(date)}</time>${elapsed!==null?` <span class="sheet-start-age">${elapsed}wk</span>`:''}`:'—/—/—',title=date?`Started ${date}${started.estimated?' (estimated)':''}`:'Start date unknown';
     return canEditStart(item)?`<button type="button" class="text-button sheet-start-date" data-sheet-edit-start="${esc(key)}" aria-label="Edit start date for ${esc(item.positionName)}" title="${esc(title)}">${label}</button>`:`<span class="sheet-start-date" title="${esc(title)}">${label}</span>`;
   }
   function startDateEditor(item){
     const key=itemKey(item);if(!canEditStart(item)||startEditorKey!==key)return '';
-    const date=resolveCageStart(viewDataset,item,{asOf}).date;
+    const date=cageStart(item).date;
     return `<div class="sheet-start-editor"><label>Started<input type="date" data-sheet-start-input="${esc(key)}" aria-label="Start date for ${esc(item.positionName)}" max="${esc(todayTaipei())}" value="${esc(date||'')}"></label><button type="button" class="text-button" data-sheet-clear-start="${esc(key)}">Clear</button><button type="button" class="text-button" data-sheet-close-start="${esc(key)}">Done</button></div>`;
   }
   function editStartDate(key,value){
@@ -223,7 +280,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     else if(!positionId&&!canMoveCage(item.cageId))reason='This cage needs a verified current assignment.';
     else if(!cage&&!rows.length)reason='This position is empty.';
     else if(cage&&!registeredCage(item.cageId))reason='Choose a current active cage.';
-    else if(positionId){try{cageSlotMoveEligibility(viewDataset,positionId);}catch(error){reason=error.message;}}
+    else if(positionId)reason=housingMoveReason(position,cage);
     const status={canMove:!reason,reason:reason||'Drag cage or choose Move.'};movableSlots.set(positionId||item.cageId,status);return status;
   }
   const cageChoices=projectionCages(dataset);
@@ -232,13 +289,30 @@ export function renderCageSheet(host,dataset,hooks={}){
   const rooms=sortRooms([...new Map(projection.groups.filter(g=>g.roomId).map(g=>[g.roomId,{room_id:g.roomId,name:g.roomName}])).values()]).map(r=>[r.room_id,r.name]);
   const racks=[...new Map(projection.groups.filter(g=>g.rackId&&(!state.room||g.roomId===state.room)).map(g=>[g.rackId,g.rackName]))];
   const input=(type,id,field,label,options={})=>{
-    const raw=field==='manager'&&Object.hasOwn(record(viewDataset,type,id)||{},'manager')?record(viewDataset,type,id).manager:val(type,id,field,options.fallback),value=options.managerSelect?cageManagerValue(managers,raw):raw,pending=state.drafts.has(draftKey(type,id,field));
+    const raw=field==='manager'&&Object.hasOwn(viewRecord(type,id)||{},'manager')?viewRecord(type,id).manager:val(type,id,field,options.fallback),value=options.managerSelect?cageManagerValue(managers,raw):raw,pending=state.drafts.has(draftKey(type,id,field));
     const attrs=`data-sheet-type="${type}" data-sheet-id="${esc(id)}" data-sheet-field="${field}" aria-label="${esc(label)}"${options.managerSelect?` title="${esc(raw||'Unassigned')}"`:''}${canEdit(type)&&(!options.managerSelect||!managersLoading&&!managersError)&&!(type==='cages'&&state.drafts.has(draftKey(type,id,'$create')))?'':' disabled'}${pending||options.managerSelect?` class="${options.managerSelect?'sheet-manager-select ':''}${pending?'sheet-pending':''}"`:''}`;
     if(options.choices)return `<select ${attrs}>${options.choices.map(([v,n,disabled])=>`<option value="${esc(v)}"${String(value)===String(v)?' selected':''}${disabled?' disabled':''}>${esc(n)}</option>`).join('')}</select>`;
     if(options.multiline)return `<textarea ${attrs} rows="2" placeholder="${esc(options.placeholder||'Notes')}">${esc(value)}</textarea>`;
     return `<input ${attrs} type="${options.type||'text'}" value="${esc(value)}" placeholder="${esc(options.placeholder||'—')}"${field==='ear_mark'?' maxlength="160"':''}>`;
   };
   const select=(id,label,items,value)=>`<label class="sr-only" for="${id}">${label}</label><select id="${id}"><option value="">${label}</option>${items.map(([v,n])=>`<option value="${esc(v)}"${v===value?' selected':''}>${esc(n)}</option>`).join('')}</select>`;
+  function cageDetails(item){
+    const cage=item.cage,id=item.cageId,positionId=item.position?.location_id,realCage=cage&&!cage._derived;
+    const choices=item.withdrawnPosition?[...positionOptions,[String(item.withdrawnPosition.location_id),`${item.withdrawnPosition.label||item.withdrawnPosition.location_id} (withdrawn)`,true]]:positionOptions;
+    return `<div class="sheet-cage-meta">${!hooks.readOnly&&!cage&&positionId?`<label class="sheet-wide">Link cage<select data-sheet-link="${esc(positionId)}" aria-label="Link cage to ${esc(item.positionName)}"${canEdit('cages')?'':' disabled'}><option value="">Choose a registered cage…</option>${cageChoices.map(c=>`<option value="${esc(c.cage_sid)}"${val('cages',c.cage_sid,'location_id')===positionId?' selected':''}>${esc(c.cage_tag||c.cage_sid)} · SID ${esc(c.cage_sid)}</option>`).join('')}</select></label>`:''}${realCage?`<label>Cage${input('cages',id,'cage_tag','Cage tag '+id)}</label><label class="sheet-wide">Position${input('cages',id,'location_id','Cage position '+id,{choices})}</label><label>Type${input('cages',id,'cage_type','Cage type '+id)}</label><label>IACUC${input('cages',id,'cage_protocol','Cage IACUC '+id)}</label>`:''}</div>`;
+  }
+  function wireLazyPanels(root=host){
+    for(const details of root.querySelectorAll?.('[data-sheet-cage-details]')||[])details.ontoggle=()=>{
+      const key=details.dataset.sheetCageDetails;if(details.open)state.expandedDetails.add(key);else state.expandedDetails.delete(key);
+      const body=details.querySelector?.('[data-sheet-cage-detail-body]'),item=detailTargets.get(key);
+      if(details.open&&body&&item&&body.dataset.loaded!=='true'){body.innerHTML=cageDetails(item);body.dataset.loaded='true';}
+    };
+    for(const details of root.querySelectorAll?.('[data-sheet-lazy-group]')||[])details.ontoggle=()=>{
+      const key=details.dataset.sheetLazyGroup;if(details.open)state.expandedGroups.add(key);else state.expandedGroups.delete(key);
+      const body=details.querySelector?.('[data-sheet-group-body]'),group=lazyGroups.get(key);
+      if(details.open&&body&&group&&body.dataset.loaded!=='true'){body.innerHTML=rackHTML(group);body.dataset.loaded='true';wireLazyPanels(body);}
+    };
+  }
   function card(item){
     const cage=item.cage,id=item.cageId,position=item.position,positionId=position?.location_id;
     const breeding=cageLayout(item);
@@ -248,17 +322,16 @@ export function renderCageSheet(host,dataset,hooks={}){
     const printTarget=realCage?`data-sheet-label="${esc(id)}"`:positionId?`data-sheet-position-label="${esc(positionId)}"`:'';
     const printName=realCage?`cage ${cage.cage_tag||id}`:`position ${item.positionName}`;
     const printButton=!hooks.readOnly&&printTarget?`<button type="button" class="sheet-print-label" ${printTarget} title="${esc('Print label for '+printName)}" aria-label="${esc('Print label for '+printName)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6zM17 12h1"/></svg><span>Print label</span></button>`:'';
-    const observations=cageCardObservation(viewDataset,item).observation;
+    const observations=cageCardObservation(viewDataset,item,observationContext).observation;
     const manager=realCage?(Object.hasOwn(cage,'manager')?cage.manager:item.manager?.name):position&&Object.hasOwn(position,'manager')?position.manager:observations.managerName||position?.source_manager_name||position?.source_manager_acronym||item.manager?.name;
     const managerType=realCage?'cages':'locations',managerId=realCage?id:positionId;
     const managerControl=hooks.readOnly||!managerId?`<span class="sheet-manager" title="Manager">${esc(cageManagerShortName(managers,manager))}</span>`:input(managerType,managerId,'manager','Manager for '+item.positionName,{fallback:manager||'',managerSelect:true,choices:buildCageManagerChoices(managers,manager)});
     const lux=observations.intensityLux;
     const schedule=item.applicableLights.map(e=>`${e.protocol||'?'} · ${lightClock(e).label}`).join(' / ');
     const summary=[managerControl,startDateControl(item),lux!==null&&lux!==undefined?`<span class="sheet-light-intensity" title="Light intensity">${esc(lux)} lux</span>`:''].filter(Boolean).join('');
-    const positionOptions=[['','Unassigned'],...(dataset.tables.locations||[]).filter(p=>active(p)&&p.source_current!==false).map(p=>[String(p.location_id),`${(dataset.tables.rooms||[]).find(r=>r.room_id===p.room_id)?.name||p.room_id||''} / ${(dataset.tables.racks||[]).find(r=>r.rack_id===p.rack_id)?.name||p.rack_id||''} / ${p.label||p.location_id}`])];
-    if(item.withdrawnPosition)positionOptions.push([String(item.withdrawnPosition.location_id),`${item.withdrawnPosition.label||item.withdrawnPosition.location_id} (withdrawn)`,true]);
+    const detailKey=itemKey(item),detailsOpen=state.expandedDetails.has(detailKey);detailTargets.set(detailKey,item);
     return `<div class="sheet-slot-frame${selected?' sheet-move-origin':''}" data-sheet-slot-frame="${esc(positionId||'')}" data-sheet-slot-label="${esc(item.positionName)}"><div class="sheet-slot-outline" aria-hidden="true"><span>${esc(item.positionName)}</span></div><article class="sheet-cage${breeding.isBreeding?' sheet-breeding':''}${compact?' sheet-compact':''}${realCage?'':' sheet-source'}${selected?' sheet-selected':''}" data-cage="${esc(id)}"${realCage&&registeredCage(id)?` data-sheet-mouse-destination="${esc(id)}"`:""} data-sheet-slot="${esc(positionId||'')}" tabindex="0" aria-label="${esc(item.positionName)}${cage?' cage '+esc(id):' position'}"><header${movableCage?` draggable="true"${dragAttrs} class="sheet-cage-drag-region"`:""} title="${esc(moveStatus.reason)}"><div class="sheet-cage-heading">${movableCage?`<button type="button" class="text-button sheet-cage-handle" draggable="true"${dragAttrs}${positionId?` data-sheet-move-slot="${esc(positionId)}"`:""}${realCage?` data-sheet-move="${esc(id)}"`:""} aria-label="Move cage ${esc(item.positionName)}" title="Drag cage or choose a destination">⠿</button>`:""}<strong>${esc(item.positionName)}</strong>${breeding.isBreeding?'<span class="sheet-breeding-label">Breeding</span>':''}${printButton}</div><div class="sheet-cage-summary">${summary}</div></header>
-      ${startDateEditor(item)}${compact?'<details class="sheet-edit-details"><summary>Cage details</summary>':''}<div class="sheet-cage-meta">${!hooks.readOnly&&!cage&&positionId?`<label class="sheet-wide">Link cage<select data-sheet-link="${esc(positionId)}" aria-label="Link cage to ${esc(item.positionName)}"${canEdit('cages')?'':' disabled'}><option value="">Choose a registered cage…</option>${cageChoices.map(c=>`<option value="${esc(c.cage_sid)}"${val('cages',c.cage_sid,'location_id')===positionId?' selected':''}>${esc(c.cage_tag||c.cage_sid)} · SID ${esc(c.cage_sid)}</option>`).join('')}</select></label>`:''}${realCage?`<label>Cage${input('cages',id,'cage_tag','Cage tag '+id)}</label><label class="sheet-wide">Position${input('cages',id,'location_id','Cage position '+id,{choices:positionOptions})}</label><label>Type${input('cages',id,'cage_type','Cage type '+id)}</label><label>IACUC${input('cages',id,'cage_protocol','Cage IACUC '+id)}</label>`:''}</div>${compact?'</details>':''}
+      ${startDateEditor(item)}${compact?`<details class="sheet-edit-details" data-sheet-cage-details="${esc(detailKey)}"${detailsOpen?' open':''}><summary>Cage details</summary><div data-sheet-cage-detail-body data-loaded="${detailsOpen?'true':'false'}">${detailsOpen?cageDetails(item):''}</div></details>`:cageDetails(item)}
       ${compact?compactAnimals(item):detailedAnimals(item)}
       <div class="sheet-light"><span>${esc(schedule||'Light schedule not recorded')}</span>${!hooks.readOnly?`<button type="button" class="text-button" data-sheet-locobox="${esc(id)}" data-sheet-position="${esc(positionId||'')}">◷ Entrainment / treatment</button>`:''}</div>
       ${compact?'<details class="sheet-edit-details"><summary>Notes</summary>':''}${realCage?input('cages',id,'comment','Cage notes '+id,{multiline:true}):positionId?input('locations',positionId,'notes','Position notes '+positionId,{multiline:true}):''}${compact?'</details>':''}
@@ -270,13 +343,13 @@ export function renderCageSheet(host,dataset,hooks={}){
     const layout=cageLayout(item),rows=layout.rows;
     return `<div class="sheet-compact-animals">${rows.map((row,index)=>{
       const key=JSON.stringify([item.locationId||item.cageId||'unassigned',row.key||row.mouseSid||row.tag,index]),mouseSid=row.mouseSid?String(row.mouseSid):null;
-      const mouse=mouseSid?record(viewDataset,'mice',mouseSid):null;
+      const mouse=mouseSid?viewRecord('mice',mouseSid):null;
       const sourceCageSid=mouse?.cage_sid??null;
       const sourcePosition=item.position,sourceMatch=row.matchStatus==='matched'?{locationId:row.locationId,tag:row.sourceTag||row.tag,sourceCell:row.sourceCell}:null;
       let draggable=false;
       if(mouse&&canMoveMice()&&active(mouse)&&mouse.state==='Stock'&&!mouse.history_read_only&&!mouse.source_historical&&['matched','registered'].includes(row.matchStatus)){
         if(sourceMatch&&sourcePosition&&active(sourcePosition)&&sourcePosition.source_current!==false&&!sourcePosition.history_read_only&&!sourcePosition.source_historical)draggable=true;
-        else if(item.cage&&!item.cage._derived&&String(item.cageId)===String(sourceCageSid)){try{planMouseMove(viewDataset,mouseSid,sourceCageSid,{sourceCageSid});draggable=true;}catch{}}
+        else if(item.cage&&!item.cage._derived&&String(item.cageId)===String(sourceCageSid)&&registeredCage(sourceCageSid)&&!historical(mouse)&&!mouse._derived){const p=item.position;draggable=p?!housingMoveReason(p,item.cage):!movementIntegrityError&&(!item.cage.room_id||active(viewRecord('rooms',item.cage.room_id))&&!historical(viewRecord('rooms',item.cage.room_id)))&&(!item.cage.rack_id||active(viewRecord('racks',item.cage.rack_id))&&!historical(viewRecord('racks',item.cage.rack_id))&&String(viewRecord('racks',item.cage.rack_id)?.room_id)===String(item.cage.room_id));}
       }
       animalRows.set(key,{...row,mouseSid,sourceCageSid,sourceMatch,draggable});
       const weeks=ageWeeks(row.dateOfBirth,asOf),editable=mouseSid&&canEdit('mice'),note=String(row.note||'').trim(),color=note?noteColor(mouse?.note_color):'none';
@@ -290,7 +363,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     const layout=cageLayout(item),rows=layout.rows;
     const separator='<tr class="sheet-parent-separator"><td colspan="6"><span class="sr-only">Parents and offspring</span></td></tr>';
     return `<div class="table-scroll"><table class="sheet-mice"><thead><tr><th>Animal</th><th>Sex</th><th>Born</th><th>Genotype</th><th>Ear</th><th>User</th></tr></thead><tbody>${rows.map((row,index)=>{
-      const m=row.mouseSid?record(viewDataset,'mice',row.mouseSid):null;
+      const m=row.mouseSid?viewRecord('mice',row.mouseSid):null;
       const parentEnd=layout.isBreeding&&layout.parentCount>0&&index===layout.parentCount?separator:'';
       if(!m)return `${parentEnd}<tr><td>${esc(row.tag||'—')}</td><td>${esc(row.sex||'—')}</td><td>${esc(row.dateOfBirth||'—')}</td><td>—</td><td>${esc(row.earMark||'—')}</td><td>—</td></tr>`;
       return `${parentEnd}<tr><td>${hooks.readOnly?`<span>SID ${esc(m.mouse_sid)}</span>`:`<button type="button" class="text-button" data-sheet-open-mouse="${esc(m.mouse_sid)}">${esc(m.mouse_sid)} ↗</button>`}${input('mice',m.mouse_sid,'physical_tag','Animal tag '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'sex','Sex '+m.mouse_sid,{choices:[['Unknown','?'],['Male','♂'],['Female','♀']]})}</td><td>${input('mice',m.mouse_sid,'date_of_birth','Birth date '+m.mouse_sid,{type:'date'})}</td><td>${input('mice',m.mouse_sid,'genotype','Genotype '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'ear_mark','Ear mark '+m.mouse_sid,{placeholder:'L0R1'})}</td><td>${input('mice',m.mouse_sid,'manager','Mouse manager '+m.mouse_sid,{fallback:mouseManager(m).name||''})}</td></tr>`;
@@ -315,7 +388,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     if(state.saving||(hooks.readOnly&&mode!=='note'))return;
     if(inlineEditor){if(inlineEditor.key===key&&inlineEditor.mode===mode){await finishInlineEditor();return;}const saved=await finishInlineEditor();if(saved||inlineEditor||state.saving)return;}
     const row=animalRows.get(key),node=editorNode(key);if(!row||!node)return;
-    const mouse=row.mouseSid?record(viewDataset,'mice',row.mouseSid):null,editable=row.mouseSid&&canEdit('mice')&&active(mouse)&&!mouse.history_read_only&&!mouse.source_historical&&['matched','registered'].includes(row.matchStatus);
+    const mouse=row.mouseSid?viewRecord('mice',row.mouseSid):null,editable=row.mouseSid&&canEdit('mice')&&active(mouse)&&!mouse.history_read_only&&!mouse.source_historical&&['matched','registered'].includes(row.matchStatus);
     if(!['note','ear','dob'].includes(mode)||(!editable&&mode!=='note'))return;
     inlineEditor={key,mode};
     const baseAttrs=`data-sheet-type="mice" data-sheet-id="${esc(row.mouseSid||'')}"`;
@@ -363,13 +436,16 @@ export function renderCageSheet(host,dataset,hooks={}){
     }catch(error){state.message=error.message;state.error=true;paint();}
   }
   function paint(){
-    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();cageRowsCache.clear();cageLayoutCache.clear();newMouseTargets.clear();startDateTargets.clear();viewDataset=preview();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});
+    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();newMouseTargets.clear();startDateTargets.clear();detailTargets.clear();lazyGroups.clear();viewDataset=preview();if(prepareReadContext()){cageRowsCache.clear();cageLayoutCache.clear();cageStartCache.clear();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});}
     const query=state.search.toLowerCase().trim();
     const groups=projection.groups.filter(g=>(!state.room||g.roomId===state.room)&&(!state.rack||g.rackId===state.rack)).map(g=>({...g,items:g.items.filter(item=>!query||JSON.stringify([g.roomName,g.rackName,item.positionName,item.cage,item.mice,item.position]).toLowerCase().includes(query))})).filter(g=>g.items.length);
-    host.innerHTML=`<style>${styles}</style><section class="cage-sheet${hooks.readOnly?' sheet-historical':''}" aria-label="Animal Sheet cage view"><div class="toolbar sheet-toolbar"><input id="cage-sheet-search" type="search" class="search" aria-label="Find cages or animals" placeholder="Find cage, animal, genotype, manager…" value="${esc(state.search)}"><div class="filters">${select('cage-sheet-room','All rooms',rooms,state.room)}${select('cage-sheet-rack','All racks',racks,state.rack)}</div>${!hooks.readOnly?`<div class="sheet-transfer-actions"><button id="cage-sheet-sync" type="button" class="button primary"${state.saving||importing||!state.drafts.size?' disabled':''} title="Cage edits → Mouse Data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg><span>${state.saving?'Saving…':`Save to Mouse Data${state.drafts.size?' · '+state.drafts.size:''}`}</span></button>${canImport()?`<button id="cage-sheet-import" type="button" class="button secondary"${state.saving||importing||state.drafts.size?' disabled':''} title="${esc(importTitle())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>${importing?'Opening…':'Import from Animal sheet'}</span></button>`:''}</div><button type="button" class="button secondary" id="cage-sheet-discard"${!state.drafts.size||state.saving||importing?' disabled':''}>Discard</button>`:''}${managersError?'<button type="button" class="text-button" id="cage-sheet-managers-retry">Reload manager list</button>':''}<button type="button" class="text-button" id="cage-sheet-help">Help</button></div>${state.selectedCage||state.selectedSlot?`<div class="sheet-move-notice">Moving cage ${esc(state.selectedSlot?record(viewDataset,'locations',state.selectedSlot)?.label||state.selectedSlot:state.selectedCage)} · choose a destination in any room. <button type="button" class="text-button" id="cage-sheet-cancel-move">Cancel move</button></div>`:''}<p id="cage-sheet-status" class="${state.error?'alert error':'small muted'}" role="status">${esc(state.message|| (state.drafts.size?`${state.drafts.size} pending edits · not yet saved`:statusLabel))}</p>${groups.map(g=>{
-      const content=rackHTML(g),title=`${g.roomName} / ${g.rackName}`;
-      return g.roomId||g.rackId?`<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span>${g.items.length} cages / positions</span></div>${content}</section>`:`<details class="panel"${query?' open':''}><summary class="panel-head">${esc(title)} · ${g.items.length}</summary>${content}</details>`;
+    host.innerHTML=`<style>${styles}</style><section class="cage-sheet${hooks.readOnly?' sheet-historical':''}" aria-label="Animal Sheet cage view"><div class="toolbar sheet-toolbar"><input id="cage-sheet-search" type="search" class="search" aria-label="Find cages or animals" placeholder="Find cage, animal, genotype, manager…" value="${esc(state.search)}"><div class="filters">${select('cage-sheet-room','All rooms',rooms,state.room)}${select('cage-sheet-rack','All racks',racks,state.rack)}</div>${!hooks.readOnly?`<div class="sheet-transfer-actions"><button id="cage-sheet-sync" type="button" class="button primary"${state.saving||importing||!state.drafts.size?' disabled':''} title="Cage edits → Mouse Data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg><span>${state.saving?'Saving…':`Save to Mouse Data${state.drafts.size?' · '+state.drafts.size:''}`}</span></button>${canImport()?`<button id="cage-sheet-import" type="button" class="button secondary"${state.saving||importing||state.drafts.size?' disabled':''} title="${esc(importTitle())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>${importing?'Opening…':'Import from Animal sheet'}</span></button>`:''}</div><button type="button" class="button secondary" id="cage-sheet-discard"${!state.drafts.size||state.saving||importing?' disabled':''}>Discard</button>`:''}${managersError?'<button type="button" class="text-button" id="cage-sheet-managers-retry">Reload manager list</button>':''}<button type="button" class="text-button" id="cage-sheet-help">Help</button></div>${state.selectedCage||state.selectedSlot?`<div class="sheet-move-notice">Moving cage ${esc(state.selectedSlot?viewRecord('locations',state.selectedSlot)?.label||state.selectedSlot:state.selectedCage)} · choose a destination in any room. <button type="button" class="text-button" id="cage-sheet-cancel-move">Cancel move</button></div>`:''}<p id="cage-sheet-status" class="${state.error?'alert error':'small muted'}" role="status">${esc(state.message|| (state.drafts.size?`${state.drafts.size} pending edits · not yet saved`:statusLabel))}</p>${groups.map(g=>{
+      const title=`${g.roomName} / ${g.rackName}`;
+      if(g.roomId||g.rackId)return `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span>${g.items.length} cages / positions</span></div>${rackHTML(g)}</section>`;
+      const key=JSON.stringify([g.roomId,g.rackId,g.roomName,g.rackName]),open=Boolean(query)||state.expandedGroups.has(key),lazy=g.items.length>12;lazyGroups.set(key,g);
+      return `<details class="panel"${lazy?` data-sheet-lazy-group="${esc(key)}"`:''}${open?' open':''}><summary class="panel-head">${esc(title)} · ${g.items.length}</summary>${lazy?`<div data-sheet-group-body data-loaded="${open?'true':'false'}">${open?rackHTML(g):''}</div>`:rackHTML(g)}</details>`;
     }).join('')||'<div class="empty">No cages match.</div>'}</section>`;
+    wireLazyPanels();
     if(host.querySelector('#cage-sheet-managers-retry'))host.querySelector('#cage-sheet-managers-retry').onclick=loadManagers;
     if(host.querySelector('#cage-sheet-sync'))host.querySelector('#cage-sheet-sync').onclick=sync;
     if(host.querySelector('#cage-sheet-import'))host.querySelector('#cage-sheet-import').onclick=importFromSheet;
@@ -482,7 +558,7 @@ export function renderCageSheet(host,dataset,hooks={}){
       if(t.hasAttribute('data-sheet-label'))hooks.printLabel?.(t.dataset.sheetLabel);else hooks.printPositionLabel?.(t.dataset.sheetPositionLabel);
     }else if(t.hasAttribute('data-sheet-open-cage'))hooks.openCage?.(t.dataset.sheetOpenCage);else if(t.hasAttribute('data-sheet-open-mouse')){
       if(state.saving||importing)return;
-      const mouse=record(viewDataset,'mice',t.dataset.sheetOpenMouse),row=t.dataset.sheetAnimal?animalRows.get(t.dataset.sheetAnimal):null;
+      const mouse=viewRecord('mice',t.dataset.sheetOpenMouse),row=t.dataset.sheetAnimal?animalRows.get(t.dataset.sheetAnimal):null;
       if(!active(mouse)||mouse.history_read_only||mouse.source_historical||(t.dataset.sheetAnimal&&(!row||row.mouseSid!==String(mouse.mouse_sid)||!['matched','registered'].includes(row.matchStatus))))return;
       if(state.drafts.size){state.message='Save or discard pending edits before opening the mouse.';state.error=false;updateDraftControls();return;}
       hooks.openMouse?.(String(mouse.mouse_sid));
