@@ -1,5 +1,5 @@
 /* Pure physical cage movements. SIDs and source observations never change. */
-import {cageSheetAnimals, cageObservations} from './cage-observations.js?v=81';
+import {cageSheetAnimals, cageObservations} from './cage-observations.js?v=83';
 const present=v=>v!==null&&v!==undefined&&v!=='';
 const active=r=>r&&!r.app_archived_at&&!r.archived;
 const textId=(v,label)=>{if(typeof v!=='string'||!v||v.trim()!==v)throw new Error(`Choose a valid ${label}.`);return v;};

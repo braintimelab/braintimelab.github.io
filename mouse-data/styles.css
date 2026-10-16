@@ -241,3 +241,5 @@
 .sheet-cage .sheet-add-mouse{min-height:24px;padding:2px 4px;font-size:10px;line-height:1.35}
 .sheet-cage .sheet-empty-mouse-row>td{padding:0}
 @media(pointer:coarse){.sheet-cage .sheet-empty-mouse{height:37px;min-height:37px}.sheet-cage .sheet-add-mouse{min-height:32px}}
+
+.mouse-review th,.mouse-review td{vertical-align:top}.mouse-review td:first-child{min-width:155px}.mouse-review td .actions{flex-wrap:wrap}.mouse-review-detail .panel-body{padding:16px 20px;max-width:100%}.mouse-review-detail .form-grid{margin:16px 0;max-width:720px}.mouse-review-detail .source-disclosure{margin-top:14px}.mouse-review-detail ul{max-height:260px;overflow:auto;padding-left:20px}.mouse-review-detail li{margin:5px 0;overflow-wrap:anywhere}.mouse-review-context{padding:12px 14px;background:var(--blue-bg);border:1px solid var(--blue-line);border-radius:7px}.mouse-review-context p{margin:5px 0 9px}.mouse-review .toolbar .filters select{max-width:100%}@media(max-width:620px){.mouse-review-detail .panel-body{padding:12px}.mouse-review .button{padding:7px 9px}}

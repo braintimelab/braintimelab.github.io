@@ -83,6 +83,15 @@ function linkedMice(mice,position,animal,observations){
  return mice.filter(mouse=>!historical(mouse)&&Array.isArray(mouse.cage_sheet_source_links)&&mouse.cage_sheet_source_links.some(link=>
   object(link)&&link.schema_version===1&&link.mouse_sid===text(mouse.mouse_sid)&&link.location_id===text(position.location_id)&&link.source_cell===animal.sourceCell&&link.source_fingerprint===fingerprint));
 }
+function reviewedMice(mice,position,animal){
+ if(!currentPosition(position)||!animal.sourceCell)return [];
+ return mice.filter(mouse=>Array.isArray(mouse.animal_sheet_review_links)&&mouse.animal_sheet_review_links.some(link=>{
+  const reviewed=link?.reviewed_mouse;
+  return object(link)&&link.schema_version===1&&object(reviewed)&&
+   text(reviewed.physical_tag)===text(mouse.physical_tag)&&date(reviewed.date_of_birth)===date(mouse.date_of_birth)&&sex(reviewed.sex)===sex(mouse.sex)&&
+   Array.isArray(link.source_refs)&&link.source_refs.some(ref=>object(ref)&&ref.kind==='current_position'&&ref.record_id===text(position.location_id)&&ref.source_cell===animal.sourceCell&&ref.tag===animal.tag&&(ref.date_of_birth||null)===(animal.dateOfBirth||null)&&(ref.sex||null)===(animal.sex||null));
+ }));
+}
 /** Retain deliberate Mouse-editor values and already verified cage links.
  * This is a pure record transformation; source positions and assignments never
  * change. A rename binds only one unique current observation. Any changed source
@@ -138,21 +147,22 @@ export function cageSheetAnimals(dataset,item={}){
  const sourceByTag=new Map();for(const animal of observations.animals){const key=identifierKey(animal.tag),same=sourceByTag.get(key)||[];same.push(animal);sourceByTag.set(key,same);}
  const rows=observations.animals.map(animal=>{
   const key=identifierKey(animal.tag),entries=animal.sourceCell?index.get(key)||[]:[];
+  const reviewed=dataset?.history_projection?.read_only===true?[]:reviewedMice(mice,position,animal);
   const retained=dataset?.history_projection?.read_only===true?[]:linkedMice(mice,position,animal,observations);
   const possible=[...new Set([...entries.map(entry=>entry.mouse),...retained])];
   // Reused tag aliases identify a DOB cohort, not the animal whose SID happens
   // to resemble the suffix. An override or old link cannot select another cohort.
   const cohortSensitive=entries.some(entry=>entry.alias)||possible.length>1;
-  const missingCohortDate=!animal.dateOfBirth&&possible.length>1;
+  const missingCohortDate=!reviewed.length&&!animal.dateOfBirth&&possible.length>1;
   const literal=entries.filter(entry=>cohortSensitive?animal.dateOfBirth&&animal.dateOfBirth===date(entry.mouse.date_of_birth):!entry.requiresDob||(animal.dateOfBirth&&(animal.dateOfBirth===date(entry.mouse.date_of_birth)||override(entry.mouse,'date_of_birth')))).map(entry=>entry.mouse);
   const keptLinks=cohortSensitive?retained.filter(mouse=>animal.dateOfBirth&&animal.dateOfBirth===date(mouse.date_of_birth)):retained;
-  const candidates=[...new Set([...literal,...keptLinks])];
+  const candidates=reviewed.length?reviewed:[...new Set([...literal,...keptLinks])];
   const sameSource=sourceByTag.get(key)||[],sourceCount=!animal.dateOfBirth||sameSource.some(other=>!other.dateOfBirth)?sameSource.length:sameSource.filter(other=>other.dateOfBirth===animal.dateOfBirth).length;
   const unique=candidates.length===1&&sourceCount===1&&!missingCohortDate?candidates[0]:null;
-  const conflicting=unique&&(unique.state==='Ended'||animal.requiresReview||(animal.sex&&sex(unique.sex)&&animal.sex!==sex(unique.sex))||(animal.dateOfBirth&&date(unique.date_of_birth)&&animal.dateOfBirth!==date(unique.date_of_birth)&&!override(unique,'date_of_birth')));
+  const conflicting=unique&&(unique.state==='Ended'||!reviewed.length&&(animal.requiresReview||(animal.sex&&sex(unique.sex)&&animal.sex!==sex(unique.sex))||(animal.dateOfBirth&&date(unique.date_of_birth)&&animal.dateOfBirth!==date(unique.date_of_birth)&&!override(unique,'date_of_birth'))));
   const status=missingCohortDate||candidates.length>1||sourceCount>1?'ambiguous':conflicting?'conflict':unique?'matched':'unlinked',mouse=status==='matched'?unique:null;
-  const take=(key,source,stored)=>mouse&&override(mouse,key)?stored:source??stored;
-  return {...animal,tag:mouse&&(override(mouse,'physical_tag')||entries.some(entry=>entry.mouse===mouse&&entry.alias))?managedRow(mouse,locationId).tag:animal.tag,sourceTag:animal.tag,mouseSid:mouse?text(mouse.mouse_sid):null,dateOfBirth:take('date_of_birth',animal.dateOfBirth,mouse?date(mouse.date_of_birth):null),earMark:take('ear_mark',animal.earMark,mouse?text(mouse.ear_mark)||null:null),note:mouse&&override(mouse,'comment')?text(mouse.comment):animal.note||text(mouse?.comment),sourceNote:animal.note,sex:animal.sex||sex(mouse?.sex),locationId,matchStatus:status};
+  const take=(key,source,stored)=>mouse&&(reviewed.length||override(mouse,key))?stored:source??stored;
+  return {...animal,tag:mouse&&(reviewed.length||override(mouse,'physical_tag')||entries.some(entry=>entry.mouse===mouse&&entry.alias))?managedRow(mouse,locationId).tag:animal.tag,sourceTag:animal.tag,mouseSid:mouse?text(mouse.mouse_sid):null,dateOfBirth:take('date_of_birth',animal.dateOfBirth,mouse?date(mouse.date_of_birth):null),earMark:take('ear_mark',animal.earMark,mouse?text(mouse.ear_mark)||null:null),note:mouse&&(reviewed.length||override(mouse,'comment'))?text(mouse.comment):animal.note||text(mouse?.comment),sourceNote:animal.note,sex:reviewed.length&&mouse?sex(mouse.sex):animal.sex||sex(mouse?.sex),locationId,matchStatus:status};
  }).filter(row=>{
   if(row.matchStatus!=='matched')return true;
   const mouse=mice.find(m=>text(m.mouse_sid)===row.mouseSid);

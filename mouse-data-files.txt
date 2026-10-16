@@ -60,6 +60,8 @@ locobox.js
 manifest.webmanifest
 model.js
 mouse-registration.js
+mouse-review-view.js
+mouse-review.js
 mouse-summary.js
 overview-summary.js
 permissions.js

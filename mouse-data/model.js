@@ -293,7 +293,7 @@ export function validateRecord(type,draft,dataset,originalId=null) {
     const changed=old&&(Object.hasOwn(old,'manager')!==Object.hasOwn(draft,'manager')||key(old.manager)!==key(draft.manager));
     if(resolved.status!=='assigned') {
       const detail=resolved.status==='conflict'?'Resident mice have different managers.':resolved.incomplete?'Some resident mice have no recorded manager.':'No manager is recorded.';
-      if(type==='mice'&&(!old||changed))errors.push(`${detail} Assign a manager before saving this mouse.`);
+      if(type==='mice'&&((!old&&(draft.state!=='Unknown'||populated(draft.cage_sid)))||changed))errors.push(`${detail} Assign a manager before saving this mouse.`);
       else warnings.push(`${detail} The existing record can be saved without inventing an assignment.`);
     }
   }
