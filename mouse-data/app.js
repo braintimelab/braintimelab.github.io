@@ -3,7 +3,7 @@ import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-
 import { renderMouseReview } from './mouse-review-view.js?v=83';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=41';
-import * as store from './data-store.js?v=84';
+import * as store from './data-store.js?v=85';
 import * as model from './model.js?v=83';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=39';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=36';
@@ -59,7 +59,7 @@ const localDate = () => {const d=new Date();return [d.getFullYear(),String(d.get
 const editableTypes = ['mice','matings','litters','cages'];
 let dataset = null, cloud = {}, route = 'overview', detail = null, query = '', filters = {}, page = 0, sortKey = '', sortDesc = false;
 let editor = null, busy = false, cloudReady = true, archiveTable = 'issues', familyFocus = '', selectedMice = new Set(), deferredInstall = null;
-let startupLoading=false,startupMessage='Checking access…',manualPullPending=false,cloudLoadError='';
+let startupLoading=false,startupMessage='Checking access…',startupProgressValue=null,manualPullPending=false,cloudLoadError='';
 const pageSize = 50;
 let treeZoom = 1;
 let authPendingEmail = '';
@@ -184,17 +184,24 @@ function render() {
  if(route==='review'){renderMouseReview($('main'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),isCurrent:()=>generation===pageRenderGeneration&&route==='review'&&!detail,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
+function startupProgressBar(){
+ const value=startupProgressValue,loaded=value?.archiveBlocksLoaded,total=value?.archiveBlocksTotal;
+ const known=value?.phase==='archive'&&Number.isSafeInteger(loaded)&&loaded>=0&&Number.isSafeInteger(total)&&total>0&&loaded<=total;
+ const percent=known?Math.floor(loaded/total*100):null;
+ return `<div class="workspace-progress" aria-busy="true"><progress max="100"${percent===null?'':` value="${percent}" aria-valuetext="${percent}%"`} aria-label="${esc(value?.phase==='archive'?'Loading archived history':'Loading Braintime Mouse Data')}" aria-describedby="workspace-loading-status">${percent===null?'Loading…':`${percent}%`}</progress>${percent===null?'':`<span class="small muted">${percent}%</span>`}</div>`;
+}
 function renderStartupLoading(){
  $('navigation').innerHTML='';$('page-title').textContent='Opening workspace';$('add-button').hidden=true;$('export-button').disabled=true;
- $('main').innerHTML=`<section class="panel" aria-busy="true" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p role="status" aria-live="polite">${esc(startupMessage)}</p><p class="subtle">Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG)}</div></section>`;
+ $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p>${startupProgressBar()}<p class="subtle">Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG)}</div></section>`;
  renderConnection();
 }
 function startupProgress(value){
  if(!startupLoading)return;
- const counts=Number.isSafeInteger(value?.recordsLoaded)&&value.recordsLoaded>=0&&Number.isSafeInteger(value?.archiveBlocksLoaded)&&value.archiveBlocksLoaded>=0?`${count(value.recordsLoaded)} records · ${count(value.archiveBlocksLoaded)} archive blocks`:'';
+ const total=Number.isSafeInteger(value?.archiveBlocksTotal)&&value.archiveBlocksTotal>=value?.archiveBlocksLoaded?value.archiveBlocksTotal:null;
+ const counts=Number.isSafeInteger(value?.recordsLoaded)&&value.recordsLoaded>=0&&Number.isSafeInteger(value?.archiveBlocksLoaded)&&value.archiveBlocksLoaded>=0?`${count(value.recordsLoaded)} records · ${count(value.archiveBlocksLoaded)}${total===null?'':` / ${count(total)}`} archive blocks`:'';
  const phase=({access:'Checking access',records:'Loading shared records',archive:'Loading archived history',verifying:'Verifying the complete snapshot',saving:'Saving the verified snapshot on this device'})[value?.phase];
  if(!phase)return;
- startupMessage=phase+'…'+(counts?' '+counts:'');renderStartupLoading();
+ startupProgressValue=value;startupMessage=phase+'…'+(counts?' '+counts:'');renderStartupLoading();
 }
 async function loadSharedColony(){
  if(manualPullPending||startupLoading)return;
@@ -202,7 +209,7 @@ async function loadSharedColony(){
  const accessContext=()=>{const status=store.getCloudStatus();return JSON.stringify([status.url,status.colonyId,status.email,Boolean(status.signedIn),Boolean(status.passwordRecovery)]);};
  try{
   if(dataset&&!await confirmAction('Load shared colony?','<p class="subtle">The shared database will replace this browser’s working snapshot. Back up local changes before continuing.</p>','Load shared colony'))return;
-  openingContext=accessContext();loading=true;cloudLoadError='';cloudReady=false;startupLoading=true;startupMessage='Checking access…';renderStartupLoading();
+  openingContext=accessContext();loading=true;cloudLoadError='';cloudReady=false;startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
   const fresh=await store.pullFromCloud({onProgress:startupProgress});await refreshCloud();
   if(accessContext()!==openingContext||store.getCloudStatus().readyForEdits===false||!fresh)throw new Error('Access changed during reconnect. Sign in and load the shared colony again.');
   dataset=model.normalizeDataset(fresh);cloudReady=true;
@@ -664,7 +671,7 @@ window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()){event.pr
 window.addEventListener('offline',()=>{if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
 window.addEventListener('online',()=>{if(cloud.mode==='cloud')showToast('Connection restored. Load the shared colony before editing.')});
 async function start(){
- cloudLoadError='';startupLoading=true;startupMessage='Checking access…';renderStartupLoading();
+ cloudLoadError='';startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
  try{
   await refreshCloud();if(!cloud.configured&&PUBLIC_CONFIG.url&&PUBLIC_CONFIG.anonKey&&PUBLIC_CONFIG.colonyId){await store.configureCloud(PUBLIC_CONFIG);await refreshCloud()}
   let callback=null,authError=null;try{callback=await store.consumeAuthCallback?.();if(callback){passwordSetupRequired=callback.needsPasswordSetup===true;await refreshCloud()}}catch(error){authError=error}

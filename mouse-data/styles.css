@@ -243,3 +243,15 @@
 @media(pointer:coarse){.sheet-cage .sheet-empty-mouse{height:37px;min-height:37px}.sheet-cage .sheet-add-mouse{min-height:32px}}
 
 .mouse-review th,.mouse-review td{vertical-align:top}.mouse-review td:first-child{min-width:155px}.mouse-review td .actions{flex-wrap:wrap}.mouse-review-detail .panel-body{padding:16px 20px;max-width:100%}.mouse-review-detail .form-grid{margin:16px 0;max-width:720px}.mouse-review-detail .source-disclosure{margin-top:14px}.mouse-review-detail ul{max-height:260px;overflow:auto;padding-left:20px}.mouse-review-detail li{margin:5px 0;overflow-wrap:anywhere}.mouse-review-context{padding:12px 14px;background:var(--blue-bg);border:1px solid var(--blue-line);border-radius:7px}.mouse-review-context p{margin:5px 0 9px}.mouse-review .toolbar .filters select{max-width:100%}@media(max-width:620px){.mouse-review-detail .panel-body{padding:12px}.mouse-review .button{padding:7px 9px}}
+
+/* Native progress semantics also announce the measured archive stage. */
+.workspace-progress{display:flex;align-items:center;gap:12px;margin:18px 0}
+.workspace-progress progress{display:block;flex:1;width:100%;min-width:0;height:12px;appearance:none;-webkit-appearance:none;border:0;border-radius:8px;overflow:hidden;background:var(--surface-soft);accent-color:var(--accent)}
+.workspace-progress progress::-webkit-progress-bar{background:var(--surface-soft);border-radius:8px}
+.workspace-progress progress::-webkit-progress-value{background:var(--accent);border-radius:8px}
+.workspace-progress progress::-moz-progress-bar{background:var(--accent);border-radius:8px}
+.workspace-progress progress:indeterminate{background:linear-gradient(90deg,var(--surface-soft) 25%,var(--accent) 50%,var(--surface-soft) 75%);background-size:200% 100%;animation:workspace-loading 1.6s linear infinite}
+.workspace-progress progress:indeterminate::-webkit-progress-bar{background:transparent}
+.workspace-progress span{min-width:3em;text-align:right;font-variant-numeric:tabular-nums}
+@keyframes workspace-loading{to{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.workspace-progress progress:indeterminate{animation:none}}

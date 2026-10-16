@@ -587,7 +587,10 @@ async function selectedArchive(c,check,onLoaded,reuse=null){
       for(const id of descriptor.chunk_ids){if(typeof id!=='string'||!/^chunk:[a-f0-9]{64}$/.test(id))throw new Error(`Invalid archive chunk reference for ${table}.`);ids.add(id);}
     }
   }
-  onLoaded(1);
+  // The manifest gives the exact number of distinct required blocks, including
+  // itself. Orphaned archive chunks are not part of this transfer.
+  const total=ids.size+1;
+  onLoaded(1,{total,reused:Number(headReused)});
   const indexed=new Map();let cursor=null,limit=1000;
   while(true){
     const loaded=await readCloudPage(size=>request(`entity_records?${query('colony_id,entity_type,entity_id,version,archived',size,cursor===null?null:`gt.${cursor}`)}`),limit,check);const page=loaded.page;limit=loaded.limit;
@@ -598,7 +601,7 @@ async function selectedArchive(c,check,onLoaded,reuse=null){
   if(indexed.get('reconstruction')?.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   for(const id of ids)if(!indexed.has(id)||indexed.get(id).archived)throw new Error(`Missing or invalid archive chunk ${id}; pull was not saved.`);
   const ordered=[...ids].sort(),chunks=new Map(),needed=[];
-  for(const id of ordered){const cached=reusableRecord(reuse,indexed.get(id),c);if(cached){chunks.set(id,cached);onLoaded(1);}else needed.push(id);}
+  for(const id of ordered){const cached=reusableRecord(reuse,indexed.get(id),c);if(cached){chunks.set(id,cached);onLoaded(1,{total,reused:1});}else needed.push(id);}
   const batches=[];for(let i=0;i<needed.length;i+=3)batches.push(needed.slice(i,i+3));
   let nextBatch=0,failure=null;
   const active=()=>{check();if(failure)throw failure;};
@@ -609,7 +612,7 @@ async function selectedArchive(c,check,onLoaded,reuse=null){
         const wanted=batch.slice(offset,offset+size),page=loaded.page,seen=new Set();
         if(!Array.isArray(page)||page.length!==wanted.length)throw new Error('A referenced archive chunk is missing; pull was not saved.');
         for(const row of page){valid(row,true);if(!wanted.includes(row.entity_id)||seen.has(row.entity_id)||row.archived||row.version!==indexed.get(row.entity_id)?.version)throw new Error('A referenced archive chunk is invalid or changed; pull was not saved.');seen.add(row.entity_id);chunks.set(row.entity_id,row);}
-        active();onLoaded(page.length);offset+=size;
+        active();onLoaded(page.length,{total,reused:0});offset+=size;
       }
     }}catch(error){failure??=error;throw error;}
   }
@@ -626,8 +629,10 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   const check=()=>{checkScope?.();if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
   let reusable=referencedArchive&&reuse?.identity===syncIdentity()&&stable(reuse.policy)===stable(policy)?reuse:null;
   if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check);check();
-  let recordsLoaded=0,archiveBlocksLoaded=0,recordsReused=0,archiveBlocksReused=0;
-  const progress=phase=>{check();onProgress?.({phase,recordsLoaded,archiveBlocksLoaded});};
+  // Loaded includes verified cache reuse. Unknown totals remain null rather
+  // than estimating a percentage from earlier snapshots or transfer sizes.
+  let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
+  const progress=phase=>{check();onProgress?.({phase,recordsLoaded,recordsTotal,recordsReused,archiveBlocksLoaded,archiveBlocksTotal,archiveBlocksReused});};
   try{
   // Keep healthy reads efficient; only a confirmed timeout reduces a page.
   // Archive chunks are larger, so their initial page remains much smaller.
@@ -654,28 +659,34 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
         if(seen.has(row.entity_id))throw new Error('Cloud page cursor did not advance. Pull again.');
         seen.add(row.entity_id);
       }
-      if(type==='archive')archiveBlocksLoaded+=page.length;else recordsLoaded+=page.length;
+      const accepted=policy.source_archive_allowed?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r));
+      if(type==='archive')archiveBlocksLoaded+=accepted.length;else recordsLoaded+=accepted.length;
       progress(type==='archive'?'archive':'records');
-      result.push(...(policy.source_archive_allowed?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r))));if(page.length<limit)break;
+      result.push(...accepted);if(page.length<limit)break;
       cursor=page.at(-1).entity_id;
     }
   }
+  if(policy.source_archive_allowed)recordsTotal=recordsLoaded;
   if(policy.source_archive_allowed&&referencedArchive){
-    progress('archive');const archive=await selectedArchive(c,check,count=>{archiveBlocksLoaded+=count;progress('archive');},reusable);
+    progress('archive');const archive=await selectedArchive(c,check,(count,details)=>{
+      archiveBlocksLoaded+=count;archiveBlocksTotal=details.total;archiveBlocksReused+=details.reused;progress('archive');
+    },reusable);
     result.push(...archive);result.archive_versions=archive.archive_versions;archiveBlocksReused=archive.reused;
   }
   if(!policy.source_archive_allowed){
    let offset=0,limit=250;while(true){const loaded=await readCloudPage(size=>request('rpc/get_lac_fee_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
     const nextPolicy=checkedFeeVisibility(page?.visibility);if(nextPolicy.version!==policy.version||nextPolicy.estimate!==policy.estimate||nextPolicy.actual!==policy.actual||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading. Pull again.');
-    if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);
+    if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);recordsLoaded+=page.rows.length;progress('records');
     if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset<=offset)throw new Error('Invalid fee page cursor.');offset=page.next_offset;
    }
    offset=0;limit=250;while(true){const loaded=await readCloudPage(size=>request('rpc/get_managed_locations',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
     const nextPolicy=checkedFeeVisibility(page?.visibility);if(!sameFeeVisibility(nextPolicy,policy)||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading locations. Pull again.');
     for(const row of page.rows)result.push(checkedManagedLocation(row,c.colonyId));
+    recordsLoaded+=page.rows.length;progress('records');
     if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset<=offset)throw new Error('Invalid location page cursor.');offset=page.next_offset;
    }
   }
+  recordsTotal=recordsLoaded;archiveBlocksTotal=archiveBlocksLoaded;
   progress('verifying');
   checkExportContext(context);const finalPolicy=await refreshFeeVisibility({notify:false});if(!sameFeeVisibility(finalPolicy,policy))throw new Error('Fee visibility changed while loading. Pull again.');
   result.fee_visibility=policy;result.sync_summary={recordsDownloaded:result.filter(row=>row.entity_type!=='archive').length-recordsReused,recordsReused,archiveBlocksDownloaded:result.filter(row=>row.entity_type==='archive').length-archiveBlocksReused,archiveBlocksReused};return result;
@@ -722,13 +733,15 @@ export async function pullFromCloud({onProgress,forceFull=false}={}){
   const generation=authGeneration,context=exportContext(),config=stable(configuration());
   const check=()=>{if(pull!==pullGeneration||generation!==authGeneration||config!==stable(configuration())||context!==exportContext())throw new Error('The account or colony changed during loading. Open the shared colony again.');};
   const progress=value=>{check();if(typeof onProgress==='function'){try{onProgress(Object.freeze({...value}));}catch{/* Presentation cannot interrupt a verified read. */}}};
-  progress({phase:'access',recordsLoaded:0,archiveBlocksLoaded:0});
+  progress({phase:'access',recordsLoaded:0,recordsTotal:null,recordsReused:0,archiveBlocksLoaded:0,archiveBlocksTotal:null,archiveBlocksReused:0});
   await membership({check});check();
   const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
   try{
-    progress({phase:'saving',recordsLoaded:rows.filter(row=>row.entity_type!=='archive').length,archiveBlocksLoaded:rows.filter(row=>row.entity_type==='archive').length});
+    const recordsLoaded=rows.filter(row=>row.entity_type!=='archive').length,archiveBlocksLoaded=rows.filter(row=>row.entity_type==='archive').length;
+    const completedCounts={recordsLoaded,recordsTotal:recordsLoaded,recordsReused:rows.sync_summary.recordsReused,archiveBlocksLoaded,archiveBlocksTotal:archiveBlocksLoaded,archiveBlocksReused:rows.sync_summary.archiveBlocksReused};
+    progress({phase:'saving',...completedCounts});
     const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check);check();
     await local('put',data,{check,cacheWrite,syncBaseline});check();
     rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');const counts=rows.sync_summary;statusMessage=`Cloud connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
