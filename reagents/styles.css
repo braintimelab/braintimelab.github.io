@@ -41,3 +41,9 @@
 .inventory-print th{white-space:normal}.inventory-print{min-width:900px}@media print{.inventory-print{min-width:0}}
 
 #sheet-import-status[data-error=true]{color:var(--red)}
+
+/* Sort controls retain the table heading typography and keyboard focus. */
+th.sortable{padding:0}th .sort-button{display:flex;align-items:center;gap:7px;width:100%;padding:12px 14px;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;text-align:left;white-space:nowrap}
+th .sort-button:hover{background:#e2e9e8;color:var(--blue)}th .sort-button:focus-visible{outline:2px solid var(--blue);outline-offset:-3px}th[aria-sort=ascending],th[aria-sort=descending]{color:var(--blue)}
+@media(max-width:650px){th .sort-button{padding:10px}}
+@media print{th .sort-button{display:block!important}th .sort-indicator{display:none}}
