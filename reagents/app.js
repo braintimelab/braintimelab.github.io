@@ -1,10 +1,10 @@
-import * as store from '../mouse-data/data-store.js?v=92';
-import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=92';
-import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=92';
+import * as store from '../mouse-data/data-store.js?v=95';
+import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=95';
+import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=92';
-import {createAccessActivity} from '../mouse-data/access-activity.js?v=92';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=95';
+import {createAccessActivity} from '../mouse-data/access-activity.js?v=95';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=3';
 import {SECTIONS,canReviewHistory,canViewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=5';
 
@@ -14,6 +14,7 @@ let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=n
 const importControls=new Map();
 const tableSorts=new Map(),recordSortCache=new Map();
 let memberRows=[];
+let connectionState='checking';
 const inventoryScope=()=>section()==='safety'?'dangerous':'inventory';
 const inventorySort=()=>tableSorts.get(inventoryScope());
 function inventoryValue(row,key){const p=row.payload;return ({classification:itemClassification(row),name:[itemName(row),p.cas_number||p.cas_raw,p.catalog_number],location:[p.location,p.storage],quantity:typeof p.remaining_amount==='number'?p.remaining_amount:(p.quantity_text||p.amount),status:label(p.status||'unverified'),safety:hazardous(p)?'Review SDS':null})[key];}
@@ -62,14 +63,24 @@ const sourceHistoryFields=new Set(['source_fields','original_fields','source_ref
 function ownerHistoryAccess(){return member&&canViewHistory(permissions)&&store.getCloudStatus().signedIn&&store.getCloudStatus().role==='owner';}
 function requireHistoryAccess(){if(ownerHistoryAccess())return;const error=Error('History is available only to the owner.');if(member&&canViewHistory(permissions))accessFailure(error);throw error;}
 function withoutSourceHistory(payload){return Object.fromEntries(Object.entries(payload||{}).filter(([key])=>!sourceHistoryFields.has(key)).map(([key,value])=>[key,key==='safety'?withoutSourceHistory(value):value]));}
+function connectionIndicator(){
+ const label=connectionState==='connected'?'Cloud connected':connectionState==='unavailable'?'Cloud unavailable':'Checking cloud connection';
+ return {label,className:`account-connection ${connectionState}`};
+}
+function updateConnectionIndicator(state){
+ connectionState=state;const dot=$('account-connection');if(!dot)return;
+ const indicator=connectionIndicator();dot.className=indicator.className;dot.title=indicator.label;dot.setAttribute('aria-label',indicator.label);
+}
 function showIdentity(account){
  const name=text(account.name).trim()||text(account.username).trim()||'Lab member',parts=name.split(/\s+/).filter(Boolean);
  const initials=text(account.acronym).trim().slice(0,4)||(parts.length>1?parts[0][0]+parts.at(-1)[0]:parts[0]?.slice(0,2)||'BT');
  const role=permissions.role==='owner'?'Owner':permissions.role==='manager'?'Manager':'';
- $('identity').innerHTML=`<span class="account-initials" aria-hidden="true">${esc(initials.toUpperCase())}</span><span class="account-details"><a class="account-name" href="../mouse-data/#settings" title="Account settings">${esc(name)}</a>${role?`<span class="account-role">${role}</span>`:''}</span>`;
+ const connection=connectionIndicator();
+ $('identity').innerHTML=`<span class="account-initials" aria-hidden="true">${esc(initials.toUpperCase())}</span><span class="account-details"><a class="account-name" href="../mouse-data/#settings" title="Account settings">${esc(name)}</a><span class="account-status">${role?`<span class="account-role">${role}</span>`:''}<span id="account-connection" class="${connection.className}" role="img" aria-label="${connection.label}" title="${connection.label}"></span></span></span>`;
  $('identity').hidden=false;$('sidebar-account').hidden=false;$('sign-out').hidden=false;
 }
 function resetPrivate(){
+ connectionState='checking';
  closeExportPreview();$('sheet-import').hidden=true;$('sheet-import-dialog').close();$('import-preview').innerHTML='';
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();
  tableSorts.clear();recordSortCache.clear();memberRows=[];
@@ -83,8 +94,8 @@ function fence(){const g=generation,c=context();return ()=>{if(g!==generation||!
 function accessFailure(error){generation++;accessActivity.reset();resetPrivate();signInView(error.message||'Your access changed. Sign in again.');}
 async function rpc(action,args={}){
  const g=generation,check=fence();
- try{check();if(historyActions.has(action))requireHistoryAccess();const result=await store.callReagents(action,args);check();if(historyActions.has(action))requireHistoryAccess();if(permissions.role&&result?.permissions&&JSON.stringify(permissions)!==JSON.stringify(result.permissions))throw Object.assign(Error('Your access changed. Reopen Reagents.'),{reagentsAccessChanged:true});return result;}
- catch(error){if(g===generation&&(error.reagentsAccessChanged||/session changed|account changed|not an active member|session expired|sign.in|permission for this cloud operation/i.test(error.message)))accessFailure(error);throw error;}
+ try{check();if(historyActions.has(action))requireHistoryAccess();const result=await store.callReagents(action,args);check();if(historyActions.has(action))requireHistoryAccess();if(permissions.role&&result?.permissions&&JSON.stringify(permissions)!==JSON.stringify(result.permissions))throw Object.assign(Error('Your access changed. Reopen Reagents.'),{reagentsAccessChanged:true});updateConnectionIndicator('connected');return result;}
+ catch(error){if(g===generation){if(error.connectionUnavailable||/network|failed to fetch|load failed|connection (?:unavailable|timed out)/i.test(error.message))updateConnectionIndicator('unavailable');if(error.reagentsAccessChanged||/session changed|account changed|not an active member|session expired|sign.in|permission for this cloud operation/i.test(error.message))accessFailure(error);}throw error;}
 }
 async function collect(action,args={}){
  if(historyActions.has(action))requireHistoryAccess();
@@ -283,6 +294,7 @@ $('import-file').addEventListener('change',e=>{const g=generation;void chooseImp
 $('order-catalog-file').addEventListener('change',e=>{const g=generation;void chooseOrderCatalog(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:''};void render();});
 window.addEventListener('storage',e=>{if(e.key===null||['mouse-colony.cloud.v1','mouse-colony.config.v1','mouse-colony.session.v1'].includes(e.key))void start({force:true});});
+window.addEventListener('offline',()=>updateConnectionIndicator('unavailable'));
 // Revalidate on return from another tab. Never keep private content after an access failure.
 document.addEventListener('visibilitychange',returnToApp);
 window.addEventListener('focus',()=>{if(importing||disposeOrders)return returnToApp();});

@@ -1,52 +1,52 @@
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=94';
-import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=94';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=94';
-import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=94';
-import { renderMouseReview } from './mouse-review-view.js?v=94';
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=94';
-import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=94';
-import * as store from './data-store.js?v=94';
-import * as model from './model.js?v=94';
-import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=94';
-import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=94';
-import { renderStrainManagement } from './strain-management.js?v=94';
-import { summarizeLitters } from './litter-summary.js?v=94';
-import { summarizeOverview } from './overview-summary.js?v=94';
-import { summarizeCages } from './cage-summary.js?v=94';
-import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=94';
-import { summarizeBreeding } from './breeding-summary.js?v=94';
-import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=94';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=94';
-import * as history from './history-index.js?v=94';
-import { renderUserManagement } from './user-management.js?v=94';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=94';
-import { renderAccessLogs } from './access-logs.js?v=94';
-import { createAccessActivity } from './access-activity.js?v=94';
-import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=94';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=94';
-import { sortRooms, compareRooms } from './room-order.js?v=94';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=94';
-import { prepareMouseCageSheetEdit } from './cage-observations.js?v=94';
-import { renderCageLabelEditor } from './cage-label.js?v=94';
-import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=94';
-import { renderAccountAcronym } from './account-acronym.js?v=94';
-import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=94';
-import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=94';
-import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=94';
-import { renderBreedingPlanner } from './breeding-planner.js?v=94';
-import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=94';
-import { buildFamilyGenotypes } from './family-genotypes.js?v=94';
-import { renderCryopreservation } from './cryopreservation.js?v=94';
-import { renderExperiments, experimentHelpHTML } from './experiments.js?v=94';
-import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=94';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=94';
-import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=94';
-import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=94';
-import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=94';
-import { protocolsForEntity } from './iacuc-model.js?v=94';
-import { renderExportCenter } from './export-center.js?v=94';
-import { datasetFromLocalBackup } from './local-backup.js?v=94';
-import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=94';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=95';
+import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=95';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=95';
+import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=95';
+import { renderMouseReview } from './mouse-review-view.js?v=95';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=95';
+import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=95';
+import * as store from './data-store.js?v=95';
+import * as model from './model.js?v=95';
+import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=95';
+import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=95';
+import { renderStrainManagement } from './strain-management.js?v=95';
+import { summarizeLitters } from './litter-summary.js?v=95';
+import { summarizeOverview } from './overview-summary.js?v=95';
+import { summarizeCages } from './cage-summary.js?v=95';
+import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=95';
+import { summarizeBreeding } from './breeding-summary.js?v=95';
+import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=95';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=95';
+import * as history from './history-index.js?v=95';
+import { renderUserManagement } from './user-management.js?v=95';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=95';
+import { renderAccessLogs } from './access-logs.js?v=95';
+import { createAccessActivity } from './access-activity.js?v=95';
+import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=95';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=95';
+import { sortRooms, compareRooms } from './room-order.js?v=95';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=95';
+import { prepareMouseCageSheetEdit } from './cage-observations.js?v=95';
+import { renderCageLabelEditor } from './cage-label.js?v=95';
+import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=95';
+import { renderAccountAcronym } from './account-acronym.js?v=95';
+import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=95';
+import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=95';
+import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=95';
+import { renderBreedingPlanner } from './breeding-planner.js?v=95';
+import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=95';
+import { buildFamilyGenotypes } from './family-genotypes.js?v=95';
+import { renderCryopreservation } from './cryopreservation.js?v=95';
+import { renderExperiments, experimentHelpHTML } from './experiments.js?v=95';
+import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=95';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=95';
+import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=95';
+import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=95';
+import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=95';
+import { protocolsForEntity } from './iacuc-model.js?v=95';
+import { renderExportCenter } from './export-center.js?v=95';
+import { datasetFromLocalBackup } from './local-backup.js?v=95';
+import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=95';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -157,8 +157,10 @@ function renderSidebarAccount(){
  const profile=sidebarProfileContext===sidebarIdentityContext(cloud)?sidebarProfile:null;
  const name=[profile?.name,cloud.name,cloud.username,cloud.email].find(value=>typeof value==='string'&&value.trim())?.trim()||'Signed in';
  const words=name.includes('@')?[name]:name.split(/\s+/).filter(Boolean),code=typeof profile?.acronym==='string'?profile.acronym.trim().split(/[-_]/)[0]:'',initials=(code||(words.length>1?words[0][0]+words.at(-1)[0]:words[0].slice(0,2))).slice(0,3).toUpperCase();
- const role=visibleRoleLabel(cloud.role);
- container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong>${role?`<span class="sidebar-role">${esc(role)}</span>`:''}</div><button class="sidebar-sign-out" type="button" data-action="sign-out" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H7a5 5 0 0 0 0 10h12M15 10l4 4-4 4"/></svg></button>`;container.hidden=false;
+ const role=visibleRoleLabel(cloud.role),connected=!startupLoading&&!cachedPreview&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending';
+ const connection=startupLoading?startupMessage:cachedPreview?'Read only · '+startupMessage:cloud.role==='pending'?'Account setup':connected?'Cloud connected':cloud.mode==='cloud'?'Reconnect required':'Local only';
+ const indicator=`<span class="connection-dot${connected?' cloud':''}" role="img" aria-label="${esc(connection)}" title="${esc(connection)}"></span>`;
+ container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="sidebar-account-status">${role?`<span class="sidebar-role">${esc(role)}</span>`:''}${indicator}</span></div><button class="sidebar-sign-out" type="button" data-action="sign-out" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H7a5 5 0 0 0 0 10h12M15 10l4 4-4 4"/></svg></button>`;container.hidden=false;
 }
 function adoptSidebarProfile(result,context=sidebarIdentityContext(cloud)){
  if(context!==sidebarIdentityContext(cloud)||context!==sidebarIdentityContext(store.getCloudStatus())||!cloud.signedIn)return;
@@ -236,11 +238,10 @@ function showToast(message,error=false) { $('toast').textContent=message;$('toas
 async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 function renderConnection() {
  renderSidebarAccount();
- if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);$('connection-indicator').classList.toggle('cloud',false);$('connection-description').textContent=startupMessage;return;}
- if(cachedPreview){$('mode-badge').textContent='Saved view · syncing';$('mode-badge').classList.remove('cloud');$('connection-indicator').classList.remove('cloud');$('connection-description').textContent='Read only · '+startupMessage;$('workspace-label').textContent='Shared laboratory workspace';return;}
- if(cloud.signedIn&&cloud.role==='pending'){$('mode-badge').textContent='Account setup';$('mode-badge').classList.remove('cloud');$('connection-indicator').classList.remove('cloud');$('connection-description').textContent=cloud.email||'Account setup';$('workspace-label').textContent='Braintime Lab account';return;}
+ if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
+ if(cachedPreview){$('mode-badge').textContent='Saved view · syncing';$('mode-badge').classList.remove('cloud');$('workspace-label').textContent='Shared laboratory workspace';return;}
+ if(cloud.signedIn&&cloud.role==='pending'){$('mode-badge').textContent='Account setup';$('mode-badge').classList.remove('cloud');$('workspace-label').textContent='Braintime Lab account';return;}
  const connected=cloud.mode==='cloud';$('mode-badge').textContent=connected?(cloudReady?(cloud.role==='viewer'?'Cloud · read only':'Cloud connected'):'Cloud · reconnect required'):'Local only';$('mode-badge').classList.toggle('cloud',connected&&cloudReady);
- $('connection-indicator').classList.toggle('cloud',connected&&cloudReady);$('connection-description').textContent=connected?(cloudReady?'Cloud connected':'Reconnect required'):'Local only';
  $('workspace-label').textContent=dataset?.demo||dataset?.is_demo||dataset?.synthetic?'Synthetic demonstration':connected?'Shared laboratory workspace':'Private browser workspace';
 }
 function navigation() { $('navigation').innerHTML=Object.entries(titles).filter(([key])=>(cloud.role!=='pending'||key==='settings')&&!cloud.passwordRecovery&&(key!=='brainbot'||(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role==='owner'))).map(([key,label])=>`<button class="nav-item${['cryo','locobox'].includes(key)?' nav-subitem':''}${route===key?' active':''}" data-route="${key}" aria-current="${route===key?'page':'false'}" title="${esc(label)}"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icons[key]}</svg></span><span class="nav-label">${key==='overview'?`<span class="nav-label-full">${esc(label)}</span><span class="nav-label-compact">Overview</span>`:esc(label)}</span>${entity[key]&&dataset?`<span class="nav-count">${count((key==='cages'?cageRecords():records(key,false)).length)}</span>`:''}</button>`).join(''); }

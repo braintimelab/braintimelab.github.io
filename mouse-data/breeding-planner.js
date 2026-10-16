@@ -1,7 +1,7 @@
-import { predictCross, validateScenario, rankPairs } from './genetics.js?v=94';
-import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=94';
-import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=94';
-import { validateFamilyTargetDraft } from './family-targets.js?v=94';
+import { predictCross, validateScenario, rankPairs } from './genetics.js?v=95';
+import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=95';
+import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=95';
+import { validateFamilyTargetDraft } from './family-targets.js?v=95';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

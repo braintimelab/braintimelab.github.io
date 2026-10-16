@@ -1,9 +1,9 @@
-import {clearHistoryIndex} from './history-index.js?v=94';
-import { projectLocoboxExport } from './locobox-export.js?v=94';
-import { PUBLIC_CONFIG } from './config.js?v=94';
-import { validateManagerPermissions } from './permissions.js?v=94';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=94';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=94';
+import {clearHistoryIndex} from './history-index.js?v=95';
+import { projectLocoboxExport } from './locobox-export.js?v=95';
+import { PUBLIC_CONFIG } from './config.js?v=95';
+import { validateManagerPermissions } from './permissions.js?v=95';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=95';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=95';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -420,7 +420,7 @@ export async function updateAccountProfile(name) {
 }
 const feeRecord=r=>r?.entity_type==='husbandry_events'&&(/^(lac_fee|fee|fees|billing)_/.test(r.payload?.event_type||'')||['animal_sheet_cage_snapshot','animal_sheet_source_change'].includes(r.payload?.event_type)||['source_cage_snapshot','animal_sheet_change','lac_fee_options','lac_fee_month','fee_options','fee_month','fee_actual','fees','billing','billing_options','billing_month'].some(k=>Object.hasOwn(r.payload||{},k)));
 function checkedFeeVisibility(value){
- if(!value||!Number.isInteger(value.version)||value.version<0||typeof value.owner!=='boolean'||typeof value.estimate!=='boolean'||typeof value.actual!=='boolean'||value.source_archive_allowed!==(value.estimate&&value.actual))throw new Error('Fee visibility could not be verified. Reconnect before loading financial data.');
+ if(!value||!Number.isInteger(value.version)||value.version<0||typeof value.owner!=='boolean'||typeof value.estimate!=='boolean'||typeof value.actual!=='boolean'||typeof value.source_archive_allowed!=='boolean'||value.source_archive_allowed&&!(value.estimate&&value.actual)||value.history_allowed!==undefined&&(typeof value.history_allowed!=='boolean'||value.history_allowed===false&&(value.source_archive_allowed||typeof value.history_from!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(value.history_from))))throw new Error('Fee visibility could not be verified. Reconnect before loading financial data.');
  return value;
 }
 function validCageObservation(value){
@@ -444,9 +444,9 @@ function validLocationCageEntrainment(value,locationId){
 }
 function managedLocationPayload(payload){return payload&&typeof payload==='object'&&!Array.isArray(payload)&&Object.keys(payload).every(key=>MANAGED_LOCATION_KEYS.has(key))&&(!Object.hasOwn(payload,'source_cage_observation')||payload.source_cage_observation===null||validCageObservation(payload.source_cage_observation))&&(!Object.hasOwn(payload,'cage_start')||validLocationCageStart(payload.cage_start,payload.location_id))&&(!Object.hasOwn(payload,'cage_entrainment')||validLocationCageEntrainment(payload.cage_entrainment,payload.location_id));}
 function currentRestrictedCache(data,mark,policy){
- return data?.source_archive_restricted===true&&data.source_projection_version===SOURCE_PROJECTION_VERSION&&mark?.source_projection_version===SOURCE_PROJECTION_VERSION&&mark.estimate===policy.estimate&&mark.actual===policy.actual&&(data.tables?.locations||[]).every(managedLocationPayload);
+ return data?.source_archive_restricted===true&&data.source_projection_version===SOURCE_PROJECTION_VERSION&&mark?.source_projection_version===SOURCE_PROJECTION_VERSION&&mark.estimate===policy.estimate&&mark.actual===policy.actual&&mark.fee_history_allowed===policy.history_allowed&&mark.fee_history_from===policy.history_from&&(data.tables?.locations||[]).every(managedLocationPayload);
 }
-function sameFeeVisibility(a,b){return a.version===b.version&&a.estimate===b.estimate&&a.actual===b.actual&&a.source_archive_allowed===b.source_archive_allowed;}
+function sameFeeVisibility(a,b){return a.version===b.version&&a.estimate===b.estimate&&a.actual===b.actual&&a.source_archive_allowed===b.source_archive_allowed&&a.history_allowed===b.history_allowed&&a.history_from===b.history_from;}
 function checkedManagedLocation(row,colonyId){
  if(row?.entity_type!=='locations'||row.colony_id!==colonyId||typeof row.entity_id!=='string'||!row.entity_id||!Number.isInteger(row.version)||row.version<1||typeof row.archived!=='boolean'||!managedLocationPayload(row.payload)||row.payload.location_id!==row.entity_id||Boolean(row.payload.app_archived_at)!==row.archived)throw new Error('Invalid projected location record. Pull the latest cloud data.');
  return row;
@@ -455,7 +455,7 @@ async function refreshFeeVisibility({notify=true}={}){
  const generation=authGeneration,context=exportContext(),c=configuration();if(!c||!session()?.access_token)throw new Error('Sign in before loading shared fee visibility.');
  const check=()=>{if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
  const value=checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:c.colonyId}}));check();
- const previousPolicy=feeVisibility,changed=feeVisibilityContext!==context||!feeVisibility||feeVisibility.estimate!==value.estimate||feeVisibility.actual!==value.actual;
+ const previousPolicy=feeVisibility,changed=feeVisibilityContext!==context||!feeVisibility||!sameFeeVisibility(feeVisibility,value);
  feeVisibility=value;feeVisibilityContext=context;
  // A projected baseline cannot become a full replacement when access expands.
  // Reload the previously withheld fields before allowing another cloud edit.
@@ -774,7 +774,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   }
   if(!policy.source_archive_allowed){
    let offset=0,limit=250;while(true){const loaded=await readCloudPage(size=>request('rpc/get_lac_fee_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
-    const nextPolicy=checkedFeeVisibility(page?.visibility);if(nextPolicy.version!==policy.version||nextPolicy.estimate!==policy.estimate||nextPolicy.actual!==policy.actual||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading. Pull again.');
+    const nextPolicy=checkedFeeVisibility(page?.visibility);if(!sameFeeVisibility(nextPolicy,policy)||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading. Pull again.');
     if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);recordsLoaded+=page.rows.length;progress('records');
     if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset<=offset)throw new Error('Invalid fee page cursor.');offset=page.next_offset;
    }
@@ -828,7 +828,7 @@ async function assemble(rows){
   }
   if(partial)data.fee_visibility=rows.fee_visibility;return normalizeDataset(data);
 }
-function rememberCloudCache(writeId,baselineHash){const c=configuration();setStorage('localStorage',CLOUD_CACHE_KEY,JSON.stringify({url:c.url,colony:c.colonyId,user:session()?.user?.id,estimate:feeVisibility?.estimate,actual:feeVisibility?.actual,source_projection_version:SOURCE_PROJECTION_VERSION,...(writeId?{write_id:writeId}:{}),...(baselineHash?{baseline_sha256:baselineHash}:{})}));}
+function rememberCloudCache(writeId,baselineHash){const c=configuration();setStorage('localStorage',CLOUD_CACHE_KEY,JSON.stringify({url:c.url,colony:c.colonyId,user:session()?.user?.id,estimate:feeVisibility?.estimate,actual:feeVisibility?.actual,fee_history_allowed:feeVisibility?.history_allowed,fee_history_from:feeVisibility?.history_from,source_projection_version:SOURCE_PROJECTION_VERSION,...(writeId?{write_id:writeId}:{}),...(baselineHash?{baseline_sha256:baselineHash}:{})}));}
 function remember(rows,deferredState=null){deferredArchiveState=deferredState;versions=new Map([...(rows.archive_versions||[]),...rows.map(r=>[recordKey(r),r.version])]);baseline=new Map(rows.map(r=>[recordKey(r),r]));baselineIdentity=syncIdentity();synced=true;}
 export async function pullFromCloud({onProgress,forceFull=false,deferHistory=false}={}){
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
@@ -1132,8 +1132,10 @@ async function readExportRecords({scope='current_housing',fromDate=null,toDate=n
       if(!MANAGED.includes(row.entity_type)||typeof row.entity_id!=='string'||!row.payload||row.payload[ID_FIELDS[row.entity_type]]!==row.entity_id||seen.has(key))throw new Error('The export contains an invalid or duplicate record.');
       seen.add(key);rows.push(row);
     }
+    const consumed=page.source_rows_consumed===undefined?page.rows.length:page.source_rows_consumed;
+    if(!Number.isSafeInteger(consumed)||consumed<page.rows.length||consumed>250||consumed!==page.rows.length&&page.fee_visibility?.history_allowed!==false)throw new Error('Export pagination could not be verified. Narrow the selected records.');
     if(page.next_offset===null)break;
-    if(!Number.isSafeInteger(page.next_offset)||page.next_offset!==offset+page.rows.length||page.next_offset<=offset||page.next_offset>100000)throw new Error('Export pagination could not be verified. Narrow the selected records.');
+    if(!Number.isSafeInteger(page.next_offset)||page.next_offset!==offset+consumed||page.next_offset<=offset||page.next_offset>100000)throw new Error('Export pagination could not be verified. Narrow the selected records.');
     offset=page.next_offset;
   }
   const final=await getExportPermission();checkExportContext(context);
