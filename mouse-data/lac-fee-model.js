@@ -1,6 +1,6 @@
 /* LAC estimates use explicit mappings and dated evidence. Current occupancy is
  * only a labelled projection of the current month, never historical evidence. */
-import {currentCageStartQuantities} from './lac-fee-occupancy.js?v=88';
+import {currentCageStartQuantities} from './lac-fee-occupancy.js?v=89';
 export const LAC_FEE_GROUPS=Object.freeze([{key:'clean_room',label:'SHLAC Conventional',unit:'cage'},{key:'rat_locobox',label:'SHLAC Rat room',unit:'cage'},{key:'spf_room',label:'SHLAC SPF',unit:'mouse'}]);
 const TYPES=['lac_fee_options','lac_fee_month'],clone=structuredClone,object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x),present=x=>x!==null&&x!==undefined&&x!=='';
 const archived=r=>Boolean(r?.app_archived_at)||r?.archived===true;

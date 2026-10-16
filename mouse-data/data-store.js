@@ -1,9 +1,9 @@
-import {clearHistoryIndex} from './history-index.js';
-import { projectLocoboxExport } from './locobox-export.js?v=24';
-import { PUBLIC_CONFIG } from './config.js';
-import { validateManagerPermissions } from './permissions.js';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=76';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=48';
+import {clearHistoryIndex} from './history-index.js?v=89';
+import { projectLocoboxExport } from './locobox-export.js?v=89';
+import { PUBLIC_CONFIG } from './config.js?v=89';
+import { validateManagerPermissions } from './permissions.js?v=89';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=89';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=89';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -113,6 +113,24 @@ export async function loadDataset(){
  }
  if(generation!==authGeneration||session()?.passwordRecovery||pendingAccount(session()))return null;
  return normalizeDataset(d);
+}
+// An optional startup preview is authorized afresh but never becomes a
+// writable cloud baseline. A denied, stale or incompatible cache stays hidden.
+export async function loadStartupCache(){
+ const initial=session(),c=configuration();
+ if(mode()!=='cloud'||!c||!initial?.user?.id||!initial?.access_token||initial.passwordRecovery||pendingAccount(initial))return null;
+ invalidate();
+ try{
+  await verifyCloudMembership();
+  const generation=authGeneration,identity=syncIdentity(),context=exportContext();
+  const check=()=>{if(generation!==authGeneration||identity!==syncIdentity()||session()?.passwordRecovery||pendingAccount(session()))throw new Error('The account changed while checking the saved workspace.');checkExportContext(context);};
+  check();const mark=readJSON('localStorage',CLOUD_CACHE_KEY);
+  if(!mark||mark.url!==c.url||mark.colony!==c.colonyId||mark.user!==initial.user.id)return null;
+  const data=await local('get',undefined,{check});check();if(!data)return null;
+  const policy=await refreshFeeVisibility({notify:false});check();
+  if(policy.source_archive_allowed?data.source_archive_restricted:!currentRestrictedCache(data,mark,policy))return null;
+  const preview=normalizeDataset(data);check();return preview;
+ }catch{return null;}
 }
 export async function clearDataset(){await local('delete');setStorage('localStorage',CLOUD_CACHE_KEY,null);setStorage('localStorage',DEMO_KEY,null);setMode('local');invalidate();statusMessage='Local dataset cleared.';}
 
@@ -533,12 +551,12 @@ function reusableRecord(reuse,row,c){
   if(!cached||reuse.versions.get(key)!==row.version||cached.archived!==row.archived)return null;
   return checkedCloudRecord({...cached,colony_id:c.colonyId,version:row.version},row.entity_type,c);
 }
-async function managedVersionIndex(type,c,check){
+async function managedVersionIndex(type,c,check,read=request){
   const index=new Map();let cursor=null,limit=1000;
   while(true){
     const loaded=await readCloudPage(size=>{
       const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
-      if(cursor!==null)query.set('entity_id',`gt.${cursor}`);return request(`entity_records?${query}`);
+      if(cursor!==null)query.set('entity_id',`gt.${cursor}`);return read(`entity_records?${query}`);
     },limit,check);const page=loaded.page;limit=loaded.limit;
     if(!Array.isArray(page)||page.length>limit)throw new Error('Cloud records were not returned as a valid page.');
     for(const row of page){checkedCloudRecord(row,type,c,false);if(index.has(row.entity_id))throw new Error('Cloud page cursor did not advance. Pull again.');index.set(row.entity_id,row);}
@@ -546,8 +564,8 @@ async function managedVersionIndex(type,c,check){
   }
   return index;
 }
-async function incrementalManaged(type,c,check,reuse,restricted=false){
-  const index=await managedVersionIndex(type,c,check),rows=new Map(),pending=[],reused=new Set();
+async function incrementalManaged(type,c,check,reuse,restricted=false,read=request){
+  const index=await managedVersionIndex(type,c,check,read),rows=new Map(),pending=[],reused=new Set();
   for(const row of index.values()){const cached=reusableRecord(reuse,row,c);if(cached&&(!restricted||ordinaryManagedRecord(cached))){rows.set(row.entity_id,cached);reused.add(row.entity_id);}else pending.push(row);}
   let next=0,failure=null;
   const active=()=>{check();if(failure)throw failure;};
@@ -555,14 +573,14 @@ async function incrementalManaged(type,c,check,reuse,restricted=false){
     // An equality parameter keeps punctuation and Unicode IDs literal. Fetching
     // only changed records also avoids a large repeated historical payload.
     const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,entity_id:`eq.${expected.entity_id}`,limit:'1'});
-    const page=(await readCloudPage(()=>request(`entity_records?${query}`),1,active)).page;
+    const page=(await readCloudPage(()=>read(`entity_records?${query}`),1,active)).page;
     if(!Array.isArray(page)||page.length!==1)throw new Error('A changed cloud record is missing. Pull again.');
     const row=checkedCloudRecord(page[0],type,c);if(row.entity_id!==expected.entity_id||row.version!==expected.version||row.archived!==expected.archived)throw new Error('A cloud record changed during loading. Pull again.');
     rows.set(row.entity_id,row);
   }}catch(error){failure??=error;throw error;}}
   await Promise.all(Array.from({length:Math.min(3,pending.length)},()=>worker()));check();
   // Never silently merge against an index that changed while payloads arrived.
-  const final=await managedVersionIndex(type,c,check);
+  const final=await managedVersionIndex(type,c,check,read);
   if(final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Pull again.');
   const result=[...index.keys()].map(id=>rows.get(id)).filter(row=>!restricted||ordinaryManagedRecord(row));result.reused=result.filter(row=>reused.has(row.entity_id)).length;return result;
 }
@@ -641,24 +659,31 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
   const progress=phase=>{check();onProgress?.({phase,recordsLoaded,recordsTotal,recordsReused,archiveBlocksLoaded,archiveBlocksTotal,archiveBlocksReused});};
   try{
-  // Keep healthy reads efficient; only a confirmed timeout reduces a page.
-  // Archive chunks are larger, so their initial page remains much smaller.
-  // Bound every page with the primary key before RLS evaluates its payload.
-  // OFFSET repeatedly scans all preceding rows and can time out even at LIMIT 1.
-  for(const type of [...MANAGED,...(policy.source_archive_allowed&&!referencedArchive?['archive']:[])]){
+  // Independent table streams share three request slots, including their
+  // changed-record reads. Each stream keeps its own serial keyset cursor.
+  const types=MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations'),streams=new Array(types.length),waiting=[];
+  let nextType=0,inFlight=0,streamFailure=null;
+  const active=()=>{check();if(streamFailure)throw streamFailure;};
+  const acquire=()=>inFlight<3?(inFlight++,Promise.resolve()):new Promise(resolve=>waiting.push(resolve));
+  const release=()=>{const next=waiting.shift();if(next)next();else inFlight--;};
+  const readManaged=async route=>{active();await acquire();try{active();return await request(route);}finally{release();}};
+  async function readType(type,read,guard){
     // Restricted locations always come from the sanitized projection RPC.
-    if(!policy.source_archive_allowed&&type==='locations')continue;
-    if(reusable&&type!=='archive'){progress('records');const rows=await incrementalManaged(type,c,check,reusable,!policy.source_archive_allowed);result.push(...rows);recordsLoaded+=rows.length;recordsReused+=rows.reused;progress('records');continue;}
-    let cursor=null,limit=type==='archive'?3:1000;const seen=new Set();
+    if(reusable&&type!=='archive'){
+      progress('records');const rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed,read);
+      recordsLoaded+=rows.length;recordsReused+=rows.reused;progress('records');return rows;
+    }
+    let cursor=null,limit=type==='archive'?3:1000;const seen=new Set(),rows=[];
     progress(type==='archive'?'archive':'records');
     while(true){
+      // Reduce only confirmed timeout pages. OFFSET rescans earlier rows and
+      // can time out even at LIMIT 1; preserve the primary-key cursor instead.
       const loaded=await readCloudPage(size=>{
         const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
-        // A top-level gt value is literal PostgREST text. URL encoding protects
-        // punctuation, quotes and Unicode without changing the stored ID.
+        // The top-level gt value is literal PostgREST text, including Unicode.
         if(cursor!==null)query.set('entity_id',`gt.${cursor}`);
-        return request(`entity_records?${query}`);
-      },limit,check);
+        return read(`entity_records?${query}`);
+      },limit,guard);
       const page=loaded.page;limit=loaded.limit;
       if(!Array.isArray(page)||page.length>limit)throw new Error('Cloud records were not returned as a valid page.');
       for(const row of page){
@@ -669,10 +694,20 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
       const accepted=policy.source_archive_allowed?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r));
       if(type==='archive')archiveBlocksLoaded+=accepted.length;else recordsLoaded+=accepted.length;
       progress(type==='archive'?'archive':'records');
-      result.push(...accepted);if(page.length<limit)break;
+      rows.push(...accepted);if(page.length<limit)break;
       cursor=page.at(-1).entity_id;
     }
+    return rows;
   }
+  async function worker(){
+    try{while(true){active();const index=nextType++;if(index>=types.length)return;streams[index]=await readType(types[index],readManaged,active);}}
+    catch(error){streamFailure??=error;throw error;}
+  }
+  // Drain rejected streams before returning so none can publish late progress
+  // or continue reading after a failed pull. Flatten in stable table order.
+  await Promise.allSettled(Array.from({length:Math.min(3,types.length)},()=>worker()));
+  if(streamFailure)throw streamFailure;check();for(const rows of streams)result.push(...rows);
+  if(policy.source_archive_allowed&&!referencedArchive)result.push(...await readType('archive',request,check));
   if(policy.source_archive_allowed)recordsTotal=recordsLoaded;
   if(policy.source_archive_allowed&&referencedArchive){
     progress('archive');const archive=await selectedArchive(c,check,(count,details)=>{
