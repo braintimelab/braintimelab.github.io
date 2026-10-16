@@ -3,7 +3,7 @@
  * Ai32 and Ai96 are alternative Gt(ROSA)26Sor alleles:
  * https://www.jax.org/strain/012569  https://www.jax.org/strain/024106
  */
-import {canonicalStrainName,strainNameAliases,FLOX_STRAIN_NAMES,strainNamingWarning,explicitCreName,legacyVgatCreName} from './strain-registry.js?v=92';
+import {canonicalStrainName,strainNameAliases,FLOX_STRAIN_NAMES,strainNamingWarning,explicitCreName,legacyVgatCreName} from './strain-registry.js?v=93';
 const string=value=>typeof value==='string'?value:'';
 const unique=values=>[...new Set(values)];
 const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');

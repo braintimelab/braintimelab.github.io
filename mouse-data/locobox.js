@@ -1,5 +1,5 @@
-import {compareRooms} from './room-order.js?v=92';
-import {LOCOBOX_SCHEMES,blankLocoboxProtocol,blankLocoboxPhase,blankLocoboxTreatment,listLocoboxProtocols,buildLocoboxProtocol,locoboxEvidence} from './locobox-model.js?v=92';
+import {compareRooms} from './room-order.js?v=93';
+import {LOCOBOX_SCHEMES,blankLocoboxProtocol,blankLocoboxPhase,blankLocoboxTreatment,listLocoboxProtocols,buildLocoboxProtocol,locoboxEvidence} from './locobox-model.js?v=93';
 const mounts=new WeakMap(),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SOURCE_KINDS={experiment_locobox_group:'Locobox schedule source',animal_sheet_light_schedule:'Animal Sheet light source',related_treatment_text:'Related treatment text'};
 const sourceKind=row=>SOURCE_KINDS[row.source_kind]||'Source observation';

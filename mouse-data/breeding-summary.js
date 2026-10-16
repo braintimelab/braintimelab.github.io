@@ -1,7 +1,7 @@
-import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=92';
-import { getBreedingOptions } from './breeding-options.js?v=92';
-import { mouseLineAssignments } from './mouse-summary.js?v=92';
-import { validateGeneticProfile } from './genotype-schema.js?v=92';
+import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=93';
+import { getBreedingOptions } from './breeding-options.js?v=93';
+import { mouseLineAssignments } from './mouse-summary.js?v=93';
+import { validateGeneticProfile } from './genotype-schema.js?v=93';
 
 const text=value=>typeof value==='string'?value:'';
 const rows=value=>Array.isArray(value)?value:[];
