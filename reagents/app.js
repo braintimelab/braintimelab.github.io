@@ -1,9 +1,9 @@
-import * as store from '../mouse-data/data-store.js?v=50';
+import * as store from '../mouse-data/data-store.js?v=84';
 import {PUBLIC_CONFIG} from '../mouse-data/config.js';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=1';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=1';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=69';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=84';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=69';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=1';
 import {SECTIONS,canReviewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=3';
@@ -35,6 +35,7 @@ let filters={query:'',category:'',status:'',location:''},offset=0,historySource=
 let disposeAccessLogs=null,disposeOrders=null,refreshOrders=null,exportSession=null;
 const accessActivity=createAccessActivity({app:'reagents',sections:SECTIONS.map(([route])=>route),record:args=>store.recordAppAccess?.(args),getContext:()=>{const current=store.getCloudStatus();return member&&permissions.role&&!current.setupRequired?{...current,mode:'cloud'}:null;}});
 const section=()=>{const key=location.hash.slice(1).split('/')[0];return SECTIONS.some(s=>s[0]===key)?key:'orders';};
+function observeAccess(){const current=section();if(['history','review'].includes(current)&&!canReviewHistory(permissions))return;accessActivity.observe(current);}
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
 const date=v=>v?text(v).slice(0,10):'Date unknown';
 function status(message='',error=false){$('status').textContent=message;$('status').dataset.error=String(error);if($('sheet-import-dialog').open){$('sheet-import-status').textContent=message;$('sheet-import-status').dataset.error=String(error);}}
@@ -92,7 +93,7 @@ async function start({force=false}={}){
   const current=store.getCloudStatus();if(!current.signedIn){signInView();return;}
   if(current.setupRequired||current.passwordRecovery){main.innerHTML='<div class="empty"><h2>Complete your account</h2><p>Finish account setup or password recovery before opening Reagents.</p><a href="../mouse-data/#settings">Continue in Mouse Data →</a></div>';return;}
   const checked=await store.verifyCloudMembership();if(attempt!==generation)return;if(!checked.signedIn||checked.passwordRecovery||checked.setupRequired||!['owner','manager','editor','viewer'].includes(checked.role)||checked.url!==PUBLIC_CONFIG.url||checked.colonyId!==PUBLIC_CONFIG.colonyId)throw Error('Your lab access could not be verified. Sign in again.');member=true;
-  const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;accessActivity.observe(section());
+  const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;observeAccess();
   $('identity').textContent=checked.name||checked.email||checked.username||'Lab member';$('sign-out').hidden=false;
   const loaded=await collect('list',{p_kind:'item'});if(attempt!==generation)return;items=loaded;items.forEach(r=>records.set(r.id,r));status();await render();
  }catch(err){if(attempt!==generation)return;accessActivity.reset();resetPrivate();signInView(err.message);}
@@ -112,7 +113,7 @@ async function revalidateImportAccess(){
 }
 async function revalidateOrdersAccess(){const g=generation,refresh=refreshOrders;try{await rpc('access');if(g===generation&&refresh===refreshOrders)await refresh?.();}catch(error){if(g===generation&&member)accessFailure(error);}}
 function returnToApp(){if(!document.hidden)return importing?revalidateImportAccess():disposeOrders?revalidateOrdersAccess():start();}
-async function render(){if(!member)return;closeExportPreview();closeOrders();closeAccessLogs();clearTimeout(searchTimer);listKind=null;nav();accessActivity.observe(section());const v=++viewGeneration;selected=null;main.innerHTML='<div class="empty">Loading…</div>';try{
+async function render(){if(!member)return;closeExportPreview();closeOrders();closeAccessLogs();clearTimeout(searchTimer);listKind=null;nav();observeAccess();const v=++viewGeneration;selected=null;main.innerHTML='<div class="empty">Loading…</div>';try{
  const s=section();if(['history','review'].includes(s)&&!canReviewHistory(permissions)){main.innerHTML='<div class="empty">This section is available to the owner and managers.</div>';return;}if(s==='orders'){await ordersView(v);return;}if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
  if(s==='history'){await historyView(v);return;}if(s==='settings'){await settingsView(v);return;}await recordList(v,s);
  }catch(err){if(v===viewGeneration){main.innerHTML='<div class="empty">This view could not load. Use Refresh to try again.</div>';status(err.message,true);}}}

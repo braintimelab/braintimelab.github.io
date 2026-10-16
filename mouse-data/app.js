@@ -3,7 +3,7 @@ import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-
 import { renderMouseReview } from './mouse-review-view.js?v=83';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=41';
-import * as store from './data-store.js?v=83';
+import * as store from './data-store.js?v=84';
 import * as model from './model.js?v=83';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=39';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=36';
@@ -18,7 +18,7 @@ import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=83'
 import * as history from './history-index.js';
 import { renderUserManagement } from './user-management.js';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=74';
-import { renderAccessLogs } from './access-logs.js?v=69';
+import { renderAccessLogs } from './access-logs.js?v=84';
 import { createAccessActivity } from './access-activity.js?v=69';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=80';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
