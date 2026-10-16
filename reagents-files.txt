@@ -1,5 +1,6 @@
 app.js
 index.html
+inventory-export.js
 manifest.webmanifest
 model.js
 orders.js

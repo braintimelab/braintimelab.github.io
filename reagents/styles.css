@@ -5,3 +5,39 @@
 @media print{.sidebar,header,.toolbar,.pagination,.header-actions,footer,#status,button{display:none!important}.workspace{margin:0}body,main,.panel{background:white}main{padding:0}.table-wrap{overflow:visible}tr,.source-card,.panel{break-inside:avoid}}
 .order-search-panel .section-head{margin-bottom:12px}.order-search-panel h2,.purchase-compose>summary{font-size:19px;font-weight:600;letter-spacing:-.02em}.order-search-panel .toolbar{margin-bottom:8px}.order-offers{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,285px),1fr));gap:10px}.order-offer{border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-width:0}.order-offer h3{margin:0 0 5px;font-size:14px}.order-offer p{margin:3px 0;font-size:12px;overflow-wrap:anywhere}.order-offer button{align-self:flex-start}.offer-email{color:var(--muted)}.order-form{margin-top:18px}.order-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.order-fields .wide,.order-fields>p{grid-column:1/-1}.order-submit{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding-top:18px}.order-form .error,.purchase-card .error{padding:0}.order-submit button{min-width:160px}.purchase-compose>summary{cursor:pointer}.purchase-list{display:grid;gap:14px}.purchase-card{border:1px solid var(--line);border-radius:8px;padding:17px;min-width:0}.purchase-card .section-head{margin-bottom:12px;align-items:flex-start;flex-wrap:wrap}.purchase-card h3{margin:0;font-size:16px}.purchase-card .section-head p{margin:4px 0}.purchase-summary{display:grid;grid-template-columns:85px minmax(0,1fr) 85px minmax(0,1fr);gap:7px 14px;font-size:12px}.purchase-summary dt{color:var(--muted)}.purchase-summary dd{margin:0;overflow-wrap:anywhere}.order-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}.order-status-filter{display:flex;gap:10px;align-items:center;font-size:12px}.order-status-filter select{min-width:175px}.purchase-action-form{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.purchase-action-form h4{margin:0 0 12px}.purchase-action-form .order-actions{margin-top:15px}.order-search-panel .pagination:empty,.purchase-card .error:empty{display:none}
 @media(max-width:750px){.purchase-summary{grid-template-columns:85px minmax(0,1fr)}.order-fields{grid-template-columns:1fr}.order-fields .wide{grid-column:auto}.order-submit{align-items:stretch;flex-direction:column}.order-submit button{width:100%}.purchase-card{padding:14px}.order-offers{grid-template-columns:1fr}.order-search-panel .section-head h2{font-size:18px}}
+
+.header-actions{flex-wrap:wrap;justify-content:flex-end}#sheet-import{white-space:nowrap}#sheet-import-dialog .upload-preview{margin-top:18px}#pdf-export{width:min(1180px,calc(100vw - 24px))}.pdf-export-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;font-size:12px}.pdf-export-actions span{color:var(--muted)}#pdf-export-content{padding:20px;overflow:auto;max-height:65dvh}
+@media(max-width:650px){header{flex-wrap:wrap}.header-actions{width:100%;justify-content:flex-start}#sheet-import{margin-right:auto}.pdf-export-actions{flex-wrap:wrap;padding:12px 18px}#pdf-export-content{padding:12px}}
+@media print{@page{size:A4 landscape;margin:10mm}body:has(#pdf-export[open])>.shell,body:has(#pdf-export[open])>.skip-link,body:has(#pdf-export[open])>dialog:not(#pdf-export){display:none!important}#pdf-export[open]{display:block!important;position:static;width:auto;max-width:none;height:auto;max-height:none;overflow:visible;margin:0;padding:0;border:0;border-radius:0}#pdf-export::backdrop{display:none}#pdf-export>.dialog-head,#pdf-export>.pdf-export-actions{display:none!important}#pdf-export-content{max-height:none;overflow:visible;padding:0}}
+
+@page { size: A4 landscape; margin: 10mm; }
+.inventory-print { color: #111; background: #fff; font: 10pt/1.35 Arial, "Noto Sans TC", "PingFang TC", sans-serif; }
+.inventory-print * { box-sizing: border-box; }
+.inventory-print h1 { margin: 0 0 2mm; font-size: 18pt; line-height: 1.2; }
+.inventory-print .export-brand { margin: 0 0 1mm; font-size: 10pt; }
+.inventory-print .export-meta { margin: 0 0 2mm; font-size: 9pt; overflow-wrap: anywhere; }
+.inventory-print .export-legend { margin: 2mm 0; font-size: 8pt; }
+.inventory-print table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
+.inventory-print th, .inventory-print td { padding: 2mm; border: .2mm solid #aaa; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.inventory-print th { color: #000; background: #eee; font-weight: 700; }
+.inventory-print .export-detail { margin-top: .8mm; white-space: pre-wrap; }
+.inventory-print .export-detail span { font-weight: 500; }
+.inventory-print .export-sds { margin-top: 1mm; font-size: 7pt; overflow-wrap: anywhere; }
+.inventory-print a { color: #111; text-decoration: underline; }
+.inventory-print thead { display: table-header-group; }
+.inventory-print tr { break-inside: avoid; page-break-inside: avoid; }
+.inventory-print .export-item { width: 23%; }
+.inventory-print .export-identifiers { width: 16%; }
+.inventory-print .export-storage { width: 15%; }
+.inventory-print .export-quantity { width: 11%; }
+.inventory-print .export-hazards { width: 17%; }
+.inventory-print .export-review { width: 18%; }
+@media print {
+  .inventory-print { width: 100%; padding: 0; }
+  .inventory-print h1, .inventory-print .export-meta { break-after: avoid; }
+  .inventory-print th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
+.inventory-print th{white-space:normal}.inventory-print{min-width:900px}@media print{.inventory-print{min-width:0}}
+
+#sheet-import-status[data-error=true]{color:var(--red)}

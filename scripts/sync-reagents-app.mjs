@@ -4,7 +4,7 @@ import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const REAGENTS_PUBLIC_FILES = Object.freeze([
-  'app.js', 'index.html', 'manifest.webmanifest', 'model.js', 'orders.js', 'styles.css'
+  'app.js', 'index.html', 'inventory-export.js', 'manifest.webmanifest', 'model.js', 'orders.js', 'styles.css'
 ]);
 const defaultRoot = fileURLToPath(new URL('../',import.meta.url));
 
