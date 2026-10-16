@@ -1,4 +1,4 @@
-import {esc,text,validDate,numeric} from './model.js?v=4';
+import {esc,text,validDate,numeric} from './model.js?v=5';
 
 export const ORDER_STATES=Object.freeze({submitted:'Awaiting approval',approved:'Proceed to purchase',ordered:'Awaiting receipt',received:'Received',rejected:'Declined',cancelled:'Cancelled'});
 const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'});

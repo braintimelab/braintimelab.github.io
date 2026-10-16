@@ -1,4 +1,4 @@
-import {esc,hazardous,itemClassification,labels,quantity,safeURL,text} from './model.js?v=4';
+import {esc,hazardous,itemClassification,labels,quantity,safeURL,text} from './model.js?v=5';
 
 // The caller supplies only records already authorized by the server. This module
 // never fetches data, expands a filter, or includes raw source/history payloads.

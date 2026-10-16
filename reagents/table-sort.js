@@ -1,4 +1,4 @@
-import {esc} from './model.js?v=3';
+import {esc} from './model.js?v=5';
 
 const collator=new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
 const decimal=/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
