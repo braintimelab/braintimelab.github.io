@@ -1,7 +1,7 @@
 /* Cage-card display schedules. Inferred/default LD never becomes exposure evidence. */
-import {cageObservations,cageCardObservation,todayTaipei} from './cage-observations.js?v=95';
-import {validTimingDate as timingDate} from './experiment-timing.js?v=95';
-import {blankLocoboxProtocol,blankLocoboxPhase,buildLocoboxProtocol,validateLocoboxRecord} from './locobox-model.js?v=95';
+import {cageObservations,cageCardObservation,todayTaipei} from './cage-observations.js?v=96';
+import {validTimingDate as timingDate} from './experiment-timing.js?v=96';
+import {blankLocoboxProtocol,blankLocoboxPhase,buildLocoboxProtocol,validateLocoboxRecord} from './locobox-model.js?v=96';
 const list=value=>Array.isArray(value)?value:[];
 const text=value=>typeof value==='string'?value.trim():value==null?'':String(value);
 const active=row=>row&&!row.app_archived_at&&row.archived!==true;

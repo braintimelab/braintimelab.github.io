@@ -1,52 +1,53 @@
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=95';
-import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=95';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=95';
-import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=95';
-import { renderMouseReview } from './mouse-review-view.js?v=95';
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=95';
-import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=95';
-import * as store from './data-store.js?v=95';
-import * as model from './model.js?v=95';
-import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=95';
-import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=95';
-import { renderStrainManagement } from './strain-management.js?v=95';
-import { summarizeLitters } from './litter-summary.js?v=95';
-import { summarizeOverview } from './overview-summary.js?v=95';
-import { summarizeCages } from './cage-summary.js?v=95';
-import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=95';
-import { summarizeBreeding } from './breeding-summary.js?v=95';
-import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=95';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=95';
-import * as history from './history-index.js?v=95';
-import { renderUserManagement } from './user-management.js?v=95';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=95';
-import { renderAccessLogs } from './access-logs.js?v=95';
-import { createAccessActivity } from './access-activity.js?v=95';
-import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=95';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=95';
-import { sortRooms, compareRooms } from './room-order.js?v=95';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=95';
-import { prepareMouseCageSheetEdit } from './cage-observations.js?v=95';
-import { renderCageLabelEditor } from './cage-label.js?v=95';
-import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=95';
-import { renderAccountAcronym } from './account-acronym.js?v=95';
-import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=95';
-import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=95';
-import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=95';
-import { renderBreedingPlanner } from './breeding-planner.js?v=95';
-import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=95';
-import { buildFamilyGenotypes } from './family-genotypes.js?v=95';
-import { renderCryopreservation } from './cryopreservation.js?v=95';
-import { renderExperiments, experimentHelpHTML } from './experiments.js?v=95';
-import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=95';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=95';
-import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=95';
-import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=95';
-import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=95';
-import { protocolsForEntity } from './iacuc-model.js?v=95';
-import { renderExportCenter } from './export-center.js?v=95';
-import { datasetFromLocalBackup } from './local-backup.js?v=95';
-import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=95';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=96';
+import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=96';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=96';
+import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=96';
+import { renderMouseReview } from './mouse-review-view.js?v=96';
+import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=96';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=96';
+import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=96';
+import * as store from './data-store.js?v=96';
+import * as model from './model.js?v=96';
+import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=96';
+import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=96';
+import { renderStrainManagement } from './strain-management.js?v=96';
+import { summarizeLitters } from './litter-summary.js?v=96';
+import { summarizeOverview } from './overview-summary.js?v=96';
+import { summarizeCages } from './cage-summary.js?v=96';
+import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=96';
+import { summarizeBreeding } from './breeding-summary.js?v=96';
+import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=96';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=96';
+import * as history from './history-index.js?v=96';
+import { renderUserManagement } from './user-management.js?v=96';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=96';
+import { renderAccessLogs } from './access-logs.js?v=96';
+import { createAccessActivity } from './access-activity.js?v=96';
+import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=96';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=96';
+import { sortRooms, compareRooms } from './room-order.js?v=96';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=96';
+import { prepareMouseCageSheetEdit } from './cage-observations.js?v=96';
+import { renderCageLabelEditor } from './cage-label.js?v=96';
+import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=96';
+import { renderAccountAcronym } from './account-acronym.js?v=96';
+import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=96';
+import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=96';
+import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=96';
+import { renderBreedingPlanner } from './breeding-planner.js?v=96';
+import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=96';
+import { buildFamilyGenotypes } from './family-genotypes.js?v=96';
+import { renderCryopreservation } from './cryopreservation.js?v=96';
+import { renderExperiments, experimentHelpHTML } from './experiments.js?v=96';
+import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=96';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=96';
+import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=96';
+import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=96';
+import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=96';
+import { protocolsForEntity } from './iacuc-model.js?v=96';
+import { renderExportCenter } from './export-center.js?v=96';
+import { datasetFromLocalBackup } from './local-backup.js?v=96';
+import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=96';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -61,6 +62,7 @@ const localDate = () => {const d=new Date();return [d.getFullYear(),String(d.get
 const editableTypes = ['mice','matings','litters','cages'];
 let dataset = null, cloud = {}, route = 'overview', detail = null, query = '', filters = {}, page = 0, sortKey = '', sortDesc = false;
 let editor = null, busy = false, cloudReady = true, archiveTable = 'issues', familyFocus = '', selectedMice = new Set(), deferredInstall = null;
+let brainbotReviewPending=false;
 let startupLoading=false,startupMessage='Checking access…',startupProgressValue=null,manualPullPending=false,cloudLoadError='',cachedPreview=false,startupRequest=0;
 const pageSize = 50;
 let treeZoom = 1;
@@ -208,7 +210,7 @@ const fieldDefs = {
 };
 
 function canEditRecords(section=route){
- if(startupLoading||historyLoadState||cloud.passwordRecovery||cloud.role==='pending')return false;if(cloud.mode!=='cloud')return true;if(!cloudReady)return false;
+ if(brainbotReviewPending||startupLoading||historyLoadState||cloud.passwordRecovery||cloud.role==='pending')return false;if(cloud.mode!=='cloud')return true;if(!cloudReady)return false;
  if(['owner','editor'].includes(cloud.role))return true;
  if(cloud.role!=='manager')return false;
  const key=({mice:'mice',matings:'breeding',litters:'breeding',cages:'housing',locations:'housing',rooms:'housing',racks:'housing',housing:'housing',locobox:'housing',planner:'genetics',family:'genetics',experiments:'experiments',iacuc:'iacuc',cryo:'cryo',fees:'fees',archive:'archive'})[section]||section;
@@ -244,8 +246,9 @@ function renderConnection() {
  const connected=cloud.mode==='cloud';$('mode-badge').textContent=connected?(cloudReady?(cloud.role==='viewer'?'Cloud · read only':'Cloud connected'):'Cloud · reconnect required'):'Local only';$('mode-badge').classList.toggle('cloud',connected&&cloudReady);
  $('workspace-label').textContent=dataset?.demo||dataset?.is_demo||dataset?.synthetic?'Synthetic demonstration':connected?'Shared laboratory workspace':'Private browser workspace';
 }
-function navigation() { $('navigation').innerHTML=Object.entries(titles).filter(([key])=>(cloud.role!=='pending'||key==='settings')&&!cloud.passwordRecovery&&(key!=='brainbot'||(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role==='owner'))).map(([key,label])=>`<button class="nav-item${['cryo','locobox'].includes(key)?' nav-subitem':''}${route===key?' active':''}" data-route="${key}" aria-current="${route===key?'page':'false'}" title="${esc(label)}"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icons[key]}</svg></span><span class="nav-label">${key==='overview'?`<span class="nav-label-full">${esc(label)}</span><span class="nav-label-compact">Overview</span>`:esc(label)}</span>${entity[key]&&dataset?`<span class="nav-count">${count((key==='cages'?cageRecords():records(key,false)).length)}</span>`:''}</button>`).join(''); }
-function navigate(view,id=null) { if(sidebarMenuOpen)setSidebarMenuOpen(false,false);if(cloud.role==='pending')view='settings';route=titles[view]?view:'overview';detail=id&&entity[route]?{type:route,id:String(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;selectedMice.clear();location.hash=detail?`${route}/${encodeURIComponent(detail.id)}`:route;render(); }
+function canViewBrainbot(status=cloud){return status.mode==='cloud'&&status.signedIn===true&&!status.passwordRecovery&&['owner','manager','editor','viewer'].includes(status.role)&&(['owner','manager'].includes(status.role)||['high','max'].includes(status.exportLevel));}
+function navigation() { $('navigation').innerHTML=Object.entries(titles).filter(([key])=>(cloud.role!=='pending'||key==='settings')&&!cloud.passwordRecovery&&(key!=='brainbot'||canViewBrainbot())).map(([key,label])=>`<button class="nav-item${['cryo','locobox'].includes(key)?' nav-subitem':''}${route===key?' active':''}" data-route="${key}" aria-current="${route===key?'page':'false'}" title="${esc(label)}"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icons[key]}</svg></span><span class="nav-label">${key==='overview'?`<span class="nav-label-full">${esc(label)}</span><span class="nav-label-compact">Overview</span>`:esc(label)}</span>${entity[key]&&dataset?`<span class="nav-count">${count((key==='cages'?cageRecords():records(key,false)).length)}</span>`:''}</button>`).join(''); }
+function navigate(view,id=null) { if(brainbotReviewPending){showToast('BB review is running.');return;}if(sidebarMenuOpen)setSidebarMenuOpen(false,false);if(cloud.role==='pending')view='settings';route=titles[view]?view:'overview';detail=id&&entity[route]?{type:route,id:String(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;selectedMice.clear();location.hash=detail?`${route}/${encodeURIComponent(detail.id)}`:route;render(); }
 function render() {
  const generation=++pageRenderGeneration;
  if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();
@@ -272,7 +275,7 @@ function render() {
  if(route==='iacuc'){renderIacuc($('main'),dataset,{initialEntity:iacucEntity,canEdit:()=>canEditRecords('iacuc'),openMouse:id=>navigate('mice',id),openCage:id=>navigate('cages',id),toast:showToast,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='fees'){renderLacFees($('main'),dataset,{isCurrent:()=>generation===pageRenderGeneration&&route==='fees'&&!detail,getVisibility:()=>store.getLacFeeVisibility(),saveVisibility:input=>store.saveLacFeeVisibility(input),canEdit:()=>canEditRecords('fees'),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='archive'){renderArchive();return}
- if(route==='review'){renderMouseReview($('main'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),isCurrent:()=>generation===pageRenderGeneration&&route==='review'&&!detail,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
+ if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;renderMouseReview($('main'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
 function startupProgressBar(){
@@ -614,11 +617,47 @@ function renderPasswordRecovery(){
  const verify=cloud.passwordRecoveryUpdated===true;
  $('main').innerHTML=panel(verify?'Verify your new password':'Choose a new password',`<p class="subtle">${verify?'Your password was saved. Enter that password to verify sign-in; this will not change it again.':'Set a new Braintime Mouse Data password and verify sign-in.'}</p><form id="password-recovery" class="form-stack"><div class="field"><label for="recovery-account">Account</label><input id="recovery-account" type="email" autocomplete="username" readonly value="${esc(cloud.email||'')}"></div><div class="field"><label for="recovery-password">${verify?'Saved new password':'New password'}</label><input id="recovery-password" type="password" autocomplete="${verify?'current-password':'new-password'}" minlength="12" maxlength="128" required><small>12–128 characters. Use a unique password from your password manager.</small></div>${verify?'':'<div class="field"><label for="recovery-confirm">Confirm new password</label><input id="recovery-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></div>'}<label class="checkbox"><input id="recovery-show-password" type="checkbox"> Show password</label><button class="button primary" type="submit">${verify?'Verify password &amp; sign in':'Save password &amp; sign in'}</button><button class="text-button" type="button" data-action="cancel-recovery">Cancel and return to sign in</button><p id="password-recovery-status" class="small" role="status"></p></form>`);
 }
+function canBatchMouseReview(){
+ return Boolean(dataset)&&cloud.mode==='cloud'&&cloud.signedIn===true&&cloud.role==='owner'&&!cloud.passwordRecovery&&!cachedPreview&&!startupLoading&&!historyLoadState&&cloudReady&&!editor&&!hasCageSheetDrafts();
+}
+async function runMouseReviewBatch({scope='current'}={},current=()=>true){
+ if(brainbotReviewPending||busy||!canBatchMouseReview()||!current())throw new Error('Open the verified shared colony as owner before running BB review.');
+ const context=cageSheetContext();let fresh=dataset,started=false;
+ const checkAccess=()=>{
+  const status=store.getCloudStatus();
+  if(context!==cageSheetContext()||context!==JSON.stringify([status.mode,status.url,status.colonyId,status.email,status.role,Boolean(status.signedIn)])||status.mode!=='cloud'||status.role!=='owner'||status.signedIn!==true||status.passwordRecovery||!current())throw new Error('Access or page changed. Reopen Review.');
+  if(!canBatchMouseReview())throw new Error('Synchronizing. BB review is paused.');
+ };
+ brainbotReviewPending=true;busy=true;
+ try{
+  checkAccess();const status=await store.getBrainbotStatus();checkAccess();
+  if(!status?.principal?.principal_id||status.principal.role!=='manager'||status.principal.permissions?.mice!==true)throw new Error('Enable the Braintime Bot mice capability in its settings.');
+  started=true;const result=await runBrainbotMouseReview({scope,checkAccess,
+   loadFresh:async()=>{
+    checkAccess();let loaded=await store.pullFromCloud({deferHistory:true});checkAccess();
+    if(store.getDeferredHistoryTables(loaded).includes('mating_members')){loaded=await store.ensureHistory(loaded,{tables:['mating_members']});checkAccess();}
+    fresh=loaded;dataset=loaded;return loaded;
+   },
+   save:async(next,options)=>{checkAccess();await store.saveDataset(next,options);checkAccess();}
+  });
+  checkAccess();dataset=result.dataset;await refreshCloud();checkAccess();return result;
+ }catch(error){
+  if(context===cageSheetContext()){
+   dataset=fresh;
+   try{await refreshCloud();}catch{cloudReady=false;}
+   if(started){cloudReady=false;renderConnection();}
+  }
+  throw error;
+ }finally{
+  brainbotReviewPending=false;busy=false;
+  if(context===cageSheetContext()&&!current())render();
+ }
+}
 function renderBrainbotPage(){
- if(cloud.mode!=='cloud'||!cloud.signedIn||cloud.role!=='owner'){$('main').innerHTML='<div class="empty">Braintime Bot monitoring is available only to the signed-in database owner.</div>';return;}
- const context=()=>JSON.stringify([route,cloud.mode,cloud.url,cloud.colonyId,cloud.email,cloud.role,Boolean(cloud.signedIn)]);
- const synchronized=fn=>(...args)=>{if(cachedPreview||startupLoading||!cloudReady)throw new Error('Synchronizing. Bot changes are paused.');return fn(...args);};
- void renderBrainbot($('main'),{getStatus:store.getBrainbotStatus,saveSettings:synchronized(store.saveBrainbotSettings),runChecks:synchronized(async()=>{const result=await store.runBrainbot();if(result.last_run?.fixed_count>0){cloudReady=false;try{dataset=await store.pullFromCloud({deferHistory:true});cloudReady=true;await refreshCloud();}catch(error){showToast('Checks finished. Reload the shared colony before editing corrected records.',true);}renderConnection();}return result;}),reviewIssue:synchronized(store.reviewBrainbotIssue),context:context(),currentContext:context,openEntity:(type,id)=>{if(entity[type])navigate(type,id);else if(type==='integration')navigate('settings');else if(['husbandry_events','locations','rooms','racks'].includes(type)){navigate('housing')}},toast:showToast,help:()=>showHelp()});
+ if(!canViewBrainbot()){$('main').innerHTML='<div class="empty">Braintime Bot monitoring is unavailable for this account.</div>';return;}
+ const context=()=>JSON.stringify([route,cloud.mode,cloud.url,cloud.colonyId,cloud.email,cloud.role,cloud.exportLevel,Boolean(cloud.signedIn)]);
+ const synchronized=fn=>(...args)=>{if(cloud.role!=='owner')throw new Error('Only the owner can manage Braintime Bot.');if(brainbotReviewPending||cachedPreview||startupLoading||!cloudReady)throw new Error('Synchronizing. Bot changes are paused.');return fn(...args);};
+ void renderBrainbot($('main'),{canManage:()=>cloud.role==='owner',getStatus:store.getBrainbotStatus,openReview:()=>navigate('review'),saveSettings:synchronized(store.saveBrainbotSettings),runChecks:synchronized(async()=>{const result=await store.runBrainbot();if(result.last_run?.fixed_count>0){cloudReady=false;try{dataset=await store.pullFromCloud({deferHistory:true});cloudReady=true;await refreshCloud();}catch(error){showToast('Checks finished. Reload the shared colony before editing corrected records.',true);}renderConnection();}return result;}),reviewIssue:synchronized(store.reviewBrainbotIssue),context:context(),currentContext:context,openEntity:(type,id)=>{if(entity[type])navigate(type,id);else if(type==='integration')navigate('settings');else if(['husbandry_events','locations','rooms','racks'].includes(type)){navigate('housing')}},toast:showToast,help:()=>showHelp()});
 }
 function renderSettings(){clearAccountSetup($('account-setup'));if(startupLoading){renderStartupLoading();return;}clearAccessLogView();clearLabMembersView();accessActivity.observe('settings');if(cloud.passwordRecovery){renderPasswordRecovery();return;}if(isLegacySite(location)){renderLegacySettings();return;}const signed=Boolean(cloud.signedIn),connected=cloud.mode==='cloud';const emailLogin=authPendingEmail?`<div class="form-stack"><p class="subtle">Open the sign-in link sent to ${esc(authPendingEmail)}.</p><div class="settings-actions" style="margin:0">${button('Send another link','resend-link')}${button('Use another email','change-email')}</div><details class="source-disclosure"><summary>Enter an email code</summary><form id="email-code-verify" class="form-stack" style="margin-top:14px"><div class="field"><label for="email-code">Code, if included in your email</label><input id="email-code" inputmode="numeric" autocomplete="one-time-code" required placeholder="Enter email code"></div><button class="button primary" type="submit">Verify & sign in</button></form></details></div>`:`<form id="email-link-request" class="form-stack"><div class="field"><label for="code-email">Email</label><input id="code-email" type="email" autocomplete="email" required placeholder="Your lab email"></div><button class="button primary" type="submit"${!cloud.configured?' disabled':''}>Send sign-in link</button>${!cloud.configured?'<p class="small muted">Configure the shared colony below first.</p>':''}</form>`;const firstLogin=`<details class="source-disclosure"><summary>Create an account</summary><form id="first-login-request" class="form-stack"><div class="field"><label for="first-login-email">Email</label><input id="first-login-email" type="email" autocomplete="email" required></div><p class="small muted">Verify your email to continue. New members require owner approval.</p><button class="button secondary" type="submit">Send verification link</button></form></details>`;const passwordLogin=`<form id="cloud-login" class="form-stack"><div class="field"><label for="login-email">ID or email</label><input id="login-email" type="text" autocomplete="username" required placeholder="Your ID or registered email"></div><div class="field"><label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required></div><button class="button primary" type="submit"${!cloud.configured?' disabled':''}>Sign in</button></form><details class="source-disclosure"><summary>Forgot password?</summary><form id="password-reset-request" class="form-stack"><div class="field"><label for="reset-identifier">ID or registered email</label><input id="reset-identifier" autocomplete="username" required maxlength="254"></div><button type="submit" class="button secondary"${!cloud.configured?' disabled':''}>Send reset link</button><p id="password-reset-status" class="small" role="status"></p></form></details>`;const config=`<details class="source-disclosure"${!cloud.configured?' open':''}><summary>Advanced connection settings</summary><form id="cloud-config" class="form-stack" style="margin-top:15px"><div class="field"><label for="cloud-url">Supabase project URL</label><input id="cloud-url" type="url" required placeholder="https://your-project.supabase.co" value="${esc(cloud.url||PUBLIC_CONFIG.url||'')}"></div><div class="field"><label for="cloud-key">Public publishable / anon key</label><input id="cloud-key" autocomplete="off" spellcheck="false" value="${esc(cloud.anonKey||PUBLIC_CONFIG.anonKey||'')}"></div><div class="field"><label for="cloud-colony">Colony UUID</label><input id="cloud-colony" required spellcheck="false" value="${esc(cloud.colonyId||PUBLIC_CONFIG.colonyId||'')}"></div><button class="button secondary" type="submit">Save connection settings</button></form></details>`;$('main').innerHTML=`<div class="settings-grid"><div>${panel(signed?'Your account':'Sign in',signed?`<p class="subtle">${esc(cloud.email||'Signed in')}${cloud.role==='pending'?' · Account setup':visibleRoleLabel(cloud.role)?' · '+esc(visibleRoleLabel(cloud.role)):''}</p><div class="settings-actions">${cloud.role==='pending'?'':button('Load shared colony','cloud-pull',true)}${canWriteCloud()?button('Upload local records','cloud-push'):''}${button('Sign out','sign-out')}</div>${accountForms()}`:passwordLogin+`<details class="source-disclosure"${authPendingEmail?' open':''}><summary>Sign in with an email link</summary>${emailLogin}</details>`+firstLogin)}${cloud.role==='pending'?'':panel('Workspace',`${cloudLoadError?`<div class="alert error" id="cloud-load-error" role="alert">${esc(cloudLoadError)}<p class="small">Shared editing remains paused.</p>${signed&&cloud.role!=='pending'?button('Retry loading','cloud-pull',true):''}</div>`:''}<div class="alert info">${connected?(cloudReady?'Cloud connected':'Reconnect to edit'):'Local only'}</div>${connected&&cloudReady?`<p class="small muted" role="status" id="cloud-sync-summary">${esc(cloud.message)}</p>`:''}<div class="settings-actions">${button('Export & backup','export')}${button('Import JSON','import')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG)}${config}`)}</div><div>${panel('Install on your devices',`<ol class="list-steps"><li><strong>iPhone / iPad:</strong> Safari → Share → Add to Home Screen.</li><li><strong>Android:</strong> Chrome → Install app.</li><li><strong>Computer:</strong> Chrome / Edge → address-bar install icon.</li></ol>${deferredInstall?button('Install app','install',true):''}`)}${panel('Help',`${button('Open Help','help')}<details class="source-disclosure"><summary>Clear browser data</summary><p class="subtle">Local copies only. Shared records remain.</p>${button('Clear browser workspace','clear-workspace')}</details>`)}</div>${signed&&cloud.role!=='pending'?'<div class="wide" id="animal-sheet-import"></div>':''}${signed&&cloud.role==='owner'?`<div class="wide">${panel('Braintime Bot (BB)','<p class="small muted">Manager service account · Owner-only monitoring</p><button class="button secondary" data-route="brainbot">Open monitoring &amp; review</button>')}</div><div class="wide" id="lab-members"></div><div class="wide" id="user-management"></div>`:''}${signed&&connected&&cloud.role==='owner'?'<div class="wide" id="access-logs"></div>':''}</div>`;if(signed){void renderAccountSetup($('account-setup'),{getProfile:loadSidebarProfile,saveProfile:store.saveMyLabProfile,complete:store.completeAccountSetup,onProfileSaved:adoptSidebarProfile,onComplete:afterSignIn});if(cloud.role!=='pending')void renderAccountAcronym($('account-acronym'),{getProfile:loadSidebarProfile,saveAcronym:store.updateMyLabAcronym,onSaved:async profile=>{adoptSidebarProfile(profile);try{const directory=await store.getLabUserDirectory();setLabUserDirectory(directory?.users||[]);}catch{setLabUserDirectory([]);}}});}
  if(signed&&cloud.role!=='pending')void renderAnimalSheetImport($('animal-sheet-import'),{canImport:()=>canEditRecords('housing')&&canWriteCloud(),getStatus:store.getAnimalSheetImportStatus,start:store.startAnimalSheetImport,getConflicts:store.getAnimalSheetImportConflicts,help:()=>showHelp(),onComplete:async()=>{dataset=await store.pullFromCloud({deferHistory:true});cloudReady=true;await refreshCloud();showToast('Animal Sheet update loaded.');}});
@@ -716,6 +755,7 @@ async function bulkCage(){if(!canEditRecords('mice')||!canEditRecords('housing')
 function showHelp(mouseCounts=false,breedingCounts=false,cageCounts=false,overviewCounts=false,litterCounts=false,familyGenotypes=false,experimentHelp=false,feeHelp=false){let dialog=$('help-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='help-dialog';document.body.appendChild(dialog)}dialog.innerHTML=`<div class="dialog-heading"><h2>Braintime Mouse Data · Help</h2><button class="icon-button" id="help-close" aria-label="Close help">×</button></div><div class="dialog-content"><details class="source-disclosure"${mouseCounts||breedingCounts||cageCounts||overviewCounts||litterCounts||familyGenotypes||experimentHelp?'':' open'}><summary>Local and shared records</summary><p class="subtle">Local only means changes stay in this browser. Configure Supabase with its HTTPS project URL, public publishable/anon key and colony UUID. Never use a service-role key. Sign in, then load the shared colony or explicitly upload local records. Shared saves check record versions; conflicts require a fresh load. Offline shared editing is disabled.</p></details><details class="source-disclosure"${overviewCounts?' open':''}><summary>Current Animal Overview counts</summary>${overviewHelpHTML()}</details><details class="source-disclosure"${mouseCounts?' open':''}><summary>Current mouse counts</summary><p class="subtle">Mice shows current Stock animals, excluding archived records. Search and table filters do not change these totals. Each strain total includes recorded and undetermined labels; the undetermined subset appears below it. These labels are not independent carrier verification. Strain totals overlap: ADB′ counts in AD and B; ADFB′ counts in AD, F and B. AD means APP/PS1. An apostrophe means homozygous; parentheses mean undetermined until genotyping. Genotype combinations count each mouse once and preserve these distinctions. Missing information is Unclassified. Reviewed allele calls take precedence; negative calls are excluded. Animal Sheet observations are not added as extra mice. Changes appear after saving or refreshing the shared colony.</p></details><details class="source-disclosure"><summary>Strain acronyms &amp; insertion types</summary>${strainLegendHTML()}</details><details class="source-disclosure"${familyGenotypes?' open':''}><summary>Family tree &amp; genotype targets</summary>${familyHelpHTML()}</details><details class="source-disclosure"><summary>Parents, genotypes and source evidence</summary><p class="subtle">A single parent ID is a recorded assertion, not independent genetic verification. Several IDs for one parent role remain alternatives, shown with dashed tree edges. Missing scientific values remain unknown. Current trees use current mouse parent fields; imported link tables stay historical evidence. Historical tag matches do not establish identity across time, pedigree or present housing.</p></details><details class="source-disclosure"${breedingCounts?' open':''}><summary>Breeding counts &amp; age options</summary>${breedingHelpHTML()}</details><details class="source-disclosure"><summary>Planning</summary><p class="subtle">Add loci from your records, review allele calls, and compare inherited genotype frequencies. Saved plans do not create matings or offspring. Planning Help explains linkage, same-locus reporters and Cre recombination limits.</p></details><details class="source-disclosure"${litterCounts?' open':''}><summary>Litter ages &amp; weaning</summary>${litterHelpHTML()}</details><details class="source-disclosure"${cageCounts?' open':''}><summary>Cage usage &amp; capacity</summary>${cageSummaryHelpHTML()}${cageSheetHelpHTML()}</details><details class="source-disclosure"><summary>Housing and light history</summary><p class="subtle">Use Add room, Add rack here and Add position in Housing &amp; light. Empty rooms and racks stay visible. Select named rooms, racks and positions when editing a cage, or use Assign cage on an empty position. Cage location changes save a dated history; names at the time of the move are preserved. Cage occupancy uses Stock mice assigned to each cage. Moving mice saves an effective date and husbandry event with the animal update. Light history records exposure protocols, not proof of biological entrainment. Enter actual cycle duration for T-cycles and leave shifting or unknown clock times blank.</p></details><details class="source-disclosure"${experimentHelp?' open':''}><summary>Experiments &amp; samples</summary>${experimentHelpHTML()}${userAcronymHelpHTML(dataset)}</details><details class="source-disclosure"><summary>Cryopreservation</summary><p class="subtle">Open Housing &amp; light → Cryopreservation to view the Animal Sheet register. Historical straw balances stay dated source observations until a stocktake establishes current stock. Review a case to assign a manager and storage location. Record withdrawals, transfers and recovery attempts as dated activities; recovery does not automatically create live mice. Planned transfers remain separate from stored material.</p></details><details class="source-disclosure"${feeHelp?' open':''}><summary>LAC monthly fees</summary>${lacFeeHelpHTML()}</details><details class="source-disclosure"><summary>Exports and permission levels</summary><p class="subtle">Export → Current Animal Sheet creates a room/rack layout, cage register and current animal tables in XLSX or a PDF print preview. Choose Save as PDF in your browser print dialog. Filters select rooms, racks, cages or mice. Records and history exports use recorded event dates, not import dates. Your export window is shown in Export. Undated history is excluded from bounded exports; a current animal can have an older birth date. Local backup availability and its history window depend on your account permissions. Partial backups cannot replace a full workspace. Raw source archive exports require full-history permission. The server rechecks permissions for each export. Export levels govern these export workflows separately from viewing and read/write access; they do not revoke information already viewed or copied.</p></details><details class="source-disclosure"><summary>Animal Sheet updates</summary>${animalSheetImportHelpHTML()}</details><details class="source-disclosure"><summary>Locobox schedules &amp; treatments</summary>${locoboxHelpHTML()}</details><details class="source-disclosure"><summary>IACUC protocols &amp; design</summary>${iacucHelpHTML()}</details><details class="source-disclosure"><summary>Source files, backups and private cloud history</summary><p class="subtle">JSON backups contain the working dataset. Source archive retains read-only evidence. The separate full-cell index preserves every archived populated cell, cached value and formula; import history_cells.json locally or use the private cloud upload/download controls. Private records are never bundled in public code or cached by the service worker. Clearing the browser removes local data and the local source-cell index, not shared cloud records.</p></details><details class="source-disclosure"><summary>Install on iPhone, iPad, Android or computer</summary><ol class="list-steps"><li>iPhone/iPad: open in Safari, tap Share → Add to Home Screen → Add. Enable Open as Web App if shown.</li><li>Android: open Chrome’s menu → Install app or Add to Home screen.</li><li>Computer: use Chrome/Edge’s address-bar install icon.</li></ol><p class="subtle">Use HTTPS or localhost. Sign into the same cloud colony on each device. The app shell can load offline; shared records require reconnection before editing.</p></details><details class="source-disclosure"><summary>Your profile and app password</summary><p class="subtle">In Settings → Your account, each user can save their name and set their own app password. ID or email and password is the default sign-in. Forgot password sends a reset link to the registered email; a verified link opens the new-password form. Save password &amp; sign in verifies the new password and current account access before opening data. If verification fails, retry with the saved password; no second password change is made. Show password is optional and off by default. Email-link sign-in remains available. Use a unique password and protect your email account. This is separate from Google or GitHub credentials. The owner manages access in User management.</p></details><details class="source-disclosure"><summary>Braintime Bot monitoring</summary>${brainbotHelpHTML()}</details><details class="source-disclosure"><summary>Managers and user access</summary><p class="subtle">Mouse and cage managers default to the recorded SoftMouse Owner. Edit a record to assign a different manager; the original imported owner is retained. A cage without an assignment may use a single manager shared by all current residents. Conflicting or incomplete assignments are marked for review. The owner preregisters current and historical lab members in Settings. Historical and review entries remain owner-only and cannot activate accounts. Current members verify their registered email and choose their username and app password. Read only, Read &amp; write, and configurable Manager roles are separate from export-history levels. Only the owner can manage accounts and privileges. Record managers do not automatically gain an app account.</p></details><details class="source-disclosure"><summary>Archive and print</summary><p class="subtle">Archiving is reversible and does not change biological state or End Date. Enable Include archived to restore a record. Print animal cards from a mouse record or selected mice. Print cage cards from a cage record or the housing board. Compact two-column cards show managers, IDs, housing and recorded light information. Cage cards list current Stock occupants.</p></details></div>`;$('help-close').onclick=()=>dialog.close();dialog.showModal()}
 
 async function action(name,target=null){
+ if(brainbotReviewPending&&!['help','sign-out','toggle-sidebar-menu','close-sidebar-menu'].includes(name)){showToast('BB review is running.');return;}
  if(name==='toggle-sidebar-menu'){setSidebarMenuOpen(!sidebarMenuOpen);return;}
  if(name==='close-sidebar-menu'){setSidebarMenuOpen(false);return;}
  if(name==='history-retry'){historyLoadFailure=null;render();return;}

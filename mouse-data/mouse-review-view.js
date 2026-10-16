@@ -1,4 +1,4 @@
-import { buildMouseReviewIssues } from './mouse-review.js?v=95';
+import { buildMouseReviewIssues } from './mouse-review.js?v=96';
 
 const mounts=new WeakMap();
 let mountNumber=0;
@@ -9,25 +9,29 @@ const safeUrl=value=>{try{const url=new URL(value);return ['https:','http:'].inc
 const sexLabel=value=>value==='Male'?'M':value==='Female'?'F':'?';
 const pageSize=25;
 
-/** Local review of retained Animal Sheet observations. Choosing an identity
- * opens the main editor; this view never creates, links, or saves a mouse. */
+/** Review retained Animal Sheet observations. Manual choices open the mouse
+ * editor; owner-requested BB batches save only through the supplied hook. */
 export function renderMouseReview(container,dataset,hooks={}){
- const issues=buildMouseReviewIssues(dataset,{includeHistorical:true});
- const byId=new Map(issues.map(issue=>[String(issue.id),issue]));
- const mice=list(dataset?.tables?.mice),mouseIndex=new Map();
- for(const mouse of mice){const id=String(mouse.mouse_sid??'');if(!id)continue;const matches=mouseIndex.get(id)||[];matches.push(mouse);mouseIndex.set(id,matches);}
+ let issues,byId,mouseIndex,counts,searchText;
+ function adoptDataset(data){
+  const nextIssues=buildMouseReviewIssues(data,{includeHistorical:true}),nextMouseIndex=new Map();
+  for(const mouse of list(data?.tables?.mice)){const id=String(mouse.mouse_sid??'');if(!id)continue;const matches=nextMouseIndex.get(id)||[];matches.push(mouse);nextMouseIndex.set(id,matches);}
+  const nextSearchText=new Map(nextIssues.map(issue=>[String(issue.id),[issue.tag,issue.dateOfBirth,issue.sex,issue.reasonLabel,issue.place,issue.room,issue.cage,...list(issue.candidateMouseSids),...list(issue.sources).flatMap(source=>[source.cell,source.room,source.cage,source.note])].filter(Boolean).join(' ').toLocaleLowerCase()]));
+  dataset=data;issues=nextIssues;byId=new Map(issues.map(issue=>[String(issue.id),issue]));mouseIndex=nextMouseIndex;searchText=nextSearchText;
+  counts={current:issues.filter(issue=>issue.current).length,historical:issues.filter(issue=>!issue.current).length,all:issues.length};
+ }
+ adoptDataset(dataset);
  const availableMouse=id=>{const rows=mouseIndex.get(String(id))||[];return rows.length===1?rows[0]:null;};
  const selectableMouse=id=>{const mouse=availableMouse(id);return mouse&&!mouse.archived&&!mouse.app_archived_at&&!mouse.history_read_only&&!mouse.source_historical?mouse:null;};
  const prefix=`mouse-review-${++mountNumber}`;
- const state={search:'',scope:'current',page:0,expanded:null,completing:false,choice:'',otherSid:'',busy:false,error:''};
+ const state={search:'',scope:'current',page:0,expanded:null,completing:false,choice:'',otherSid:'',busy:false,batchBusy:false,error:'',batchError:'',notice:''};
  mounts.set(container,state);
  const attached=()=>mounts.get(container)===state&&container.isConnected!==false;
  const current=()=>{try{return attached()&&hooks.isCurrent?.()!==false;}catch{return false;}};
  const editable=()=>{try{return current()&&hooks.canEdit?.()===true&&typeof hooks.completeMouse==='function';}catch{return false;}};
+ const batchAllowed=()=>{try{return current()&&hooks.canBatchReview?.()===true&&typeof hooks.batchReview==='function';}catch{return false;}};
  const allowed=()=>current();
  const candidateLabel=id=>{const m=availableMouse(id);return m?[text(m.physical_tag)||'Mouse',`SID ${id}`,text(m.date_of_birth)].filter(Boolean).join(' · '):`SID ${id}`;};
- const counts={current:issues.filter(issue=>issue.current).length,historical:issues.filter(issue=>!issue.current).length,all:issues.length};
- const searchText=new Map(issues.map(issue=>[String(issue.id),[issue.tag,issue.dateOfBirth,issue.sex,issue.reasonLabel,issue.place,issue.room,issue.cage,...list(issue.candidateMouseSids),...list(issue.sources).flatMap(source=>[source.cell,source.room,source.cage,source.note])].filter(Boolean).join(' ').toLocaleLowerCase()]));
  function filtered(){const query=state.search.trim().toLocaleLowerCase();return issues.filter(issue=>(state.scope==='all'||(state.scope==='current'?issue.current:!issue.current))&&(!query||searchText.get(String(issue.id)).includes(query)));}
  function clearSelection(){state.expanded=null;state.completing=false;state.choice='';state.otherSid='';state.error='';}
  function sourceHTML(source){
@@ -46,8 +50,8 @@ export function renderMouseReview(container,dataset,hooks={}){
   const rows=filtered(),pages=Math.max(1,Math.ceil(rows.length/pageSize));state.page=Math.min(Math.max(0,state.page),pages-1);
   const visible=rows.slice(state.page*pageSize,(state.page+1)*pageSize);
   if(state.expanded&&!visible.some(issue=>String(issue.id)===state.expanded))clearSelection();
-  const canEdit=editable();
-  container.innerHTML=`<section class="mouse-review" aria-label="Animal Sheet review"><div class="toolbar"><input id="${prefix}-search" class="search" type="search" data-review-search aria-label="Search animal review" placeholder="Find animal, SID, cage…" value="${esc(state.search)}"${state.busy?' disabled':''}><div class="filters"><select data-review-scope aria-label="Review period"${state.busy?' disabled':''}>${[['current','Current'],['all','All'],['historical','Historical']].map(([value,label])=>`<option value="${value}"${state.scope===value?' selected':''}>${label} (${counts[value]})</option>`).join('')}</select></div></div><div class="resultsbar"><span>${rows.length} unresolved${state.scope==='all'?' · '+counts.current+' current':''}</span></div><div class="table-card"><div class="table-scroll"><table><thead><tr><th>Animal</th><th>Cage / room</th><th>Review</th><th>Last seen</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${visible.map(issue=>`<tr><td><strong>${esc(issue.tag||'—')}</strong><div class="small muted">${esc([sexLabel(issue.sex),issue.dateOfBirth||'DOB unknown',!issue.current?'Historical':null].filter(Boolean).join(' · '))}</div></td><td>${esc(issue.place||[issue.room,issue.cage].filter(Boolean).join(' · ')||'—')}</td><td>${esc(issue.reasonLabel||issue.reason||'Review required')}</td><td>${esc(issue.lastSeen||'—')}</td><td><div class="actions"><button type="button" class="text-button" data-review-action="details" data-review-id="${esc(issue.id)}" aria-expanded="${state.expanded===String(issue.id)}"${state.busy?' disabled':''}>Details</button>${canEdit?`<button type="button" class="button secondary" data-review-action="complete" data-review-id="${esc(issue.id)}"${state.busy?' disabled':''}>Complete in Mice</button>`:''}</div></td></tr>${state.expanded===String(issue.id)?detailHTML(issue):''}`).join('')}</tbody></table></div>${!rows.length?`<div class="empty">${state.search?'No matching entries.':state.scope==='current'?'No current entries to review.':'No entries to review.'}${state.scope==='current'&&counts.historical?` <button type="button" class="text-button" data-review-action="historical">Historical (${counts.historical})</button>`:''}</div>`:''}<div class="pagination"><span>${rows.length?`${state.page*pageSize+1}–${Math.min(rows.length,(state.page+1)*pageSize)} of ${rows.length}`:'0 entries'}</span><div class="actions"><button type="button" class="button secondary" data-review-action="previous"${state.busy||state.page===0?' disabled':''}>Previous</button><span>${state.page+1} / ${pages}</span><button type="button" class="button secondary" data-review-action="next"${state.busy||state.page+1>=pages?' disabled':''}>Next</button></div></div></div></section>`;
+  const canEdit=editable(),canBatch=batchAllowed();
+  container.innerHTML=`<section class="mouse-review" aria-label="Animal Sheet review"${state.busy?' aria-busy="true"':''}><div class="toolbar"><input id="${prefix}-search" class="search" type="search" data-review-search aria-label="Search animal review" placeholder="Find animal, SID, cage…" value="${esc(state.search)}"${state.busy?' disabled':''}><div class="filters"><select data-review-scope aria-label="Review period"${state.busy?' disabled':''}>${[['current','Current'],['all','All'],['historical','Historical']].map(([value,label])=>`<option value="${value}"${state.scope===value?' selected':''}>${label} (${counts[value]})</option>`).join('')}</select>${canBatch?`<button type="button" class="button secondary" data-review-action="batch-review" title="Evaluate all animal consistency entries in the selected period, including entries hidden by search"${state.busy?' disabled':''}>${state.batchBusy?'BB working…':'BB evaluate &amp; approve'}</button>`:''}</div></div>${state.batchError?`<p class="alert error" role="alert">${esc(state.batchError)}</p>`:''}${state.notice?`<p class="small muted" role="status">${esc(state.notice)}</p>`:''}<div class="resultsbar"><span>${rows.length} unresolved${state.scope==='all'?' · '+counts.current+' current':''}</span></div><div class="table-card"><div class="table-scroll"><table><thead><tr><th>Animal</th><th>Cage / room</th><th>Review</th><th>Last seen</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${visible.map(issue=>`<tr><td><strong>${esc(issue.tag||'—')}</strong><div class="small muted">${esc([sexLabel(issue.sex),issue.dateOfBirth||'DOB unknown',!issue.current?'Historical':null].filter(Boolean).join(' · '))}</div></td><td>${esc(issue.place||[issue.room,issue.cage].filter(Boolean).join(' · ')||'—')}</td><td>${esc(issue.reasonLabel||issue.reason||'Review required')}</td><td>${esc(issue.lastSeen||'—')}</td><td><div class="actions"><button type="button" class="text-button" data-review-action="details" data-review-id="${esc(issue.id)}" aria-expanded="${state.expanded===String(issue.id)}"${state.busy?' disabled':''}>Details</button>${canEdit?`<button type="button" class="button secondary" data-review-action="complete" data-review-id="${esc(issue.id)}"${state.busy?' disabled':''}>Complete in Mice</button>`:''}</div></td></tr>${state.expanded===String(issue.id)?detailHTML(issue):''}`).join('')}</tbody></table></div>${!rows.length?`<div class="empty">${state.search?'No matching entries.':state.scope==='current'?'No current entries to review.':'No entries to review.'}${state.scope==='current'&&counts.historical?` <button type="button" class="text-button" data-review-action="historical">Historical (${counts.historical})</button>`:''}</div>`:''}<div class="pagination"><span>${rows.length?`${state.page*pageSize+1}–${Math.min(rows.length,(state.page+1)*pageSize)} of ${rows.length}`:'0 entries'}</span><div class="actions"><button type="button" class="button secondary" data-review-action="previous"${state.busy||state.page===0?' disabled':''}>Previous</button><span>${state.page+1} / ${pages}</span><button type="button" class="button secondary" data-review-action="next"${state.busy||state.page+1>=pages?' disabled':''}>Next</button></div></div></div></section>`;
   if(focusSearch){const input=container.querySelector?.(`#${prefix}-search`);input?.focus?.();if(selectionStart!==null)input?.setSelectionRange?.(selectionStart,selectionEnd??selectionStart);}
  }
  function setScope(scope){if(!['current','all','historical'].includes(scope))return;state.scope=scope;state.page=0;clearSelection();paint();}
@@ -70,6 +74,21 @@ export function renderMouseReview(container,dataset,hooks={}){
  container.onclick=async event=>{
   if(!allowed()||state.busy)return;const target=event.target.closest?.('[data-review-action]');if(!target||target.disabled)return;
   event.preventDefault?.();const action=target.dataset.reviewAction;
+  if(action==='batch-review'){
+   if(!batchAllowed())return;
+   const scope=state.scope;state.busy=true;state.batchBusy=true;state.batchError='';state.notice='';clearSelection();paint();
+   try{
+    if(!batchAllowed())throw new Error('Access changed. Refresh Review.');
+    const result=await hooks.batchReview({scope});
+    if(!current())return;
+    if(!batchAllowed())throw new Error('Access changed. Refresh Review.');
+    if(!result||!['checked','approved','manual'].every(key=>Number.isSafeInteger(result[key])&&result[key]>=0)||result.checked!==result.approved+result.manual||!result.dataset||typeof result.dataset!=='object'||!result.dataset.tables||!Array.isArray(result.dataset.tables.mice))throw new Error('The batch result could not be confirmed. Refresh Review.');
+    adoptDataset(result.dataset);state.page=0;
+    state.notice=`${result.checked} checked · ${result.approved} approved · ${result.manual} manual`;
+   }catch(error){if(current())state.batchError=error?.message||'BB review could not be completed. Refresh Review.';}
+   finally{if(current()){state.busy=false;state.batchBusy=false;paint();}}
+   return;
+  }
   if(action==='historical'){state.search='';setScope('historical');return;}
   if(action==='previous'||action==='next'){const pages=Math.max(1,Math.ceil(filtered().length/pageSize));state.page=Math.max(0,Math.min(pages-1,state.page+(action==='next'?1:-1)));clearSelection();paint();return;}
   if(action==='cancel-complete'){state.completing=false;state.choice='';state.otherSid='';state.error='';paint();return;}

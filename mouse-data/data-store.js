@@ -1,9 +1,9 @@
-import {clearHistoryIndex} from './history-index.js?v=95';
-import { projectLocoboxExport } from './locobox-export.js?v=95';
-import { PUBLIC_CONFIG } from './config.js?v=95';
-import { validateManagerPermissions } from './permissions.js?v=95';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=95';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=95';
+import {clearHistoryIndex} from './history-index.js?v=96';
+import { projectLocoboxExport } from './locobox-export.js?v=96';
+import { PUBLIC_CONFIG } from './config.js?v=96';
+import { validateManagerPermissions } from './permissions.js?v=96';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=96';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=96';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -1497,11 +1497,12 @@ export async function getAnimalSheetImportConflicts({offset=0,limit=100}={}){
 }
 
 
-// Braintime Bot owner controls are transient and never enter shared colony backups.
+// Monitoring is readable from High upward; all bot mutations remain owner-only.
 async function brainbotRequest(name,body={}){
  const context=exportContext(),c=configuration();
  if(!c||!session()?.user?.id)throw new Error('Sign in before opening Braintime Bot.');
- if(await membership()!=='owner')throw new Error('Only the owner can manage Braintime Bot.');
+ const role=await membership(),monitoring=name==='get_brainbot_status';
+ if(monitoring?!(['owner','manager'].includes(role)||['high','max'].includes(session()?.exportLevel)):role!=='owner')throw new Error(monitoring?'Braintime Bot monitoring is unavailable for this account.':'Only the owner can manage Braintime Bot.');
  checkExportContext(context);
  const result=await request('rpc/'+name,{method:'POST',body:{p_colony_id:c.colonyId,...body}});
  checkExportContext(context);

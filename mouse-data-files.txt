@@ -7,6 +7,8 @@ animal-sheet-export.js
 animal-sheet-import.js
 app.js
 archive-format.js
+brainbot-review-runner.js
+brainbot-review.js
 brainbot.js
 breeding-options.js
 breeding-planner.js
