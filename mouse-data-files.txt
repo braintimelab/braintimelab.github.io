@@ -13,6 +13,7 @@ breeding-planner.js
 breeding-summary.js
 cage-history.js
 cage-label.js
+cage-managers.js
 cage-movement.js
 cage-observations.js
 cage-sheet.js
