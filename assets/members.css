@@ -3,6 +3,7 @@
 .member-section-nav a[aria-current="page"] { color: var(--blue); border-bottom-color: var(--blue); }
 .member-section-nav a:hover { color: var(--blue); }
 .member-portrait { display: block; width: 210px; max-width: 100%; height: auto; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 3px; }
+.member-portrait-crop { aspect-ratio: 4 / 5; object-fit: cover; object-position: center; }
 .member-profile-link { font-size: .9rem; }
 @media (max-width: 850px) {
   .members-current .member-heading:has(.member-portrait) { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 8px 24px; align-items: start; }
