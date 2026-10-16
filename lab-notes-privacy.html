@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Lab Notes privacy · Braintime Lab</title>
+<meta name="description" content="How Braintime Lab Notes uses account information and presentation archives.">
+<meta name="theme-color" content="#28628c">
+<link rel="icon" href="assets/images/braintime-121x138.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header"><div class="header-inner">
+<a class="brand" href="index.html"><img src="assets/images/braintime-121x138.png" alt="" width="48" height="55"><span>Braintime Lab<small>Taipei Medical University</small></span></a>
+<button class="menu-button" type="button" aria-expanded="false" aria-controls="navigation">Menu <span aria-hidden="true">☰</span></button>
+<nav id="navigation" class="site-nav" aria-label="Main navigation"><a href="index.html#research">Projects</a><a href="members.html">People</a><a href="publications.html">Publications</a><a href="lectures.html">Lectures</a><a href="resources.html">Resources</a><a href="join.html">Why join?</a><a href="internal/" class="tools-link">Lab tools</a></nav>
+</div></header>
+<main id="main">
+<section class="page-heading wrap"><p class="eyebrow">Braintime Lab</p><h1>Lab Notes privacy</h1><p>Updated 16 October 2026</p></section>
+<div class="resources wrap">
+<section class="resource-section"><h2>Internal lab workspace</h2><div class="resource-content">
+<p>Lab Notes is a private workspace for registered Braintime Lab members. Existing lab accounts are verified through Supabase. Notes, images, schedules and meeting records are stored on BraintimeDisk, the lab’s private server.</p>
+<p>Member identities and roles control access. The browser uses a session cookie to stay signed in.</p>
+</div></section>
+<section class="resource-section"><h2>Google Drive connection</h2><div class="resource-content">
+<p>The owner may connect the dedicated lab Google account. Lab Notes uses Drive access to verify that account, copy selected Google Slides presentations, and store original uploaded PDFs, final whiteboard images and meeting records in a private archive folder.</p>
+<p>The connection requests Drive permission so it can copy presentations shared with the lab account. The application writes archive copies to its configured folder; it does not alter source presentations or their sharing permissions.</p>
+<p>Google connection credentials are stored privately on the lab server. Access tokens are not returned to members. Lab Notes does not use Google Drive data for advertising or to train AI models.</p>
+</div></section>
+<section class="resource-section"><h2>Archive access and retention</h2><div class="resource-content">
+<p>Saved archives are available only to the owner by default. The owner may give selected members access to a meeting’s archive through Lab Notes. This does not add Google Drive sharing permissions.</p>
+<p>New archive versions preserve earlier copies. Revoking Google access stops future archiving, but does not delete copies already stored on Drive or BraintimeDisk. Retained copies remain until the owner removes them.</p>
+</div></section>
+<section class="resource-section"><h2>Contact</h2><div class="resource-content">
+<p>For questions, access changes or removal of retained copies, contact Jihwan Myung at <a href="mailto:jihwan@tmu.edu.tw">jihwan@tmu.edu.tw</a>.</p>
+</div></section>
+</div></main>
+<footer class="site-footer"><div class="footer-main wrap"><div><a class="footer-brand" href="index.html">Braintime Lab</a><p>Taipei Medical University</p><a href="mailto:jihwan@tmu.edu.tw">jihwan@tmu.edu.tw</a></div><div class="footer-links"><a href="mailto:jihwan@tmu.edu.tw">Contact PI</a><a href="join.html">Why join Braintime?</a><a href="http://gimbc.tmu.edu.tw">GIMBC</a><a href="https://twitter.com/braintimelab">Braintime on X</a><a href="internal/">Lab tools</a></div></div><div class="footer-note wrap"><a href="https://braintime.tmu.edu.tw/">Original TMU lab website</a><a href="#main">Back to top ↑</a></div></footer>
+</body></html>
