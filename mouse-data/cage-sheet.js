@@ -1,15 +1,16 @@
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=86';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=87';
 import { sortRooms } from './room-order.js?v=24';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
 import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=76';
 import { lightClock } from './husbandry.js?v=83';
 import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=86';
 import { cageBreedingLayout } from './mouse-registration.js?v=83';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=87';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};
-const fields={mice:['cage_sid','physical_tag','ear_mark','sex','date_of_birth','genotype','manager','comment','note_color'],cages:['cage_tag','manager','cage_type','cage_protocol','location_id','comment','start_date','cage_sheet_card','cage_sheet_source_location_id'],locations:['notes','manager']};
+const fields={mice:['cage_sid','physical_tag','ear_mark','sex','date_of_birth','genotype','manager','comment','note_color'],cages:['cage_tag','manager','cage_type','cage_protocol','location_id','comment','start_date','cage_sheet_card','cage_sheet_source_location_id','cage_start'],locations:['notes','manager','cage_start']};
 const equal=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
 const record=(data,type,id)=>(data?.tables?.[type]||[]).find(r=>String(r[keys[type]])===String(id));
 const draftKey=(type,id,field)=>JSON.stringify([type,String(id),field]);
@@ -19,14 +20,16 @@ const noteColor=value=>noteColors.includes(value)?value:'green';
 const currentOverrides=r=>r?.cage_sheet_overrides&&typeof r.cage_sheet_overrides==='object'&&!Array.isArray(r.cage_sheet_overrides)?r.cage_sheet_overrides:{};
 const projectionCages=data=>{const occupied=new Set((data.tables.mice||[]).filter(m=>active(m)&&m.state==='Stock').map(m=>String(m.cage_sid)));return (data.tables.cages||[]).filter(c=>active(c)&&(occupied.has(String(c.cage_sid))||/^(Active|Occupied)$/i.test(c.state||''))).sort((a,b)=>String(a.cage_tag||a.cage_sid).localeCompare(String(b.cage_tag||b.cage_sid),undefined,{numeric:true}));};
 let renderSequence=0;
-let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),message:'',error:false};
+let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),message:'',error:false};
 
-export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),message:'',error:false};}
+export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),message:'',error:false};}
 export function hasCageSheetDrafts(){return state.drafts.size>0;}
 
 /** Apply only explicit edits to fresh records. Unrelated remote edits survive. */
 export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Date().toISOString()}={}){
   const changes=Array.from(drafts),conflicts=[],updates=new Map();
+  validateCageStartDrafts(dataset,changes,{at});
+  if(changes.some(change=>change.field==='cage_start')&&(!canEdit('cages')||!canEdit('locations')))throw new Error('Housing edit permission is required to edit the cage start date.');
   if(changes.some(c=>c.type==='mice'&&c.field==='cage_sid')&&(!canEdit('mice')||!canEdit('cages')||!canEdit('locations')))throw new Error('Mouse and housing edit permission is required to move mice.');
   validateMouseMoveDrafts(dataset,changes);
   const created=changes.filter(c=>c.type==='cages'&&c.field==='$create');
@@ -118,7 +121,7 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
     if(!canEdit('locations'))throw new Error('Housing edit permission is required to update cage positions.');
     tables.locations=(tables.locations||[]).map(position=>affectedPositions.has(String(position.location_id))?{...position,app_modified_at:new Date(Math.max(Date.parse(at),Number.isFinite(Date.parse(position.app_modified_at))?Date.parse(position.app_modified_at)+1:0)).toISOString()}:position);
   }
-  return {...dataset,tables};
+  return applyCageEntryStartDates(dataset,{...dataset,tables},{at});
 }
 
 export function renderCageSheet(host,dataset,hooks={}){
@@ -135,7 +138,7 @@ export function renderCageSheet(host,dataset,hooks={}){
   const canMoveMice=()=>canEdit('mice')&&canEdit('cages')&&canEdit('locations');
   const compact=hooks.layout!=='detailed';
   function preview(){const tables={...dataset.tables,cages:[...(dataset.tables.cages||[])]};for(const d of state.drafts.values())if(d.type==='cages'&&d.field==='$create'&&!tables.cages.some(c=>String(c.cage_sid)===String(d.id)))tables.cages.push({...d.value});for(const type of ['cages','mice','locations'])tables[type]=(tables[type]||[]).map(r=>{const edits=[...state.drafts.values()].filter(d=>d.type===type&&d.field!=='$create'&&String(d.id)===String(r[keys[type]]));if(!edits.length)return r;const next={...r};for(const d of edits)next[d.field]=d.value;if(type==='mice'){if(edits.some(d=>d.field==='cage_sid')){next.cage_tag=(tables.cages||[]).find(c=>String(c.cage_sid)===String(next.cage_sid))?.cage_tag||null;next.cage_sheet_overrides={...currentOverrides(next),cage_sid:true};}const fields=edits.filter(d=>['comment','ear_mark','date_of_birth'].includes(d.field));if(fields.length)next.cage_sheet_overrides={...currentOverrides(next),...Object.fromEntries(fields.map(d=>[d.field,true]))};}if(type==='cages'&&edits.some(d=>d.field==='location_id')){const p=(tables.locations||[]).find(p=>p.location_id===next.location_id);next.room_id=p?.room_id||null;next.rack_id=p?.rack_id||null;next.room=null;next.rack=null;next.location=p?.label||null;}return next;});const moved=new Set([...state.drafts.values()].filter(d=>d.type==='cages'&&d.field==='location_id'&&!equal(d.base,d.value)).map(d=>String(d.id)));tables.mice=(tables.mice||[]).map(m=>active(m)&&m.state==='Stock'&&moved.has(String(m.cage_sid))?{...m,cage_tag:(tables.cages||[]).find(c=>String(c.cage_sid)===String(m.cage_sid))?.cage_tag||null,cage_sheet_overrides:{...currentOverrides(m),cage_sid:true}}:m);return {...dataset,tables};}
-  let viewDataset=preview(),inlineEditor=null,drag=null,suppressMouseClickUntil=0;
+  let viewDataset=preview(),inlineEditor=null,startEditorKey=null,drag=null,suppressMouseClickUntil=0;
   const dragPlans=new Map();
   const registeredCage=id=>{const cage=record(viewDataset,'cages',id),resident=(viewDataset.tables.mice||[]).some(m=>active(m)&&m.state==='Stock'&&String(m.cage_sid)===String(id));return active(cage)&&!cage._derived&&!cage.history_read_only&&!cage.source_historical&&(resident||/^(Active|Occupied)$/i.test(cage.state||''))?cage:null;};
   const animalRows=new Map(),asOf=hooks.selectedDate||todayTaipei();
@@ -150,7 +153,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     const newCageIds={};for(const id of [source,destination]){if(!state.newCageIds.has(id))state.newCageIds.set(id,'CAGE-'+crypto.randomUUID());newCageIds[id]=state.newCageIds.get(id);}
     return planCageSlotMove(viewDataset,source,destination,{newCageIds});
   }
-  const movableSlots=new Map(),cageRowsCache=new Map(),cageLayoutCache=new Map(),newMouseTargets=new Map();
+  const movableSlots=new Map(),cageRowsCache=new Map(),cageLayoutCache=new Map(),newMouseTargets=new Map(),startDateTargets=new Map();
   const cageRows=item=>{const key=JSON.stringify([item.position?.location_id||item.locationId,item.cageId||item.cage?.cage_sid]);if(!cageRowsCache.has(key))cageRowsCache.set(key,cageSheetAnimals(viewDataset,item));return cageRowsCache.get(key);};
   const itemKey=item=>JSON.stringify([item.position?.location_id||item.locationId||'',item.cageId||item.cage?.cage_sid||'']);
   function cageLayout(item){
@@ -172,17 +175,41 @@ export function renderCageSheet(host,dataset,hooks={}){
     const target=mouseEntryTarget(item),label=newborn?'Add newborn':'Add mouse';
     if(!target)return empty?'<div class="sheet-empty-mouse" aria-hidden="true"></div>':'';
     const key=itemKey(item);newMouseTargets.set(key,item);
-    return `<button type="button" class="text-button ${empty?'sheet-empty-mouse':'sheet-add-mouse'}" data-sheet-add-mouse="${esc(key)}" data-sheet-newborn="${newborn?'true':'false'}" aria-label="${esc(label+' to '+item.positionName)}" title="${esc(label)}">${empty?'<span aria-hidden="true">＋</span>':`＋ ${newborn?'Newborn':'Add mouse'}`}</button>`;
+    return `<button type="button" class="text-button ${empty?'sheet-empty-mouse':'sheet-add-mouse'}" data-sheet-add-mouse="${esc(key)}" data-sheet-newborn="${newborn?'true':'false'}" aria-label="${esc(label+' to '+item.positionName)}" title="${esc(label)}">${empty?'':newborn?'Newborn':'Add mouse'}</button>`;
   }
+  const mouseRowCount=(item,count=cageLayout(item).rows.length)=>Math.max(5,count,state.rowCounts.get(itemKey(item))||5);
   function emptyMouseRows(item,count,{table=false}={}){
     if(hooks.readOnly)return '';
     const newborn=cageLayout(item).isBreeding===true;
-    return Array.from({length:Math.max(0,5-count)},()=>table?`<tr class="sheet-empty-mouse-row"><td colspan="6">${newMouseButton(item,{newborn,empty:true})}</td></tr>`:newMouseButton(item,{newborn,empty:true})).join('');
+    return Array.from({length:Math.max(0,mouseRowCount(item,count)-count)},()=>table?`<tr class="sheet-empty-mouse-row"><td colspan="6">${newMouseButton(item,{newborn,empty:true})}</td></tr>`:newMouseButton(item,{newborn,empty:true})).join('');
   }
   function newMouseActions(item){
-    if(hooks.readOnly)return '';
-    const buttons=(cageLayout(item).isBreeding?newMouseButton(item,{newborn:true}):'')+newMouseButton(item);
-    return buttons?`<div class="sheet-add-mouse-actions">${buttons}</div>`:'';
+    if(hooks.readOnly||!mouseEntryTarget(item))return '';
+    const key=itemKey(item),count=cageLayout(item).rows.length;newMouseTargets.set(key,item);
+    return `<div class="sheet-add-mouse-actions sheet-row-controls"><button type="button" class="text-button sheet-row-control" data-sheet-rows-add="${esc(key)}" aria-label="Add mouse row to ${esc(item.positionName)}" title="Add row">＋</button><button type="button" class="text-button sheet-row-control" data-sheet-rows-remove="${esc(key)}" aria-label="Remove empty mouse row from ${esc(item.positionName)}" title="Remove empty row"${mouseRowCount(item,count)<=Math.max(5,count)?' disabled':''}>−</button>${cageLayout(item).isBreeding?newMouseButton(item,{newborn:true}):''}${newMouseButton(item)}</div>`;
+  }
+  function canEditStart(item){
+    if(!canEdit('cages')||!canEdit('locations'))return false;
+    if(item.cage&&!item.cage._derived)return Boolean(registeredCage(item.cageId));
+    const position=item.position;
+    return Boolean(active(position)&&position.location_id&&position.source_current!==false&&!position.history_read_only&&!position.source_historical);
+  }
+  function startDateControl(item){
+    const started=resolveCageStart(viewDataset,item,{asOf}),date=started.date,key=itemKey(item),elapsed=ageWeeks(date,asOf);
+    startDateTargets.set(key,item);
+    const label=date?`<time datetime="${esc(date)}">${esc(date)}</time>${elapsed!==null?` <span class="sheet-start-age">${elapsed}wk</span>`:''}`:'—/—/—',title=date?`Started ${date}${started.estimated?' (estimated)':''}`:'Start date unknown';
+    return canEditStart(item)?`<button type="button" class="text-button sheet-start-date" data-sheet-edit-start="${esc(key)}" aria-label="Edit start date for ${esc(item.positionName)}" title="${esc(title)}">${label}</button>`:`<span class="sheet-start-date" title="${esc(title)}">${label}</span>`;
+  }
+  function startDateEditor(item){
+    const key=itemKey(item);if(!canEditStart(item)||startEditorKey!==key)return '';
+    const date=resolveCageStart(viewDataset,item,{asOf}).date;
+    return `<div class="sheet-start-editor"><label>Started<input type="date" data-sheet-start-input="${esc(key)}" aria-label="Start date for ${esc(item.positionName)}" max="${esc(todayTaipei())}" value="${esc(date||'')}"></label><button type="button" class="text-button" data-sheet-clear-start="${esc(key)}">Clear</button><button type="button" class="text-button" data-sheet-close-start="${esc(key)}">Done</button></div>`;
+  }
+  function editStartDate(key,value){
+    if(renderToken!==renderSequence||state.context!==context||String(hooks.currentContext?.()??accountContext)!==accountContext)return;
+    const item=startDateTargets.get(key);if(!item||!canEditStart(item))return;
+    try{const plan=planCageStartDateEdit(viewDataset,{cageSid:item.cage&&!item.cage._derived?String(item.cageId):null,positionId:item.position?.location_id||null},value);startEditorKey=null;stage({...plan,summary:'Start date updated.'});}
+    catch(error){state.message=error.message||'Choose a valid start date.';state.error=true;updateDraftControls();}
   }
   function slotStatus(item){
     const positionId=item.position?.location_id;
@@ -206,7 +233,7 @@ export function renderCageSheet(host,dataset,hooks={}){
   const racks=[...new Map(projection.groups.filter(g=>g.rackId&&(!state.room||g.roomId===state.room)).map(g=>[g.rackId,g.rackName]))];
   const input=(type,id,field,label,options={})=>{
     const raw=field==='manager'&&Object.hasOwn(record(viewDataset,type,id)||{},'manager')?record(viewDataset,type,id).manager:val(type,id,field,options.fallback),value=options.managerSelect?cageManagerValue(managers,raw):raw,pending=state.drafts.has(draftKey(type,id,field));
-    const attrs=`data-sheet-type="${type}" data-sheet-id="${esc(id)}" data-sheet-field="${field}" aria-label="${esc(label)}"${canEdit(type)&&(!options.managerSelect||!managersLoading&&!managersError)&&!(type==='cages'&&state.drafts.has(draftKey(type,id,'$create')))?'':' disabled'}${pending||options.managerSelect?` class="${options.managerSelect?'sheet-manager-select ':''}${pending?'sheet-pending':''}"`:''}`;
+    const attrs=`data-sheet-type="${type}" data-sheet-id="${esc(id)}" data-sheet-field="${field}" aria-label="${esc(label)}"${options.managerSelect?` title="${esc(raw||'Unassigned')}"`:''}${canEdit(type)&&(!options.managerSelect||!managersLoading&&!managersError)&&!(type==='cages'&&state.drafts.has(draftKey(type,id,'$create')))?'':' disabled'}${pending||options.managerSelect?` class="${options.managerSelect?'sheet-manager-select ':''}${pending?'sheet-pending':''}"`:''}`;
     if(options.choices)return `<select ${attrs}>${options.choices.map(([v,n,disabled])=>`<option value="${esc(v)}"${String(value)===String(v)?' selected':''}${disabled?' disabled':''}>${esc(n)}</option>`).join('')}</select>`;
     if(options.multiline)return `<textarea ${attrs} rows="2" placeholder="${esc(options.placeholder||'Notes')}">${esc(value)}</textarea>`;
     return `<input ${attrs} type="${options.type||'text'}" value="${esc(value)}" placeholder="${esc(options.placeholder||'—')}"${field==='ear_mark'?' maxlength="160"':''}>`;
@@ -221,17 +248,17 @@ export function renderCageSheet(host,dataset,hooks={}){
     const printTarget=realCage?`data-sheet-label="${esc(id)}"`:positionId?`data-sheet-position-label="${esc(positionId)}"`:'';
     const printName=realCage?`cage ${cage.cage_tag||id}`:`position ${item.positionName}`;
     const printButton=!hooks.readOnly&&printTarget?`<button type="button" class="sheet-print-label" ${printTarget} title="${esc('Print label for '+printName)}" aria-label="${esc('Print label for '+printName)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6zM17 12h1"/></svg><span>Print label</span></button>`:'';
-    const observations=cageCardObservation(viewDataset,item).observation,started=cage?.start_date||cage?.set_up_date||observations.startedDate||null;
-    const elapsed=ageWeeks(started,asOf),manager=realCage?(Object.hasOwn(cage,'manager')?cage.manager:item.manager?.name):position&&Object.hasOwn(position,'manager')?position.manager:observations.managerName||position?.source_manager_name||position?.source_manager_acronym||item.manager?.name;
+    const observations=cageCardObservation(viewDataset,item).observation;
+    const manager=realCage?(Object.hasOwn(cage,'manager')?cage.manager:item.manager?.name):position&&Object.hasOwn(position,'manager')?position.manager:observations.managerName||position?.source_manager_name||position?.source_manager_acronym||item.manager?.name;
     const managerType=realCage?'cages':'locations',managerId=realCage?id:positionId;
     const managerControl=hooks.readOnly||!managerId?`<span class="sheet-manager" title="Manager">${esc(cageManagerShortName(managers,manager))}</span>`:input(managerType,managerId,'manager','Manager for '+item.positionName,{fallback:manager||'',managerSelect:true,choices:buildCageManagerChoices(managers,manager)});
     const lux=observations.intensityLux;
     const schedule=item.applicableLights.map(e=>`${e.protocol||'?'} · ${lightClock(e).label}`).join(' / ');
-    const summary=[managerControl,started?`<time datetime="${esc(started)}" title="Started ${esc(started)}${elapsed!==null?' · '+elapsed+' weeks':''}">${esc(started)}${elapsed!==null?` · ${elapsed}wk`:''}</time>`:'',lux!==null&&lux!==undefined?`<span title="Light intensity">${esc(lux)} lux</span>`:''].filter(Boolean).join('');
+    const summary=[managerControl,startDateControl(item),lux!==null&&lux!==undefined?`<span class="sheet-light-intensity" title="Light intensity">${esc(lux)} lux</span>`:''].filter(Boolean).join('');
     const positionOptions=[['','Unassigned'],...(dataset.tables.locations||[]).filter(p=>active(p)&&p.source_current!==false).map(p=>[String(p.location_id),`${(dataset.tables.rooms||[]).find(r=>r.room_id===p.room_id)?.name||p.room_id||''} / ${(dataset.tables.racks||[]).find(r=>r.rack_id===p.rack_id)?.name||p.rack_id||''} / ${p.label||p.location_id}`])];
     if(item.withdrawnPosition)positionOptions.push([String(item.withdrawnPosition.location_id),`${item.withdrawnPosition.label||item.withdrawnPosition.location_id} (withdrawn)`,true]);
     return `<div class="sheet-slot-frame${selected?' sheet-move-origin':''}" data-sheet-slot-frame="${esc(positionId||'')}" data-sheet-slot-label="${esc(item.positionName)}"><div class="sheet-slot-outline" aria-hidden="true"><span>${esc(item.positionName)}</span></div><article class="sheet-cage${breeding.isBreeding?' sheet-breeding':''}${compact?' sheet-compact':''}${realCage?'':' sheet-source'}${selected?' sheet-selected':''}" data-cage="${esc(id)}"${realCage&&registeredCage(id)?` data-sheet-mouse-destination="${esc(id)}"`:""} data-sheet-slot="${esc(positionId||'')}" tabindex="0" aria-label="${esc(item.positionName)}${cage?' cage '+esc(id):' position'}"><header${movableCage?` draggable="true"${dragAttrs} class="sheet-cage-drag-region"`:""} title="${esc(moveStatus.reason)}"><div class="sheet-cage-heading">${movableCage?`<button type="button" class="text-button sheet-cage-handle" draggable="true"${dragAttrs}${positionId?` data-sheet-move-slot="${esc(positionId)}"`:""}${realCage?` data-sheet-move="${esc(id)}"`:""} aria-label="Move cage ${esc(item.positionName)}" title="Drag cage or choose a destination">⠿</button>`:""}<strong>${esc(item.positionName)}</strong>${breeding.isBreeding?'<span class="sheet-breeding-label">Breeding</span>':''}${printButton}</div><div class="sheet-cage-summary">${summary}</div></header>
-      ${compact?'<details class="sheet-edit-details"><summary>Cage details</summary>':''}<div class="sheet-cage-meta">${!hooks.readOnly&&!cage&&positionId?`<label class="sheet-wide">Link cage<select data-sheet-link="${esc(positionId)}" aria-label="Link cage to ${esc(item.positionName)}"${canEdit('cages')?'':' disabled'}><option value="">Choose a registered cage…</option>${cageChoices.map(c=>`<option value="${esc(c.cage_sid)}"${val('cages',c.cage_sid,'location_id')===positionId?' selected':''}>${esc(c.cage_tag||c.cage_sid)} · SID ${esc(c.cage_sid)}</option>`).join('')}</select></label>`:''}${realCage?`<label>Cage${input('cages',id,'cage_tag','Cage tag '+id)}</label><label class="sheet-wide">Position${input('cages',id,'location_id','Cage position '+id,{choices:positionOptions})}</label><label>Type${input('cages',id,'cage_type','Cage type '+id)}</label><label>IACUC${input('cages',id,'cage_protocol','Cage IACUC '+id)}</label>`:''}</div>${compact?'</details>':''}
+      ${startDateEditor(item)}${compact?'<details class="sheet-edit-details"><summary>Cage details</summary>':''}<div class="sheet-cage-meta">${!hooks.readOnly&&!cage&&positionId?`<label class="sheet-wide">Link cage<select data-sheet-link="${esc(positionId)}" aria-label="Link cage to ${esc(item.positionName)}"${canEdit('cages')?'':' disabled'}><option value="">Choose a registered cage…</option>${cageChoices.map(c=>`<option value="${esc(c.cage_sid)}"${val('cages',c.cage_sid,'location_id')===positionId?' selected':''}>${esc(c.cage_tag||c.cage_sid)} · SID ${esc(c.cage_sid)}</option>`).join('')}</select></label>`:''}${realCage?`<label>Cage${input('cages',id,'cage_tag','Cage tag '+id)}</label><label class="sheet-wide">Position${input('cages',id,'location_id','Cage position '+id,{choices:positionOptions})}</label><label>Type${input('cages',id,'cage_type','Cage type '+id)}</label><label>IACUC${input('cages',id,'cage_protocol','Cage IACUC '+id)}</label>`:''}</div>${compact?'</details>':''}
       ${compact?compactAnimals(item):detailedAnimals(item)}
       <div class="sheet-light"><span>${esc(schedule||'Light schedule not recorded')}</span>${!hooks.readOnly?`<button type="button" class="text-button" data-sheet-locobox="${esc(id)}" data-sheet-position="${esc(positionId||'')}">◷ Entrainment / treatment</button>`:''}</div>
       ${compact?'<details class="sheet-edit-details"><summary>Notes</summary>':''}${realCage?input('cages',id,'comment','Cage notes '+id,{multiline:true}):positionId?input('locations',positionId,'notes','Position notes '+positionId,{multiline:true}):''}${compact?'</details>':''}
@@ -336,7 +363,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     }catch(error){state.message=error.message;state.error=true;paint();}
   }
   function paint(){
-    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();cageRowsCache.clear();cageLayoutCache.clear();newMouseTargets.clear();viewDataset=preview();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});
+    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();cageRowsCache.clear();cageLayoutCache.clear();newMouseTargets.clear();startDateTargets.clear();viewDataset=preview();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});
     const query=state.search.toLowerCase().trim();
     const groups=projection.groups.filter(g=>(!state.room||g.roomId===state.room)&&(!state.rack||g.rackId===state.rack)).map(g=>({...g,items:g.items.filter(item=>!query||JSON.stringify([g.roomName,g.rackName,item.positionName,item.cage,item.mice,item.position]).toLowerCase().includes(query))})).filter(g=>g.items.length);
     host.innerHTML=`<style>${styles}</style><section class="cage-sheet${hooks.readOnly?' sheet-historical':''}" aria-label="Animal Sheet cage view"><div class="toolbar sheet-toolbar"><input id="cage-sheet-search" type="search" class="search" aria-label="Find cages or animals" placeholder="Find cage, animal, genotype, manager…" value="${esc(state.search)}"><div class="filters">${select('cage-sheet-room','All rooms',rooms,state.room)}${select('cage-sheet-rack','All racks',racks,state.rack)}</div>${!hooks.readOnly?`<div class="sheet-transfer-actions"><button id="cage-sheet-sync" type="button" class="button primary"${state.saving||importing||!state.drafts.size?' disabled':''} title="Cage edits → Mouse Data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg><span>${state.saving?'Saving…':`Save to Mouse Data${state.drafts.size?' · '+state.drafts.size:''}`}</span></button>${canImport()?`<button id="cage-sheet-import" type="button" class="button secondary"${state.saving||importing||state.drafts.size?' disabled':''} title="${esc(importTitle())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>${importing?'Opening…':'Import from Animal sheet'}</span></button>`:''}</div><button type="button" class="button secondary" id="cage-sheet-discard"${!state.drafts.size||state.saving||importing?' disabled':''}>Discard</button>`:''}${managersError?'<button type="button" class="text-button" id="cage-sheet-managers-retry">Reload manager list</button>':''}<button type="button" class="text-button" id="cage-sheet-help">Help</button></div>${state.selectedCage||state.selectedSlot?`<div class="sheet-move-notice">Moving cage ${esc(state.selectedSlot?record(viewDataset,'locations',state.selectedSlot)?.label||state.selectedSlot:state.selectedCage)} · choose a destination in any room. <button type="button" class="text-button" id="cage-sheet-cancel-move">Cancel move</button></div>`:''}<p id="cage-sheet-status" class="${state.error?'alert error':'small muted'}" role="status">${esc(state.message|| (state.drafts.size?`${state.drafts.size} pending edits · not yet saved`:statusLabel))}</p>${groups.map(g=>{
@@ -374,7 +401,7 @@ export function renderCageSheet(host,dataset,hooks={}){
         for(const change of pending.filter(change=>change.field==='manager'&&!change.positionManager&&['cages','locations'].includes(change.type)&&change.value))if(!buildCageManagerChoices(managers,'').some(([value,,disabled])=>!disabled&&value===change.value))throw new Error('Selected manager is no longer in the manager list. Choose again.');
       }
       const next=applyCageSheetDrafts(fresh,pending,{canEdit:type=>hooks.canEdit?.(type)===true});
-      await hooks.save(next,{readDependencies:getMouseMoveReadDependencies(fresh,pending)});
+      await hooks.save(next,{readDependencies:[...getMouseMoveReadDependencies(fresh,pending),...cageStartReadDependencies(fresh,next)]});
       if(state.context!==token)return;
       dataset=next;state.drafts.clear();state.message='Changes saved.';state.saving=false;
       if(hooks.saved)hooks.saved(state.message);else paint();
@@ -406,6 +433,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     if(equal(original,value)&&!overrideSource)state.drafts.delete(key);else state.drafts.set(key,{type,id,field,base:original??null,value,...(sourceMatch?{sourceMatch}:{}),...(overrideSource?{overrideSource:true}:{})});
     t.classList.toggle('sheet-pending',state.drafts.has(key));state.message='';state.error=false;updateDraftControls();
   };
+  host.onchange=event=>{const input=event.target;if(!input.dataset?.sheetStartInput)return;if(input.validity?.badInput||input.validity?.valid===false){state.message='Choose a valid start date.';state.error=true;updateDraftControls();return;}editStartDate(input.dataset.sheetStartInput,input.value||null);};
   host.onfocusout=event=>{
     if(!inlineEditor)return;
     const node=editorNode(inlineEditor.key);if(!node?.contains?.(event.target)||node.contains(event.relatedTarget))return;
@@ -418,6 +446,20 @@ export function renderCageSheet(host,dataset,hooks={}){
     if(editButton)return openAnimalEditor(editButton.dataset.sheetAnimal,editButton.dataset.sheetEditAnimal);
     if(event.target.closest('[data-sheet-editor-done]')){await finishInlineEditor();if(!inlineEditor)paint();return;}
     if(inlineEditor){const node=editorNode(inlineEditor.key);if(node&&!node.contains(event.target)){const saved=await finishInlineEditor();if(saved||inlineEditor)return;}}
+    const startCommand=event.target.closest('[data-sheet-edit-start],[data-sheet-clear-start],[data-sheet-close-start]');
+    if(startCommand){
+      if(renderToken!==renderSequence||state.context!==context||String(hooks.currentContext?.()??accountContext)!==accountContext)return;
+      const key=startCommand.dataset.sheetEditStart||startCommand.dataset.sheetClearStart||startCommand.dataset.sheetCloseStart,item=startDateTargets.get(key);if(!item||!canEditStart(item))return;
+      if(startCommand.dataset.sheetClearStart)editStartDate(key,null);else{startEditorKey=startCommand.dataset.sheetCloseStart?null:startEditorKey===key?null:key;paint();if(startEditorKey)[...(host.querySelectorAll?.('[data-sheet-start-input]')||[])].find(input=>input.dataset.sheetStartInput===key)?.focus?.();}
+      return;
+    }
+    const rowCommand=event.target.closest('[data-sheet-rows-add],[data-sheet-rows-remove]');
+    if(rowCommand){
+      if(renderToken!==renderSequence||state.context!==context||String(hooks.currentContext?.()??accountContext)!==accountContext)return;
+      const key=rowCommand.dataset.sheetRowsAdd||rowCommand.dataset.sheetRowsRemove,item=newMouseTargets.get(key);if(!item||!mouseEntryTarget(item))return;
+      const count=cageLayout(item).rows.length,current=mouseRowCount(item,count),next=rowCommand.dataset.sheetRowsAdd?current+1:Math.max(5,count,current-1);
+      state.rowCounts.set(key,next);paint();return;
+    }
     const addMouse=event.target.closest('[data-sheet-add-mouse]');
     if(addMouse){
       if(renderToken!==renderSequence||state.context!==context||String(hooks.currentContext?.()??accountContext)!==accountContext)return;

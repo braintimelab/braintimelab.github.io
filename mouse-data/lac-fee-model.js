@@ -1,5 +1,6 @@
 /* LAC estimates use explicit mappings and dated evidence. Current occupancy is
  * only a labelled projection of the current month, never historical evidence. */
+import {resolveCageStart} from './cage-start.js?v=87';
 export const LAC_FEE_GROUPS=Object.freeze([{key:'clean_room',label:'SHLAC Conventional',unit:'cage'},{key:'rat_locobox',label:'SHLAC Rat room',unit:'cage'},{key:'spf_room',label:'SHLAC SPF',unit:'mouse'}]);
 const TYPES=['lac_fee_options','lac_fee_month'],clone=structuredClone,object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x),present=x=>x!==null&&x!==undefined&&x!=='';
 const archived=r=>Boolean(r?.app_archived_at)||r?.archived===true;
@@ -99,6 +100,19 @@ export function buildLacFeeActualMonthCorrection(dataset,originalRecord,targetMo
 export function compareLacFees(estimate,actual,options={target_percent:5,maximum_percent:10}){if(!amount(estimate)||!amount(actual))return {difference:null,absolute_percent:null,status:'unknown'};const difference=estimate-actual;if(actual===0)return {difference,absolute_percent:estimate===0?0:null,status:estimate===0?'within_target':'zero_actual_mismatch'};const absolute_percent=Math.abs(difference)/actual*100;return {difference,absolute_percent,status:absolute_percent<=options.target_percent+1e-9?'within_target':absolute_percent<=options.maximum_percent+1e-9?'within_maximum':'above_maximum'}}
 function housing(record,dataset){const t=dataset.tables??{},location=(t.locations??[]).find(p=>p.location_id===record.location_id),rack_id=record.rack_id||location?.rack_id||null,rack=(t.racks??[]).find(r=>r.rack_id===rack_id);return {room_id:record.room_id||location?.room_id||rack?.room_id||null,rack_id}}
 function currentQuantities(dataset,options){const t=dataset.tables??{},mice=(t.mice??[]).filter(m=>!archived(m)&&m.state==='Stock'),cages=new Map((t.cages??[]).filter(c=>!archived(c)).map(c=>[c.cage_sid,c])),counts=Object.fromEntries(LAC_FEE_GROUPS.map(g=>[g.key,{mice:0,cages:new Set()}]));let excluded=0,unmapped=0;for(const m of mice){const cage=cages.get(m.cage_sid),refs=housing(cage??m,dataset);if(options.excluded_room_ids.includes(refs.room_id)){excluded++;continue}const matches=options.groups.filter(g=>g.room_ids.includes(refs.room_id)&&(!g.rack_ids.length||g.rack_ids.includes(refs.rack_id)));if(matches.length!==1||(matches[0].unit==='cage'&&!m.cage_sid)){unmapped++;continue}const count=counts[matches[0].key];count.mice++;if(m.cage_sid)count.cages.add(m.cage_sid)}return {counts,excluded_mice:excluded,unmapped_mice:unmapped}}
+// Starts bound only the live current-month forecast. They cannot establish
+// closed-month occupancy, departed cages, or an individual SPF mouse's arrival.
+function currentCageDays(dataset,cageIds,bounds,asOf){
+ const tables=dataset.tables??{},cages=new Map((tables.cages??[]).filter(c=>!archived(c)).map(c=>[c.cage_sid,c])),positions=new Map((tables.locations??[]).map(p=>[p.location_id,p]));let quantity=0,estimated=false;
+ for(const id of cageIds){
+  const cage=cages.get(id);if(!cage)return {quantity:null,reason:'Cage start date unavailable'};
+  let start;try{start=resolveCageStart(dataset,{cage,position:positions.get(cage.location_id)},{asOf});}catch{return {quantity:null,reason:'Cage start date needs review'};}
+  if(!feeDate(start?.date)||start.date>asOf)return {quantity:null,reason:'Cage start date unavailable'};
+  const first=start.date>bounds.start?start.date:bounds.start;
+  quantity+=(Date.parse(bounds.end+'T00:00:00Z')-Date.parse(first+'T00:00:00Z'))/86400000+1;estimated||=start.estimated===true;
+ }
+ return {quantity,reason:'Current cages projected from '+(estimated?'recorded or estimated':'recorded')+' starts to month end'};
+}
 function historicQuantity(lines,group,bounds,{allowSnapshot=false,asOfDate=null}={}){
  const groupLines=lines.filter(l=>l.group_key===group.key),relevant=groupLines.filter(l=>present(l.quantity)),expected=group.unit+'_'+group.rate_period;if(groupLines.some(l=>l.quantity_basis==='ambiguous'))return {quantity:null,reason:'Quantity needs review; source placeholders or conflicting counts cannot establish the billed amount'};
  if(!relevant.length)return {quantity:null,reason:'No dated quantity evidence'};
@@ -141,7 +155,7 @@ export function calculateLacFeeMonth(dataset,month,{nowDate=localDate()}={}){
   if(rateConflict&&!result.warnings.includes('Conflicting billing rates require review.'))result.warnings.push('Conflicting billing rates require review.');
   if(!rateOptions||rateErrors.length||rateOptions.currency!==result.currency||rateConflict){group={...group,rate:null};reason=rateConflict?'Conflicting billing rates require review':!rateOptions?'No rate effective at the evidence date':'Rate options need review or use another currency'}
   else if(monthConflict){reason='Conflicting monthly quantities require review'}
-  else if(projection){quantity=snapshot.counts[group.key][group.unit==='mouse'?'mice':'cages'];if(quantity instanceof Set)quantity=quantity.size;if(group.rate_period==='day')quantity*=bounds.days;reason='Current occupied '+group.unit+' count projected over '+bounds.days+' days';if(!group.room_ids.length){quantity=null;reason='Room mapping missing'}}
+  else if(projection){const occupied=snapshot.counts[group.key][group.unit==='mouse'?'mice':'cages'];if(group.unit==='cage'&&group.rate_period==='day')({quantity,reason}=currentCageDays(dataset,occupied,bounds,nowDate));else{quantity=occupied instanceof Set?occupied.size:occupied;if(group.rate_period==='day')quantity*=bounds.days;reason='Current occupied '+group.unit+' count projected over '+bounds.days+' days';}if(!group.room_ids.length){quantity=null;reason='Room mapping missing'}}
   else {({quantity,reason}=historicQuantity(lines,group,bounds,{allowSnapshot:current,asOfDate:nowDate}));if(!snapshotLine&&rateOptions.rate_scope==='snapshot_only'){quantity=null;reason='A snapshot-only rate does not establish the rate for the full billing month'}if(!snapshotLine&&feeRecords(dataset,'lac_fee_options').some(r=>r.lac_fee_options.rate_scope!=='snapshot_only'&&r.lac_fee_options.effective_from>bounds.start&&r.lac_fee_options.effective_from<=bounds.end)){quantity=null;reason='Billing options changed during this month; split billing needs review';if(!result.warnings.includes(reason))result.warnings.push(reason)}}
   const charge=amount(quantity)&&amount(group.rate)?quantity*group.rate:null;if(charge===null)complete=false;else result.partial_estimate+=charge;
   result.groups.push({...group,quantity,quantity_unit:group.unit+'_'+group.rate_period,charge,actual:lines.some(l=>l.group_key===group.key&&present(l.actual_amount))?lines.filter(l=>l.group_key===group.key&&present(l.actual_amount)).reduce((sum,l)=>sum+l.actual_amount,0):null,reason,rate_effective_from:rateOptions?.effective_from??null,snapshot_date:snapshotLine?.evidence_start??null,quantity_basis:groupLines.find(l=>l.quantity_basis==='ambiguous')?'ambiguous':groupLines.some(l=>l.quantity_basis==='source_formula')?'source_formula':'recorded',quantity_note:[...new Set(lines.filter(l=>l.group_key===base.key&&l.quantity_note).map(l=>String(l.quantity_note)))].join(' ')});

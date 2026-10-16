@@ -255,3 +255,25 @@
 .workspace-progress span{min-width:3em;text-align:right;font-variant-numeric:tabular-nums}
 @keyframes workspace-loading{to{background-position:-200% 0}}
 @media(prefers-reduced-motion:reduce){.workspace-progress progress:indeterminate{animation:none}}
+
+/* Fixed compact header tracks keep rack cage names aligned. */
+.sheet-cage.sheet-compact>header{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:32px 48px;gap:4px;align-items:stretch;align-content:start}
+.sheet-cage.sheet-compact .sheet-cage-heading{height:32px;min-height:32px;flex-wrap:nowrap;gap:4px}
+.sheet-cage.sheet-compact .sheet-cage-heading>strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-cage.sheet-compact .sheet-cage-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:28px 18px;align-items:center;gap:2px 5px;min-width:0}
+.sheet-cage.sheet-compact .sheet-cage-summary>.sheet-manager-select,.sheet-cage.sheet-compact .sheet-cage-summary>.sheet-manager{grid-column:1/-1;grid-row:1;width:100%;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-cage.sheet-compact .sheet-cage-summary>.sheet-start-date{grid-column:1;grid-row:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-cage.sheet-compact .sheet-cage-summary>.sheet-light-intensity{grid-column:2;grid-row:2;white-space:nowrap}
+.sheet-cage .sheet-start-date{font:inherit;font-size:10px;line-height:18px;padding:0;text-align:left;white-space:nowrap;color:#303b43}
+.sheet-cage button.sheet-start-date{cursor:pointer;border-bottom:1px dotted #7c909e}
+.sheet-cage button.sheet-start-date:hover{color:#194f7a;background:#eef5fa}
+.sheet-cage button.sheet-start-date:focus-visible{outline:2px solid #216aa0;outline-offset:2px}
+.sheet-cage .sheet-start-age{font-size:9px;color:#61717a}
+.sheet-cage .sheet-start-editor{display:flex;align-items:end;gap:8px;flex-wrap:wrap;padding:7px;border-bottom:1px solid #a9b5bf;background:#f4f8fb;font-size:11px}
+.sheet-cage .sheet-start-editor label{display:grid;gap:3px;flex:1 1 120px;min-width:0}
+.sheet-cage .sheet-start-editor input{min-width:0;width:100%;max-width:100%;border:1px solid #9db6c8;background:#fff;padding:4px}
+.sheet-cage .sheet-start-editor>.text-button{min-height:28px;padding:3px 5px}
+.sheet-cage .sheet-row-controls{align-items:center;gap:4px}
+.sheet-cage .sheet-row-control{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:24px;padding:1px 4px;border:1px solid #c5d3de;border-radius:4px;background:#f7fafc;color:#194f7a;font-size:13px;line-height:1}
+.sheet-cage .sheet-row-control:disabled{opacity:.4;cursor:default}
+@media(pointer:coarse){.sheet-cage.sheet-compact>header{grid-template-rows:44px 56px}.sheet-cage.sheet-compact .sheet-cage-heading{height:44px;min-height:44px}.sheet-cage.sheet-compact .sheet-cage-summary{grid-template-rows:36px 18px}.sheet-cage .sheet-row-control{min-width:32px;min-height:32px}.sheet-cage .sheet-start-editor>.text-button{min-height:36px}}

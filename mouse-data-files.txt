@@ -17,6 +17,7 @@ cage-managers.js
 cage-movement.js
 cage-observations.js
 cage-sheet.js
+cage-start.js
 cage-summary-options.js
 cage-summary.js
 config.js
