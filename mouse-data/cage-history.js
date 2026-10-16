@@ -8,20 +8,53 @@ const unique=values=>[...new Set(values.filter(Boolean))];
 const table=(data,name)=>list(data?.tables?.[name]);
 const calendarToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const coordinate=value=>{const match=/^([A-Z]+)(\d+)$/i.exec(text(value));if(!match)return {};let column=0;for(const c of match[1].toUpperCase())column=column*26+c.charCodeAt(0)-64;return {row:Number(match[2]),column};};
+const hiddenSource=source=>['hidden','veryHidden'].includes(source.sheet_state);
 const sourceKey=source=>[source.workbook_id,source.snapshot_date].join('|');
 const sheetKey=source=>text(source.sheet_id)||/[?#&]gid=(\d+)/.exec(text(source.source_url))?.[1]||text(source.sheet_name);
-const blockKey=source=>[sourceKey(source),sheetKey(source),source.source_header_cell||source.source_range||source.cage_label].join('|');
+const positionKey=source=>[source.workbook_id,sheetKey(source),source.source_header_cell||source.source_range||source.cage_label].join('|');
+const blockKey=source=>[source.snapshot_date,positionKey(source)].join('|');
+const sourceRoomNames={room_sheet_beh:'Ani Beh',room_sheet_rat:'SHLAC Rat room',room_sheet_conventional:'SHLAC Conventional',room_sheet_spf:'SHLAC SPF'};
+function roomName(source){
+ const explicit=text(source.room_label),known=sourceRoomNames[source.source_room_id];
+ if(known)return known;
+ const name=explicit||text(source.sheet_name)||'(untitled)';
+ if(/^(?:SHH?\s+)?(?:ani(?:mal)?\s*beh(?:aviou?r)?)$/i.test(name))return 'Ani Beh';
+ if(/^(?:SH\s*LAC[- ,]*)?(?:Rat Room)(?:\s*\(LocoBoxes\), Rat room 6)?$/i.test(name))return 'SHLAC Rat room';
+ if(/^(?:SH\s*LAC[- ,]*)?(?:Conventional(?: area)?)(?:, Mouse Room #2)?$/i.test(name))return 'SHLAC Conventional';
+ if(/^(?:SH\s*LAC[- ,]*)?SPF(?:, Room 6)?$/i.test(name))return 'SHLAC SPF';
+ return name;
+}
 
 
-function sourcePosition(p,{event_id,kind='position_capture',priority=2,conflict_reason=null}={}){
+function sourcePosition(p,{event_id,kind='position_capture',priority=4,conflict_reason=null}={}){
  if(!p||!date(p.source_snapshot_date)||!text(p.source_file_id)||!text(p.source_label||p.label)||typeof p.source_block_text!=='string')return null;
  const m=p.manager_source||{},managerDate=m.observed_on||m.snapshot_date;
  return {snapshot_date:p.source_snapshot_date,date_basis:p.source_snapshot_date_basis||'source_position_capture',workbook_id:p.source_file_id,title:p.source_title,sheet_id:p.source_sheet_id,sheet_name:p.source_sheet,source_url:p.source_url,source_header_cell:p.source_cell,source_range:p.source_block_range,cage_label:p.source_label||p.label,block_text:p.source_block_text,observed_tags:list(p.source_observed_tags),
   manager_name:Object.hasOwn(p,'source_manager_name')?p.source_manager_name:managerDate===p.source_snapshot_date?(m.name||m.manager_name):null,
   manager_acronym:Object.hasOwn(p,'source_manager_acronym')?p.source_manager_acronym:managerDate===p.source_snapshot_date?m.acronym:null,
-  manager_literal:p.source_manager_raw||null,capture_at:p.source_capture_at||p.source_last_seen_at||null,event_id:event_id||p.location_id,kind,complete:false,priority,conflict_reason};
+  room_label:p.source_room_label||null,rack_label:p.source_rack_label||null,source_room_id:p.room_id||null,source_rack_id:p.rack_id||null,source_is_current_map:p.record_origin==='current_google_sheet_map',sheet_state:p.source_sheet_state||null,cage_observation:p.source_cage_observation||null,source_position_closed:p.source_position_closed===true,source_closed_cells:list(p.source_closed_cells),review_flags:list(p.source_review_flags),manager_literal:p.source_manager_raw||null,capture_at:p.source_capture_at||p.source_last_seen_at||null,event_id:event_id||p.location_id,kind,complete:false,priority,conflict_reason};
 }
 function captureTime(source){const stamp=Date.parse(source.capture_at);return Number.isFinite(stamp)?stamp:null;}
+const taipeiDate=stamp=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(stamp));
+function revisionMetadata(source){
+ if(!text(source.revision_series_id)&&!text(source.revision_position_key))return null;
+ const stamp=Date.parse(source.source_revision_modified_at),column=coordinate(source.source_header_cell).column,room=roomName(source),label=text(source.cage_label).replace(/\s/g,'').toUpperCase();
+ if(!Number.isFinite(stamp)||taipeiDate(stamp)!==source.snapshot_date||!column||!text(source.source_revision_id)||!text(source.revision_base_id)||!['baseline','change'].includes(source.revision_observation_kind))return false;
+ if(source.revision_series_id!==[source.workbook_id,sheetKey(source),room].join('|')||source.revision_position_key!==[sheetKey(source),room,label,column].join('|'))return false;
+ if(source.revision_observation_kind==='baseline'&&source.revision_base_id!==source.source_revision_id)return false;
+ if(source.snapshot_at&&Date.parse(source.snapshot_at)!==stamp)return false;
+ return {capture_at:new Date(stamp).toISOString(),revision_valid:true};
+}
+function latestSource(a,b){
+ if(a.snapshot_date!==b.snapshot_date)return a.snapshot_date>b.snapshot_date?a:b;
+ const at=captureTime(a),bt=captureTime(b),rank=s=>s.priority*1000+(Number.isSafeInteger(s.parser_revision)&&s.parser_revision>=0&&s.parser_revision<1000?s.parser_revision:0);
+ if(at!==null&&bt!==null&&at!==bt)return at>bt?a:b;
+ // An exact Drive revision time outranks an undated compact copy on that day.
+ if(a.revision_valid&&at!==null&&bt===null)return a;
+ if(b.revision_valid&&bt!==null&&at===null)return b;
+ return rank(a)>rank(b)?a:b;
+}
+
 
 function snapshotSources(data){
  const sources=[];
@@ -29,7 +62,8 @@ function snapshotSources(data){
   if(event.event_type==='animal_sheet_cage_snapshot'){
    const s=event.source_cage_snapshot;
    if(!s||s.schema_version!==1||!date(s.snapshot_date)||!text(s.workbook_id)||!text(s.cage_label))continue;
-   sources.push({...s,event_id:event.event_id,kind:'cage_snapshot',complete:s.coverage_complete===true,priority:3});
+   const revision=revisionMetadata(s);if(revision===false)continue;
+   sources.push({...s,...revision,event_id:event.event_id,kind:'cage_snapshot',archive_baseline_date:s.layout_complete===true||s.coverage_complete===true?s.snapshot_date:null,complete:s.coverage_complete===true,priority:3});
   }else if(event.event_type==='source_manager_observation'){
    const e=event.source_evidence||{},d=e.snapshot_date||event.event_date;
    if(!date(d)||!text(e.workbook_id)||!text(event.source_cage_label))continue;
@@ -37,12 +71,19 @@ function snapshotSources(data){
  }else if(event.event_type==='animal_sheet_source_change'){
    const change=event.animal_sheet_change;
    if(!change||change.schema_version!==1||change.entity_type!=='locations'||!text(change.entity_id))continue;
+   // A successful withdrawal is a dated observation of a missing source slot,
+   // not a claim that its former cage became empty or moved on that date.
+   const observed=change.observation_date,stamp=Date.parse(event.source_capture_at),before=change.before;
+   if(change.action==='withdrawn'&&before?.location_id===change.entity_id&&before.source_file_id===event.source_file_id&&before.record_origin==='current_google_sheet_map'&&date(observed)&&Number.isFinite(stamp)&&new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(stamp))===observed){
+    const source=sourcePosition(before,{event_id:event.event_id,kind:'import_withdrawal',priority:6});
+    if(source&&source.snapshot_date<=observed)sources.push({...source,snapshot_date:observed,date_basis:'source_withdrawal_capture',capture_at:event.source_capture_at,withdrawn:true});
+   }
    for(const side of ['before','after']){
     const p=change[side];
     // Snapshot dates belong to the source payload, not the import or effective date.
     // A withdrawn after-state is absence, not a newly observed occupied/empty position.
     if(!p||p.location_id!==change.entity_id||p.source_file_id!==event.source_file_id||p.record_origin!=='current_google_sheet_map'||side==='after'&&(change.action==='withdrawn'||p.source_current===false))continue;
-    const source=sourcePosition(p,{event_id:event.event_id,kind:'import_change_'+side,priority:side==='after'?4:2,conflict_reason:side==='after'&&change.action==='conflict'?(change.conflict_reason||'Import conflict'):null});
+    const source=sourcePosition(p,{event_id:event.event_id,kind:'import_change_'+side,priority:side==='after'?5:2,conflict_reason:side==='after'&&change.action==='conflict'?(change.conflict_reason||'Import conflict'):null});
     if(source)sources.push(source);
    }
   }
@@ -52,11 +93,13 @@ function snapshotSources(data){
  for(const p of table(data,'locations')){const source=sourcePosition(p);if(source)sources.push(source);}
  const dedup=new Map();
  for(const s of sources){
-  const key=blockKey(s),old=dedup.get(key);if(!old){dedup.set(key,s);continue;}
-  const at=captureTime(s),oldAt=captureTime(old);
-  // Captures on the same date use their actual order when both timestamps exist.
-  // Never inherit a blank manager from an earlier observation of the same position.
-  if(at!==null&&oldAt!==null&&at!==oldAt?at>oldAt:s.priority>old.priority)dedup.set(key,s);
+  // Keep revision baselines and every timestamped delta until the series is
+  // composed. Daily coordinate dedup would otherwise discard a baseline when
+  // a later revision changed that same grid on the same calendar day.
+  const key=s.revision_valid?['revision',s.workbook_id,s.source_revision_id,s.revision_position_key].join('|'):blockKey(s),old=dedup.get(key);if(!old){dedup.set(key,s);continue;}
+  // Never inherit a blank manager from an earlier observation of this position.
+  const chosen=latestSource(s,old);
+  dedup.set(key,{...chosen,archive_baseline_date:s.archive_baseline_date||old.archive_baseline_date||null});
  }
  return [...dedup.values()];
 }
@@ -64,29 +107,58 @@ function snapshotSources(data){
 function managedEvents(data){return table(data,'husbandry_events').filter(e=>active(e)&&date(e.event_date)&&['cage_move','cage_assignment','cage_location_assignment'].includes(e.event_type));}
 
 /** Dates with actual source snapshots or recorded assignment events, not invented daily states. */
-export function getCageHistoryDates(dataset){return unique([...snapshotSources(dataset).map(s=>s.snapshot_date),...managedEvents(dataset).map(e=>e.event_date)]).sort();}
+export function getCageHistoryDates(dataset,{includeHiddenSources=false}={}){return unique([...snapshotSources(dataset).filter(s=>includeHiddenSources||!hiddenSource(s)).map(s=>s.snapshot_date),...managedEvents(dataset).map(e=>e.event_date)]).sort();}
 
 function bodyText(source){
  if(text(source.block_text))return text(source.block_text);
- return list(source.body).map(cell=>{const rowDates=list(cell.same_row_dates).map(d=>`${text(d.cell)}: ${text(d.value)}`).join('; ');return `${text(cell.cell)||'?'}: ${text(cell.raw)}${rowDates?` [Source row dates: ${rowDates}]`:''}`;}).join('\n');
+ return list(source.body).map(cell=>{const rowDates=list(cell.same_row_dates).map(d=>`${text(d.cell)}: ${text(d.value)}`).join('; ');return `${text(cell.cell)||'?'}: ${text(cell.raw)}${rowDates?`\nSource row dates (${text(cell.cell)||'?'}): ${rowDates}`:''}`;}).join('\n');
 }
 function observedLabels(source){
  if(list(source.observed_tags).length)return unique(source.observed_tags.map(text));
  return unique(list(source.body).map(cell=>text(cell.raw)).filter(raw=>/\b[MF]\s*\d+\b/i.test(raw)||/[MF]\d+/i.test(raw)));
 }
+// Daily imports retain only changed positions. Select a source workbook cohort,
+// then overlay its dated position captures on the latest archived layout. A later
+// workbook copy starts a separate cohort; matching slot labels never bridge eras.
+function selectedSnapshotSources(sources){
+ if(!sources.length)return [];
+ const latest=sources.reduce((at,s)=>s.snapshot_date>at?s.snapshot_date:at,''),latestRows=sources.filter(s=>s.snapshot_date===latest),current=latestRows.filter(s=>s.source_is_current_map===true),workbooks=new Set((current.length?current:latestRows).map(s=>s.workbook_id)),selected=[];
+ for(const workbook of workbooks){
+  const rows=sources.filter(s=>s.workbook_id===workbook),baselines=new Map(),positions=new Map(),revisionBaselines=new Map();
+  for(const s of rows){
+   if(s.archive_baseline_date>(baselines.get(sheetKey(s))||''))baselines.set(sheetKey(s),s.archive_baseline_date);
+   if(s.revision_valid&&s.revision_observation_kind==='baseline'){const prior=revisionBaselines.get(s.revision_series_id);if(!prior||captureTime(s)>captureTime(prior))revisionBaselines.set(s.revision_series_id,s);}
+  }
+  const candidates=rows.filter(s=>{
+   const baseline=revisionBaselines.get(s.revision_series_id);
+   return (!baselines.has(sheetKey(s))||s.snapshot_date>=baselines.get(sheetKey(s)))&&(!s.revision_valid||baseline?.revision_base_id===s.revision_base_id&&captureTime(s)>=captureTime(baseline));
+  });
+  const revisionKeys=new Set(candidates.filter(s=>s.revision_valid).map(s=>s.revision_position_key)),nativeKeys=new Map();
+  const signature=s=>[sheetKey(s),roomName(s),text(s.cage_label).replace(/\s/g,'').toUpperCase(),coordinate(s.source_header_cell).column||''].join('|');
+  for(const s of candidates.filter(s=>!s.revision_valid)){const key=s.snapshot_date+'|'+signature(s),anchors=nativeKeys.get(key)||new Set();anchors.add(s.source_header_cell);nativeKeys.set(key,anchors);}
+  for(const s of candidates){
+   const physical=signature(s),join=s.revision_valid||revisionKeys.has(physical)&&nativeKeys.get(s.snapshot_date+'|'+physical)?.size===1;
+   const key=join?workbook+'|revision-position|'+physical:positionKey(s),old=positions.get(key);positions.set(key,old?latestSource(s,old):s);
+  }
+  selected.push(...positions.values());
+ }
+ return selected;
+}
 function snapshotProjection(sources){
- const rooms=new Map(),racks=new Map(),locations=[];
+ const rooms=new Map(),racks=new Map(),locations=[],roomSheets=new Map();
+ for(const s of sources){const key=s.workbook_id+'|'+roomName(s),sheets=roomSheets.get(key)||new Set();sheets.add(sheetKey(s));roomSheets.set(key,sheets);}
  for(const s of sources){
-  const roomLabel=text(s.room_label)||`Source sheet: ${text(s.sheet_name)||'(untitled)'}`;
-  const room_id='history-room:'+token([s.workbook_id,s.sheet_id||s.sheet_name,roomLabel].join('|'));
-  const rackLabel=text(s.rack_label)||'Snapshot positions',rack_id='history-rack:'+token(room_id+'|'+rackLabel);
+  const roomLabel=roomName(s);
+  const room_id='history-room:'+token([s.workbook_id,roomLabel].join('|'));
+  const multipleSheets=roomSheets.get(s.workbook_id+'|'+roomLabel).size>1,baseRack=text(s.rack_label)||'Positions',sheetLabel=text(s.sheet_name)||'(untitled)';
+  const rackLabel=baseRack+(multipleSheets?' · '+sheetLabel:'')+(hiddenSource(s)?' (archived)':''),rack_id='history-rack:'+token([room_id,sheetKey(s),baseRack].join('|'));
   rooms.set(room_id,{room_id,name:roomLabel,history_read_only:true,record_origin:'historical_snapshot_projection'});
   racks.set(rack_id,{rack_id,room_id,name:rackLabel,history_read_only:true,record_origin:'historical_snapshot_projection'});
   const location_id='history-position:'+token(blockKey(s));
   locations.push({location_id,room_id,rack_id,label:text(s.cage_label),...coordinate(s.source_header_cell),
-   source_label:text(s.cage_label),source_block_text:[bodyText(s),text(s.manager_literal)?`Source manager label (literal): ${text(s.manager_literal)}`:null,s.conflict_reason?`Unverified incoming source observation; import conflict (${text(s.conflict_reason)}). Not applied as a cage or animal assignment.`:null,s.formula_cells_omitted?`${s.formula_cells_omitted} formula cells omitted from this compact view; see the original source.`:null].filter(Boolean).join('\n'),source_block_range:s.source_range||null,source_observed_tags:observedLabels(s),
-   source_file_id:s.workbook_id,source_title:s.title||null,source_sheet:s.sheet_name||null,source_cell:s.source_header_cell||null,source_url:s.source_url||null,
-   source_snapshot_date:s.snapshot_date,source_snapshot_date_basis:s.date_basis||'unknown',source_capture_at:s.capture_at||null,source_import_conflict:s.conflict_reason||null,source_current:true,source_historical:true,
+   source_label:text(s.cage_label),source_cage_observation:s.cage_observation||s.source_cage_observation||null,source_block_text:[bodyText(s),text(s.manager_literal)?`Source manager label (literal): ${text(s.manager_literal)}`:null,s.conflict_reason?`Unverified incoming source observation; import conflict (${text(s.conflict_reason)}). Not applied as a cage or animal assignment.`:null,s.formula_cells_omitted?`${s.formula_cells_omitted} formula cells omitted from this compact view; see the original source.`:null].filter(Boolean).join('\n'),source_block_range:s.source_range||null,source_observed_tags:observedLabels(s),
+   source_file_id:s.workbook_id,source_title:s.title||null,source_sheet:s.sheet_name||null,source_sheet_id:s.sheet_id??null,source_sheet_state:s.sheet_state||null,source_position_closed:s.source_position_closed===true,source_closed_cells:list(s.source_closed_cells),source_review_flags:list(s.review_flags),source_room_label:roomLabel,source_rack_label:rackLabel,source_cell:s.source_header_cell||null,source_url:s.source_url||null,
+   source_revision_id:s.source_revision_id||null,source_revision_modified_at:s.source_revision_modified_at||null,source_revision_series_id:s.revision_series_id||null,source_revision_position_key:s.revision_position_key||null,source_snapshot_date:s.snapshot_date,source_snapshot_date_basis:s.date_basis||'unknown',source_capture_at:s.capture_at||null,source_import_conflict:s.conflict_reason||null,source_current:true,source_historical:true,
    source_manager_name:s.manager_name||null,source_manager_acronym:s.manager_acronym||null,source_manager_raw:s.manager_literal||null,source_event_id:s.event_id||null,
    history_evidence_kind:'source_snapshot',history_read_only:true,record_origin:'historical_snapshot_projection',requires_review:true,
    notes:'Source labels at the snapshot date; cage and animal identities are not assigned from these labels.'});
@@ -149,16 +221,19 @@ function managedProjection(data,at,warnings){
  * Nearest earlier snapshots retain their actual snapshot date. Missing cages/animals stay unknown.
  * Export permissions are separate: this function receives only the dataset the caller may view.
  */
-export function projectCageHistory(dataset,selectedDate,{today=calendarToday()}={}){
+export function projectCageHistory(dataset,selectedDate,{today=calendarToday(),includeHiddenSources=false}={}){
  if(!date(today))throw new Error('A valid current date is required.');
- if(!selectedDate||selectedDate==='current')return {dataset,selectedDate:null,snapshotDate:null,basis:'current',readOnly:false,warnings:[],sources:[],coverage:null,availableDates:getCageHistoryDates(dataset)};
+ if(!selectedDate||selectedDate==='current')return {dataset,selectedDate:null,snapshotDate:null,basis:'current',readOnly:false,warnings:[],sources:[],coverage:null,availableDates:getCageHistoryDates(dataset,{includeHiddenSources})};
  if(!date(selectedDate)||selectedDate>today)throw new Error('Choose a valid historical date no later than today.');
- const warnings=[],allSources=snapshotSources(dataset),eligible=allSources.filter(s=>s.snapshot_date<=selectedDate);
+ const warnings=[],allSources=snapshotSources(dataset),visibleSources=allSources.filter(s=>includeHiddenSources||!hiddenSource(s)),eligible=visibleSources.filter(s=>s.snapshot_date<=selectedDate),hiddenSourceCount=selectedSnapshotSources(allSources.filter(s=>s.snapshot_date<=selectedDate)).filter(hiddenSource).length;
  if(dataset?.source_archive_restricted===true&&table(dataset,'husbandry_events').some(e=>e.event_type==='animal_sheet_cage_snapshot'&&!e.source_cage_snapshot||e.event_type==='animal_sheet_source_change'&&!e.animal_sheet_change))warnings.push('Source snapshot details are withheld by the current data-visibility settings. Available dated assignments are still shown.');
  const snapshotDate=eligible.reduce((latest,s)=>!latest||s.snapshot_date>latest?s.snapshot_date:latest,null);
- const sourceRows=eligible.filter(s=>s.snapshot_date===snapshotDate);
+ const selectedSources=selectedSnapshotSources(eligible),closedSourceCount=selectedSources.filter(s=>!s.withdrawn&&s.source_position_closed===true).length,sourceRows=selectedSources.filter(s=>!s.withdrawn&&(includeHiddenSources||s.source_position_closed!==true));
+ if(closedSourceCount&&!includeHiddenSources)warnings.push('Closed source grids are omitted; they remain available with archived layouts.');
+ if(selectedSources.some(s=>s.withdrawn))warnings.push('Withdrawn source slots are omitted from their recorded removal date; no cage movement is inferred.');
  const snapshots=snapshotProjection(sourceRows),managed=managedProjection(dataset,selectedDate,warnings);
  if(snapshotDate&&snapshotDate!==selectedDate)warnings.push(`Nearest earlier source snapshot: ${snapshotDate}. Changes between that snapshot and ${selectedDate} are unknown.`);
+ if(new Set(sourceRows.map(s=>s.snapshot_date)).size>1)warnings.push('Unchanged positions retain their last recorded snapshot date; later daily imports update only observed positions.');
  if(sourceRows.some(s=>/title/i.test(s.date_basis||'')))warnings.push('Some snapshot dates come from workbook titles, not a verified capture time.');
  if(sourceRows.some(s=>s.kind.startsWith('import_change_')))warnings.push('Daily import changes are partial source observations; unchanged positions may be absent. Capture dates are not effective movement dates.');
  if(sourceRows.some(s=>s.conflict_reason))warnings.push('Incoming observations with import conflicts are unverified and were not applied as cage or animal assignments.');
@@ -172,5 +247,5 @@ export function projectCageHistory(dataset,selectedDate,{today=calendarToday()}=
  const basis=sourceRows.length?(managed.events.length?'snapshot_and_dated_assignments':'source_snapshot'):managed.events.length?'dated_assignments':'unavailable';
  const history={selected_date:selectedDate,snapshot_date:snapshotDate,basis,read_only:true,complete_census:false};
  return {dataset:{...dataset,tables,as_of_local_date:selectedDate,history_projection:history},selectedDate,snapshotDate,basis,readOnly:true,warnings:unique(warnings),sources:[...sourceCatalog.values()],
-  coverage:{sourceBlocks:sourceRows.length,assignmentEvents:managed.events.length,identifiedMice:managed.mice.length,identifiedCages:managed.cages.length,completeCensus:false},availableDates:unique([...allSources.map(s=>s.snapshot_date),...managedEvents(dataset).map(e=>e.event_date)]).sort()};
+  hiddenSourceCount,closedSourceCount,includeHiddenSources,coverage:{sourceBlocks:sourceRows.length,assignmentEvents:managed.events.length,identifiedMice:managed.mice.length,identifiedCages:managed.cages.length,completeCensus:false},availableDates:unique([...visibleSources.map(s=>s.snapshot_date),...managedEvents(dataset).map(e=>e.event_date)]).sort()};
 }

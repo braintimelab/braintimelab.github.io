@@ -125,7 +125,7 @@ export function renderCageSheet(host,dataset,hooks={}){
   const accountContext=String(hooks.context||'local');
   const context=accountContext+'|'+(hooks.readOnly?'history:'+String(hooks.selectedDate||'unknown'):'current');
   const captureOptions=hooks.selectedDate?{capturedAt:`${hooks.selectedDate}T12:00:00+08:00`}:{};
-  const statusLabel=hooks.readOnly?`Historical evidence as of ${hooks.selectedDate||'the selected date'} · read only`:'Current cage assignments';
+  const statusLabel=hooks.readOnly?`Cages as of ${hooks.selectedDate||'the selected date'} · read only`:'Current cage assignments';
   if(state.context!==context){clearCageSheetDrafts();state.context=context;}
   const canEdit=type=>!hooks.readOnly&&!state.saving&&!importing&&![...state.drafts.values()].some(d=>d.cageSlotMove)&&hooks.canEdit?.(type)===true;
   const canImport=()=>!hooks.readOnly&&hooks.canImport?.()===true&&typeof hooks.importFromSheet==='function';
