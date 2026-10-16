@@ -1,4 +1,4 @@
-import { cageObservations } from './cage-observations.js?v=89';
+import { cageObservations } from './cage-observations.js?v=90';
 
 const list=value=>Array.isArray(value)?value:[];
 const text=value=>typeof value==='string'?value.trim():typeof value==='number'&&Number.isFinite(value)?String(value):'';

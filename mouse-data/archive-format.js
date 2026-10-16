@@ -1,4 +1,4 @@
-import {ID_FIELDS} from './model.js?v=89';
+import {ID_FIELDS} from './model.js?v=90';
 
 export const ARCHIVE_MANIFEST_FORMAT='colony-archive-manifest-v1';
 export const ARCHIVE_CHUNK_FORMAT='colony-archive-chunk-v1';
@@ -20,6 +20,7 @@ const record=(id,payload)=>({entity_type:'archive',entity_id:id,payload,archived
 
 /** Content-addressed table chunks are immutable; the versioned manifest selects a snapshot. */
 export async function encodeArchive(dataset){
+  if(dataset?.source_archive_deferred)throw new Error('Load all history before encoding a complete source archive.');
   const metadata={...dataset,tables:{}},manifest={},chunks=[],seenChunks=new Set();
   for(const [table,value] of Object.entries(dataset.tables??{})){
     if(Object.hasOwn(ID_FIELDS,table))continue;
@@ -49,7 +50,9 @@ export async function encodeArchive(dataset){
 }
 
 /** Reject missing, duplicate, truncated or corrupted referenced chunks before exposing data. */
-export async function decodeArchive(records){
+export async function decodeArchive(records,{tables=null}={}){
+  if(tables!==null&&(!Array.isArray(tables)||tables.some(table=>typeof table!=='string')))throw new Error('Choose named archive tables to load.');
+  const selected=tables===null?null:new Set(tables);
   const candidates=records.filter(r=>r.entity_type==='archive'&&r.entity_id==='reconstruction');
   if(candidates.length!==1)throw new Error('Exactly one reconstruction manifest is required.');
   const head=candidates[0];if(head.archived)throw new Error('The reconstruction manifest cannot be archived.');
@@ -64,7 +67,8 @@ export async function decodeArchive(records){
   }
   metadata.tables??={};
   for(const [table,descriptor] of Object.entries(metadata.archive_tables)){
-    if(Object.hasOwn(ID_FIELDS,table)||!descriptor||!Number.isSafeInteger(descriptor.row_count)||descriptor.row_count<0||!Array.isArray(descriptor.chunk_ids))throw new Error(`Invalid archive descriptor for ${table}.`);
+    if(Object.hasOwn(ID_FIELDS,table)||!descriptor||!Number.isSafeInteger(descriptor.row_count)||descriptor.row_count<0||!Array.isArray(descriptor.chunk_ids)||descriptor.chunk_ids.some(id=>typeof id!=='string'||!/^chunk:[a-f0-9]{64}$/.test(id)))throw new Error(`Invalid archive descriptor for ${table}.`);
+    if(selected&&!selected.has(table))continue;
     const rows=[];
     for(const id of descriptor.chunk_ids){
       const chunk=byId.get(id),p=chunk?.payload;

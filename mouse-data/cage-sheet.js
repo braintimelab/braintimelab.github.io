@@ -1,12 +1,12 @@
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=89';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=89';
-import { sortRooms } from './room-order.js?v=89';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=89';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=89';
-import { lightClock } from './husbandry.js?v=89';
-import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=89';
-import { cageBreedingLayout } from './mouse-registration.js?v=89';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=89';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=90';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=90';
+import { sortRooms } from './room-order.js?v=90';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=90';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=90';
+import { lightClock } from './husbandry.js?v=90';
+import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=90';
+import { cageBreedingLayout } from './mouse-registration.js?v=90';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=90';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};

@@ -1,14 +1,14 @@
-import { validateLocoboxRecord } from './locobox-model.js?v=89';
-import { validateIacucRecord } from './iacuc-model.js?v=89';
-import { validateLacFeeRecord } from './lac-fee-model.js?v=89';
-import { validateUserAcronym } from './user-acronyms.js?v=89';
-import { validateCageSummaryOptions } from './cage-summary-options.js?v=89';
-import { validateBreedingOptions } from './breeding-options.js?v=89';
-import { validateStrainDefinition } from './strain-registry.js?v=89';
-import { validateGeneticProfile } from './genotype-schema.js?v=89';
-import { validateScenario } from './genetics.js?v=89';
-import { validateExperimentRecord } from './experiment-model.js?v=89';
-import { validateCryoRecord } from './cryopreservation-model.js?v=89';
+import { validateLocoboxRecord } from './locobox-model.js?v=90';
+import { validateIacucRecord } from './iacuc-model.js?v=90';
+import { validateLacFeeRecord } from './lac-fee-model.js?v=90';
+import { validateUserAcronym } from './user-acronyms.js?v=90';
+import { validateCageSummaryOptions } from './cage-summary-options.js?v=90';
+import { validateBreedingOptions } from './breeding-options.js?v=90';
+import { validateStrainDefinition } from './strain-registry.js?v=90';
+import { validateGeneticProfile } from './genotype-schema.js?v=90';
+import { validateScenario } from './genetics.js?v=90';
+import { validateExperimentRecord } from './experiment-model.js?v=90';
+import { validateCryoRecord } from './cryopreservation-model.js?v=90';
 export const ID_FIELDS = Object.freeze({mice:'mouse_sid',matings:'mating_sid',litters:'litter_sid',cages:'cage_sid',rooms:'room_id',racks:'rack_id',locations:'location_id',light_events:'event_id',husbandry_events:'event_id'});
 const copy = value => structuredClone(value);
 const ids = value => Array.isArray(value) ? value : (typeof value==='string' ? value.split(/[\n,]/).map(s=>s.trim()).filter(Boolean) : []);
@@ -177,7 +177,8 @@ export function normalizeDataset(dataset) {
   }
   result.sources ??= []; result.issues ??= []; result.caveats ??= [];
   const incompleteMatings=result.tables.matings.filter(mating=>!Array.isArray(mating.male_sids)||!Array.isArray(mating.female_sids));
-  if(incompleteMatings.length){
+  const membersLoaded=!result.source_archive_deferred||result.source_archive_deferred.loaded_tables?.includes('mating_members');
+  if(incompleteMatings.length&&membersLoaded){
     const membersByMating=new Map();
     for(const member of result.tables.mating_members){
       const id=member.mating_sid;if(id!==id)continue;

@@ -7,10 +7,11 @@ export async function datasetFromLocalBackup(parsed){
  if(!object(parsed))throw new Error('Expected a reconstructed JSON with tables.mice.');
  if(parsed.kind!=='braintime-local-backup'){
   if(!object(parsed.tables)||!Array.isArray(parsed.tables.mice))throw new Error('Expected a reconstructed JSON with tables.mice.');
+  if(Object.hasOwn(parsed,'source_archive_deferred'))throw new Error('History is not fully loaded. Use a complete backup to replace the workspace.');
   return parsed;
  }
  if(parsed.full_workspace!==true||parsed.permission?.level!=='max')throw new Error('This is a partial backup. It cannot replace the workspace; its records require a reviewed merge.');
- if(parsed.schema_version!==1||parsed.application!=='mouse-data'||parsed.restore_mode!=='workspace'||!object(parsed.permission)||parsed.permission.cutoff_date!==null||!date(parsed.permission.as_of_date)||!object(parsed.sections)||Object.keys(parsed.sections).join(',')!=='workspace'||!object(parsed.sections.workspace)||parsed.sections.workspace.source_archive_restricted||!object(parsed.sections.workspace.tables)||!Array.isArray(parsed.sections.workspace.tables.mice))throw new Error('The full backup format could not be verified.');
+ if(parsed.schema_version!==1||parsed.application!=='mouse-data'||parsed.restore_mode!=='workspace'||!object(parsed.permission)||parsed.permission.cutoff_date!==null||!date(parsed.permission.as_of_date)||!object(parsed.sections)||Object.keys(parsed.sections).join(',')!=='workspace'||!object(parsed.sections.workspace)||parsed.sections.workspace.source_archive_restricted||Object.hasOwn(parsed.sections.workspace,'source_archive_deferred')||!object(parsed.sections.workspace.tables)||!Array.isArray(parsed.sections.workspace.tables.mice))throw new Error('The full backup format could not be verified.');
  const {integrity,...envelope}=parsed;
  if(!object(integrity)||integrity.algorithm!=='SHA-256'||integrity.encoding!=='JSON.stringify of envelope without integrity'||!/^([0-9a-f]{64})$/.test(integrity.value||''))throw new Error('The backup integrity check is missing or unsupported.');
  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(envelope)));

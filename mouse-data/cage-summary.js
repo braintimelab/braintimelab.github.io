@@ -1,5 +1,5 @@
-import { getCageSummaryOptions, getCageSummaryOptionsStatus } from './cage-summary-options.js?v=89';
-import { classifyAnimalSheetBreedingBlock, sourceChangeBlocks } from './breeding-summary.js?v=89';
+import { getCageSummaryOptions, getCageSummaryOptionsStatus } from './cage-summary-options.js?v=90';
+import { classifyAnimalSheetBreedingBlock, sourceChangeBlocks } from './breeding-summary.js?v=90';
 
 const list=value=>Array.isArray(value)?value.filter(record=>record&&typeof record==='object'&&!Array.isArray(record)):[];
 const id=value=>typeof value==='string'?value.trim():typeof value==='number'&&Number.isFinite(value)?String(value):'';

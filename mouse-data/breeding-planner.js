@@ -1,7 +1,7 @@
-import { predictCross, validateScenario, rankPairs } from './genetics.js?v=89';
-import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=89';
-import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=89';
-import { validateFamilyTargetDraft } from './family-targets.js?v=89';
+import { predictCross, validateScenario, rankPairs } from './genetics.js?v=90';
+import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=90';
+import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=90';
+import { validateFamilyTargetDraft } from './family-targets.js?v=90';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -52,8 +52,17 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   const api=()=>state.context.hooks;
   const mice=()=>data().tables?.mice||[];
   const mouse=id=>mice().find(row=>row.mouse_sid===id);
-  const canEdit=()=>api().canEdit?.()===true;
-  const disabled=()=>state.busy?' disabled':'';
+  const canEdit=()=>!state.historyLoading&&api().canEdit?.()===true;
+  const historyDeferred=()=>api().historyDeferred===true;
+  async function loadSourceHistory(){
+    if(state.historyLoading)return;
+    if(state.busy||state.profileId)throw new Error('Close the genotype editor before loading history.');
+    if(typeof api().loadSourceHistory!=='function')throw new Error('Source history is not loaded.');
+    const snapshot=data(),hooks=api();state.historyLoading=true;
+    try{const pending=hooks.loadSourceHistory();paint();const fresh=await pending;if(hooks.isCurrent?.()===false||data()!==snapshot)return;state.context={...state.context,dataset:fresh,hooks:{...hooks,historyDeferred:false}};state.catalogue=discoverGenotypes(fresh);state.catalogueDataset=fresh;state.sourceCache.clear();}
+    finally{state.historyLoading=false;if(hooks.isCurrent?.()!==false)paint();}
+  }
+  const disabled=()=>state.busy||state.historyLoading?' disabled':'';
   const currentCalls=(record,locus)=>reviewedCall(record,locus).call;
   const call=(owner,id)=>owner.calls[id]||(owner.calls[id]=unknown());
   const invalidate=()=>{state.result=null;state.ranking=null;state.error='';state.notice='';state.loadedPlan='';container.querySelector?.('.planner-results')?.remove();container.querySelector?.('[data-planner-ranking]')?.remove()};
@@ -130,10 +139,10 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   }
   function catalogue() {
     const entries=catalogueStrains(state.catalogue);
-    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains from colony sources <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">Choose a strain, then review its allele calls. Source labels are not confirmed genotypes.</p><div class="settings-actions">${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}</div>${entries.length?`<div class="table-scroll"><table><thead><tr><th>Strain / source labels</th><th>Evidence</th><th></th></tr></thead><tbody>${entries.map(entry=>{
+    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains from colony sources <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">Choose a strain, then review its allele calls. Source labels are not confirmed genotypes.</p><div class="settings-actions">${historyDeferred()?button('load-source-history',state.historyLoading?'Loading history…':state.historyReloadRequired?'Reload page':'Load source history',state.historyLoading?'disabled':''):''}${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}</div>${entries.length?`<div class="table-scroll"><table><thead><tr><th>Strain / source labels</th><th>Evidence</th><th></th></tr></thead><tbody>${entries.map(entry=>{
       const added=state.scenario.loci.some(row=>row.id===entry.id),disabled=entry.reviewRequired||(!added&&state.scenario.loci.length>=6)||(added&&!entry.allele);
       return `<tr><td><strong>${esc(canonicalLocusName(entry))}</strong><div class="small muted">${esc((entry.sourceLabels||[]).join(', '))}</div>${entry.locusName?'<div class="small muted">Shared Rosa26 locus</div>':''}${entry.reviewWarning?`<p class="small amber">${esc(entry.reviewWarning)}</p>`:''}</td><td>${esc(entry.occurrences||0)} source mentions${(entry.sources||[]).slice(0,3).map(source=>{const href=url(source.url),label=[source.title,source.sheet,source.cell].filter(Boolean).join(' · ');return `<div class="small">${href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label||'Source')}</a>`:esc(label)}</div>`}).join('')}</td><td>${button('catalogue-locus',entry.reviewRequired?'Review needed':entry.allele?`Use ${esc(entry.name)}`:added?'Already added':'Add locus',`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''}${disabled?' disabled':''}`)}</td></tr>`;
-    }).join('')}</tbody></table></div>`:'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
+    }).join('')}</tbody></table></div>`:historyDeferred()?'<p class="muted">Historical catalogue is not loaded.</p>':'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
   }
 
   function resultHTML() {
@@ -262,10 +271,12 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   container.oninput=event=>{const field=event.target.dataset?.plannerField,key=event.target.dataset?.key;if(['parent','profile-mouse','independent','call','target'].includes(field)||(field==='config'&&['sex','confidence'].includes(key))||(field==='locus'&&['kind','chromosome'].includes(key)))return;update(event.target,false)};
   container.onchange=event=>update(event.target,true);
   container.onclick=async event=>{
-    const target=event.target.closest('[data-planner-action]');if(!target||target.disabled||state.busy)return;
-    const meta=target.dataset,action=meta.plannerAction;state.error='';state.notice='';
+    const target=event.target.closest('[data-planner-action]');if(!target||target.disabled||state.busy||state.historyLoading)return;
+    const meta=target.dataset,action=meta.plannerAction,actionHooks=api();state.error='';state.notice='';
     try{
-      if(action==='tab'){state.tab=meta.tab;state.sourceWarnings=[]}
+      if(action==='reload-history'){api().reloadPage?.();return;}
+      else if(action==='load-source-history'){if(state.historyReloadRequired){api().reloadPage?.();return;}await loadSourceHistory();return;}
+      else if(action==='tab'){state.tab=meta.tab;state.sourceWarnings=[]}
       else if(action==='open-mouse'){api().openMouse?.(meta.id);return}
       else if(action==='calculate')state.result=checkedPrediction(state.scenario);
       else if(action==='add-locus')addLocus({id:'locus-'+crypto.randomUUID(),name:'New locus',kind:'other',chromosome:'unknown',alleles:['+','variant']});
@@ -300,8 +311,8 @@ export function renderBreedingPlanner(container,dataset,hooks) {
         state.scenario[meta.role]={sex:meta.role==='sire'?'Male':'Female',calls:Object.fromEntries(Object.entries(outcome.calls).map(([id,alleles])=>[id,{alleles:[...alleles],evidence:'inferred'}]))};
         invalidate();state.illustrative=false;state.notice=`Hypothetical offspring loaded as ${meta.role}. Calls remain inferred; no animal was created.`;
       }
-    }catch(error){state.error=error?.message||'The action could not be completed.';api().toast?.(state.error,true)}
-    paint();
+    }catch(error){if(actionHooks.isCurrent?.()===false)return;state.historyReloadRequired=error.historyReloadRequired===true;state.error=state.historyReloadRequired?'Source history changed. Reload page.':error?.message||'The action could not be completed.';api().toast?.(state.error,true)}
+    if(actionHooks.isCurrent?.()!==false)paint();
   };
   paint();
 }
