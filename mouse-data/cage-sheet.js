@@ -1,10 +1,11 @@
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=78';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=81';
 import { sortRooms } from './room-order.js?v=24';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
 import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=76';
-import { lightClock, sourceListedAnimals } from './husbandry.js?v=63';
-import { cageObservations, cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=70';
+import { lightClock } from './husbandry.js?v=81';
+import { cageObservations, cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=81';
+import { cageBreedingLayout } from './mouse-registration.js?v=81';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};
@@ -120,14 +121,14 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
 }
 
 export function renderCageSheet(host,dataset,hooks={}){
-  const renderToken=++renderSequence;let importing=false,managers=hooks.managers||[],managersLoading=typeof hooks.loadManagers==='function',managersError=false;
+  const renderToken=++renderSequence;let importing=false,creatingMouse=false,managers=hooks.managers||[],managersLoading=typeof hooks.loadManagers==='function',managersError=false;
   hooks={...hooks,readOnly:hooks.readOnly===true||dataset?.history_projection?.read_only===true};
   const accountContext=String(hooks.context||'local');
   const context=accountContext+'|'+(hooks.readOnly?'history:'+String(hooks.selectedDate||'unknown'):'current');
   const captureOptions=hooks.selectedDate?{capturedAt:`${hooks.selectedDate}T12:00:00+08:00`}:{};
   const statusLabel=hooks.readOnly?`Cages as of ${hooks.selectedDate||'the selected date'} · read only`:'Current cage assignments';
   if(state.context!==context){clearCageSheetDrafts();state.context=context;}
-  const canEdit=type=>!hooks.readOnly&&!state.saving&&!importing&&![...state.drafts.values()].some(d=>d.cageSlotMove)&&hooks.canEdit?.(type)===true;
+  const canEdit=type=>!hooks.readOnly&&!state.saving&&!importing&&!creatingMouse&&![...state.drafts.values()].some(d=>d.cageSlotMove)&&hooks.canEdit?.(type)===true;
   const canImport=()=>!hooks.readOnly&&hooks.canImport?.()===true&&typeof hooks.importFromSheet==='function';
   const importTitle=()=>state.drafts.size?'Save or discard changes before importing.':'Animal sheet → Mouse Data';
   const canMoveMice=()=>canEdit('mice')&&canEdit('cages')&&canEdit('locations');
@@ -148,8 +149,40 @@ export function renderCageSheet(host,dataset,hooks={}){
     const newCageIds={};for(const id of [source,destination]){if(!state.newCageIds.has(id))state.newCageIds.set(id,'CAGE-'+crypto.randomUUID());newCageIds[id]=state.newCageIds.get(id);}
     return planCageSlotMove(viewDataset,source,destination,{newCageIds});
   }
-  const movableSlots=new Map(),cageRowsCache=new Map();
+  const movableSlots=new Map(),cageRowsCache=new Map(),cageLayoutCache=new Map(),newMouseTargets=new Map();
   const cageRows=item=>{const key=JSON.stringify([item.position?.location_id||item.locationId,item.cageId||item.cage?.cage_sid]);if(!cageRowsCache.has(key))cageRowsCache.set(key,cageSheetAnimals(viewDataset,item));return cageRowsCache.get(key);};
+  const itemKey=item=>JSON.stringify([item.position?.location_id||item.locationId||'',item.cageId||item.cage?.cage_sid||'']);
+  function cageLayout(item){
+    const key=itemKey(item);
+    if(!cageLayoutCache.has(key)){
+      const rows=cageRows(item);
+      cageLayoutCache.set(key,hooks.readOnly?{rows,parentCount:0,isBreeding:false}:cageBreedingLayout(viewDataset,item,rows));
+    }
+    return cageLayoutCache.get(key);
+  }
+  function mouseEntryTarget(item){
+    if(hooks.readOnly||!canEdit('mice')||typeof hooks.newMouse!=='function')return null;
+    if(item.cage&&!item.cage._derived)return registeredCage(item.cageId)?{cageSid:String(item.cageId),positionId:item.position?.location_id||null}:null;
+    const position=item.position;
+    if(!active(position)||!position.location_id||position.source_current===false||position.history_read_only||position.source_historical||!canEdit('cages')||!canEdit('locations'))return null;
+    return {cageSid:null,positionId:String(position.location_id)};
+  }
+  function newMouseButton(item,{newborn=false,empty=false}={}){
+    const target=mouseEntryTarget(item),label=newborn?'Add newborn':'Add mouse';
+    if(!target)return empty?'<div class="sheet-empty-mouse" aria-hidden="true"></div>':'';
+    const key=itemKey(item);newMouseTargets.set(key,item);
+    return `<button type="button" class="text-button ${empty?'sheet-empty-mouse':'sheet-add-mouse'}" data-sheet-add-mouse="${esc(key)}" data-sheet-newborn="${newborn?'true':'false'}" aria-label="${esc(label+' to '+item.positionName)}" title="${esc(label)}">${empty?'<span aria-hidden="true">＋</span>':`＋ ${newborn?'Newborn':'Add mouse'}`}</button>`;
+  }
+  function emptyMouseRows(item,count,{table=false}={}){
+    if(hooks.readOnly)return '';
+    const newborn=cageLayout(item).isBreeding===true;
+    return Array.from({length:Math.max(0,5-count)},()=>table?`<tr class="sheet-empty-mouse-row"><td colspan="6">${newMouseButton(item,{newborn,empty:true})}</td></tr>`:newMouseButton(item,{newborn,empty:true})).join('');
+  }
+  function newMouseActions(item){
+    if(hooks.readOnly)return '';
+    const buttons=(cageLayout(item).isBreeding?newMouseButton(item,{newborn:true}):'')+newMouseButton(item);
+    return buttons?`<div class="sheet-add-mouse-actions">${buttons}</div>`:'';
+  }
   function slotStatus(item){
     const positionId=item.position?.location_id;
     if(movableSlots.has(positionId||item.cageId))return movableSlots.get(positionId||item.cageId);
@@ -180,7 +213,8 @@ export function renderCageSheet(host,dataset,hooks={}){
   const select=(id,label,items,value)=>`<label class="sr-only" for="${id}">${label}</label><select id="${id}"><option value="">${label}</option>${items.map(([v,n])=>`<option value="${esc(v)}"${v===value?' selected':''}>${esc(n)}</option>`).join('')}</select>`;
   function card(item){
     const cage=item.cage,id=item.cageId,position=item.position,positionId=position?.location_id;
-    const realCage=cage&&!cage._derived,moveStatus=slotStatus(item),movableCage=moveStatus.canMove,sourceAnimals=!cage&&position?sourceListedAnimals(position):[];
+    const breeding=cageLayout(item);
+    const realCage=cage&&!cage._derived,moveStatus=slotStatus(item),movableCage=moveStatus.canMove;
     const occupied=realCage||cageRows(item).length>0,selected=positionId?state.selectedSlot===positionId:state.selectedCage===id;
     const dragAttrs=movableCage?`${positionId?` data-sheet-drag-slot="${esc(positionId)}"`:''}${realCage?` data-sheet-drag-cage="${esc(id)}"`:''}`:'';
     const printTarget=realCage?`data-sheet-label="${esc(id)}"`:positionId?`data-sheet-position-label="${esc(positionId)}"`:'';
@@ -195,9 +229,9 @@ export function renderCageSheet(host,dataset,hooks={}){
     const summary=[managerControl,started?`<time datetime="${esc(started)}" title="Started ${esc(started)}${elapsed!==null?' · '+elapsed+' weeks':''}">${esc(started)}${elapsed!==null?` · ${elapsed}wk`:''}</time>`:'',lux!==null&&lux!==undefined?`<span title="Light intensity">${esc(lux)} lux</span>`:''].filter(Boolean).join('');
     const positionOptions=[['','Unassigned'],...(dataset.tables.locations||[]).filter(p=>active(p)&&p.source_current!==false).map(p=>[String(p.location_id),`${(dataset.tables.rooms||[]).find(r=>r.room_id===p.room_id)?.name||p.room_id||''} / ${(dataset.tables.racks||[]).find(r=>r.rack_id===p.rack_id)?.name||p.rack_id||''} / ${p.label||p.location_id}`])];
     if(item.withdrawnPosition)positionOptions.push([String(item.withdrawnPosition.location_id),`${item.withdrawnPosition.label||item.withdrawnPosition.location_id} (withdrawn)`,true]);
-    return `<div class="sheet-slot-frame${selected?' sheet-move-origin':''}" data-sheet-slot-frame="${esc(positionId||'')}" data-sheet-slot-label="${esc(item.positionName)}"><div class="sheet-slot-outline" aria-hidden="true"><span>${esc(item.positionName)}</span></div><article class="sheet-cage${compact?' sheet-compact':''}${realCage?'':' sheet-source'}${selected?' sheet-selected':''}" data-cage="${esc(id)}"${realCage&&registeredCage(id)?` data-sheet-mouse-destination="${esc(id)}"`:""} data-sheet-slot="${esc(positionId||'')}" tabindex="0" aria-label="${esc(item.positionName)}${cage?' cage '+esc(id):' position'}"><header${movableCage?` draggable="true"${dragAttrs} class="sheet-cage-drag-region"`:""} title="${esc(moveStatus.reason)}"><div class="sheet-cage-heading">${movableCage?`<button type="button" class="text-button sheet-cage-handle" draggable="true"${dragAttrs}${positionId?` data-sheet-move-slot="${esc(positionId)}"`:""}${realCage?` data-sheet-move="${esc(id)}"`:""} aria-label="Move cage ${esc(item.positionName)}" title="Drag cage or choose a destination">⠿</button>`:""}<strong>${esc(item.positionName)}</strong>${printButton}</div><div class="sheet-cage-summary">${summary}</div></header>
+    return `<div class="sheet-slot-frame${selected?' sheet-move-origin':''}" data-sheet-slot-frame="${esc(positionId||'')}" data-sheet-slot-label="${esc(item.positionName)}"><div class="sheet-slot-outline" aria-hidden="true"><span>${esc(item.positionName)}</span></div><article class="sheet-cage${breeding.isBreeding?' sheet-breeding':''}${compact?' sheet-compact':''}${realCage?'':' sheet-source'}${selected?' sheet-selected':''}" data-cage="${esc(id)}"${realCage&&registeredCage(id)?` data-sheet-mouse-destination="${esc(id)}"`:""} data-sheet-slot="${esc(positionId||'')}" tabindex="0" aria-label="${esc(item.positionName)}${cage?' cage '+esc(id):' position'}"><header${movableCage?` draggable="true"${dragAttrs} class="sheet-cage-drag-region"`:""} title="${esc(moveStatus.reason)}"><div class="sheet-cage-heading">${movableCage?`<button type="button" class="text-button sheet-cage-handle" draggable="true"${dragAttrs}${positionId?` data-sheet-move-slot="${esc(positionId)}"`:""}${realCage?` data-sheet-move="${esc(id)}"`:""} aria-label="Move cage ${esc(item.positionName)}" title="Drag cage or choose a destination">⠿</button>`:""}<strong>${esc(item.positionName)}</strong>${breeding.isBreeding?'<span class="sheet-breeding-label">Breeding</span>':''}${printButton}</div><div class="sheet-cage-summary">${summary}</div></header>
       ${compact?'<details class="sheet-edit-details"><summary>Cage details</summary>':''}<div class="sheet-cage-meta">${!hooks.readOnly&&!cage&&positionId?`<label class="sheet-wide">Link cage<select data-sheet-link="${esc(positionId)}" aria-label="Link cage to ${esc(item.positionName)}"${canEdit('cages')?'':' disabled'}><option value="">Choose a registered cage…</option>${cageChoices.map(c=>`<option value="${esc(c.cage_sid)}"${val('cages',c.cage_sid,'location_id')===positionId?' selected':''}>${esc(c.cage_tag||c.cage_sid)} · SID ${esc(c.cage_sid)}</option>`).join('')}</select></label>`:''}${realCage?`<label>Cage${input('cages',id,'cage_tag','Cage tag '+id)}</label><label class="sheet-wide">Position${input('cages',id,'location_id','Cage position '+id,{choices:positionOptions})}</label><label>Type${input('cages',id,'cage_type','Cage type '+id)}</label><label>IACUC${input('cages',id,'cage_protocol','Cage IACUC '+id)}</label>`:''}</div>${compact?'</details>':''}
-      ${compact?compactAnimals(item):`<div class="table-scroll"><table class="sheet-mice"><thead><tr><th>Animal</th><th>Sex</th><th>Born</th><th>Genotype</th><th>Ear</th><th>User</th></tr></thead><tbody>${item.mice.map(m=>`<tr><td>${hooks.readOnly?`<span>SID ${esc(m.mouse_sid)}</span>`:`<button type="button" class="text-button" data-sheet-open-mouse="${esc(m.mouse_sid)}">${esc(m.mouse_sid)} ↗</button>`}${input('mice',m.mouse_sid,'physical_tag','Animal tag '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'sex','Sex '+m.mouse_sid,{choices:[['Unknown','?'],['Male','♂'],['Female','♀']]})}</td><td>${input('mice',m.mouse_sid,'date_of_birth','Birth date '+m.mouse_sid,{type:'date'})}</td><td>${input('mice',m.mouse_sid,'genotype','Genotype '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'ear_mark','Ear mark '+m.mouse_sid,{placeholder:'L0R1'})}</td><td>${input('mice',m.mouse_sid,'manager','Mouse manager '+m.mouse_sid,{fallback:mouseManager(m).name||''})}</td></tr>`).join('')||`<tr><td colspan="6" class="sheet-empty">${sourceAnimals.length?esc(sourceAnimals.join(' · ')):(hooks.readOnly?'No animal assignments recorded':'No current mouse assignments')}${sourceAnimals.length?'<span class="small muted">Mouse links need review.</span>':''}</td></tr>`}</tbody></table></div>`}
+      ${compact?compactAnimals(item):detailedAnimals(item)}
       <div class="sheet-light"><span>${esc(schedule||'Light schedule not recorded')}</span>${!hooks.readOnly?`<button type="button" class="text-button" data-sheet-locobox="${esc(id)}" data-sheet-position="${esc(positionId||'')}">◷ Entrainment / treatment</button>`:''}</div>
       ${compact?'<details class="sheet-edit-details"><summary>Notes</summary>':''}${realCage?input('cages',id,'comment','Cage notes '+id,{multiline:true}):positionId?input('locations',positionId,'notes','Position notes '+positionId,{multiline:true}):''}${compact?'</details>':''}
       ${!cage&&position?.source_block_text?`<details class="sheet-source-details"><summary>Animal Sheet source</summary><pre>${esc(position.source_block_text)}</pre></details>`:''}
@@ -205,7 +239,7 @@ export function renderCageSheet(host,dataset,hooks={}){
       <footer>${movableCage?`<button type="button" class="text-button" ${positionId?`data-sheet-move-slot="${esc(positionId)}"`:""}${realCage?` data-sheet-move="${esc(id)}"`:""} title="Select cage to move or swap">↔ Move</button>${realCage?`<button type="button" class="text-button" data-sheet-remove="${esc(id)}" title="Remove cage from rack; keep animal records">− Remove</button>`:""}`:canEdit('cages')&&occupied?`<button type="button" class="text-button" disabled title="${esc(moveStatus.reason)}">↔ Move</button>`:canEdit('cages')&&!realCage&&positionId?`<button type="button" class="text-button" data-sheet-new="${esc(positionId)}">＋ New cage</button>`:''}${(state.selectedCage||state.selectedSlot)&&positionId&&!selected?`<button type="button" class="text-button" data-sheet-destination="${esc(positionId)}">${occupied?'⇄ Swap here':'↳ Move here'}</button>`:''}${cage&&!hooks.readOnly?`<button type="button" class="text-button" data-sheet-open-cage="${esc(id)}">Animals ↗</button>`:''}</footer></article></div>`;
   }
   function compactAnimals(item){
-    const rows=cageRows(item);
+    const layout=cageLayout(item),rows=layout.rows;
     return `<div class="sheet-compact-animals">${rows.map((row,index)=>{
       const key=JSON.stringify([item.locationId||item.cageId||'unassigned',row.key||row.mouseSid||row.tag,index]),mouseSid=row.mouseSid?String(row.mouseSid):null;
       const mouse=mouseSid?record(viewDataset,'mice',mouseSid):null;
@@ -221,8 +255,18 @@ export function renderCageSheet(host,dataset,hooks={}){
       const noteEditable=editable&&active(mouse)&&!mouse.history_read_only&&!mouse.source_historical&&['matched','registered'].includes(row.matchStatus);
       const unavailable=hooks.readOnly?'Historical view':!mouseSid?(row.matchStatus==='ambiguous'?'Multiple mouse matches; editing unavailable.':'Mouse record not linked; editing unavailable.'):'';
       const attrs=`data-sheet-animal="${esc(key)}"`,openable=mouseSid&&active(mouse)&&!hooks.readOnly&&!mouse.history_read_only&&!mouse.source_historical&&['matched','registered'].includes(row.matchStatus);
-      return `<div class="sheet-compact-mouse" data-sheet-animal-row="${esc(key)}"><div class="sheet-animal-line"><button type="button" class="sheet-animal-tag sheet-animal-badge" ${attrs}${openable?` data-sheet-open-mouse="${esc(mouseSid)}" aria-label="Open ${esc(row.tag||mouseSid)} in Mice"`:""}${draggable?` draggable="true" data-sheet-drag-mouse="${esc(key)}"`:""} title="${esc([note,unavailable].filter(Boolean).join(' · ')||'Open mouse details')}"${openable?'':' disabled'}>${esc(row.tag||mouseSid||'—')}</button><button type="button" class="sheet-note-light sheet-note-${color}" ${attrs} data-sheet-edit-animal="note" title="${esc(note||'No note')}" aria-label="${noteEditable?'Edit':'View'} note for ${esc(row.tag||mouseSid||'mouse')} · ${color==='none'?'light off':color}"><span aria-hidden="true"></span></button><button type="button" class="sheet-animal-ear text-button" ${attrs} data-sheet-edit-animal="ear" title="${esc(editable?'Edit left / right earmark':unavailable||row.earMark||'Ear mark not recorded')}"${editable?'':' disabled'}>${esc(row.earMark||'—')}</button><button type="button" class="sheet-animal-age text-button" ${attrs} data-sheet-edit-animal="dob" title="${esc(row.dateOfBirth?'DOB '+row.dateOfBirth:'DOB not recorded')}"${editable?'':' disabled'}>${weeks===null?'—':weeks+'wk'}</button></div><div class="sheet-animal-editor" data-sheet-inline-editor="${esc(key)}" hidden></div></div>`;
-    }).join('')||`<div class="sheet-empty">${hooks.readOnly?'Occupancy unknown':'—'}</div>`}</div>`;
+      return `${layout.isBreeding&&layout.parentCount>0&&index===layout.parentCount?'<div class="sheet-parent-separator" role="separator" aria-label="Parents and offspring"></div>':''}<div class="sheet-compact-mouse" data-sheet-animal-row="${esc(key)}"><div class="sheet-animal-line"><button type="button" class="sheet-animal-tag sheet-animal-badge" ${attrs}${openable?` data-sheet-open-mouse="${esc(mouseSid)}" aria-label="Open ${esc(row.tag||mouseSid)} in Mice"`:""}${draggable?` draggable="true" data-sheet-drag-mouse="${esc(key)}"`:""} title="${esc([note,unavailable].filter(Boolean).join(' · ')||'Open mouse details')}"${openable?'':' disabled'}>${esc(row.tag||mouseSid||'—')}</button><button type="button" class="sheet-note-light sheet-note-${color}" ${attrs} data-sheet-edit-animal="note" title="${esc(note||'No note')}" aria-label="${noteEditable?'Edit':'View'} note for ${esc(row.tag||mouseSid||'mouse')} · ${color==='none'?'light off':color}"><span aria-hidden="true"></span></button><button type="button" class="sheet-animal-ear text-button" ${attrs} data-sheet-edit-animal="ear" title="${esc(editable?'Edit left / right earmark':unavailable||row.earMark||'Ear mark not recorded')}"${editable?'':' disabled'}>${esc(row.earMark||'—')}</button><button type="button" class="sheet-animal-age text-button" ${attrs} data-sheet-edit-animal="dob" title="${esc(row.dateOfBirth?'DOB '+row.dateOfBirth:'DOB not recorded')}"${editable?'':' disabled'}>${weeks===null?'—':weeks+'wk'}</button></div><div class="sheet-animal-editor" data-sheet-inline-editor="${esc(key)}" hidden></div></div>`;
+    }).join('')}${layout.isBreeding&&layout.parentCount>0&&layout.parentCount===rows.length?'<div class="sheet-parent-separator" role="separator" aria-label="Parents and offspring"></div>':''}${emptyMouseRows(item,rows.length)}${hooks.readOnly&&!rows.length?'<div class="sheet-empty">Occupancy unknown</div>':''}${newMouseActions(item)}</div>`;
+  }
+  function detailedAnimals(item){
+    const layout=cageLayout(item),rows=layout.rows;
+    const separator='<tr class="sheet-parent-separator"><td colspan="6"><span class="sr-only">Parents and offspring</span></td></tr>';
+    return `<div class="table-scroll"><table class="sheet-mice"><thead><tr><th>Animal</th><th>Sex</th><th>Born</th><th>Genotype</th><th>Ear</th><th>User</th></tr></thead><tbody>${rows.map((row,index)=>{
+      const m=row.mouseSid?record(viewDataset,'mice',row.mouseSid):null;
+      const parentEnd=layout.isBreeding&&layout.parentCount>0&&index===layout.parentCount?separator:'';
+      if(!m)return `${parentEnd}<tr><td>${esc(row.tag||'—')}</td><td>${esc(row.sex||'—')}</td><td>${esc(row.dateOfBirth||'—')}</td><td>—</td><td>${esc(row.earMark||'—')}</td><td>—</td></tr>`;
+      return `${parentEnd}<tr><td>${hooks.readOnly?`<span>SID ${esc(m.mouse_sid)}</span>`:`<button type="button" class="text-button" data-sheet-open-mouse="${esc(m.mouse_sid)}">${esc(m.mouse_sid)} ↗</button>`}${input('mice',m.mouse_sid,'physical_tag','Animal tag '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'sex','Sex '+m.mouse_sid,{choices:[['Unknown','?'],['Male','♂'],['Female','♀']]})}</td><td>${input('mice',m.mouse_sid,'date_of_birth','Birth date '+m.mouse_sid,{type:'date'})}</td><td>${input('mice',m.mouse_sid,'genotype','Genotype '+m.mouse_sid)}</td><td>${input('mice',m.mouse_sid,'ear_mark','Ear mark '+m.mouse_sid,{placeholder:'L0R1'})}</td><td>${input('mice',m.mouse_sid,'manager','Mouse manager '+m.mouse_sid,{fallback:mouseManager(m).name||''})}</td></tr>`;
+    }).join('')}${layout.isBreeding&&layout.parentCount>0&&layout.parentCount===rows.length?separator:''}${emptyMouseRows(item,rows.length,{table:true})}${hooks.readOnly&&!rows.length?'<tr><td colspan="6" class="sheet-empty">No animal assignments recorded</td></tr>':''}</tbody></table></div>${newMouseActions(item)}`;
   }
   function editorNode(key){return [...(host.querySelectorAll?.('[data-sheet-inline-editor]')||[])].find(node=>node.dataset.sheetInlineEditor===key);}
   function updateDraftControls(){
@@ -291,7 +335,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     }catch(error){state.message=error.message;state.error=true;paint();}
   }
   function paint(){
-    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();cageRowsCache.clear();viewDataset=preview();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});
+    inlineEditor=null;dragPlans.clear();animalRows.clear();movableSlots.clear();cageRowsCache.clear();cageLayoutCache.clear();newMouseTargets.clear();viewDataset=preview();projection=projectAnimalSheet(viewDataset,{entityTypes:[],...captureOptions});
     const query=state.search.toLowerCase().trim();
     const groups=projection.groups.filter(g=>(!state.room||g.roomId===state.room)&&(!state.rack||g.rackId===state.rack)).map(g=>({...g,items:g.items.filter(item=>!query||JSON.stringify([g.roomName,g.rackName,item.positionName,item.cage,item.mice,item.position]).toLowerCase().includes(query))})).filter(g=>g.items.length);
     host.innerHTML=`<style>${styles}</style><section class="cage-sheet${hooks.readOnly?' sheet-historical':''}" aria-label="Animal Sheet cage view"><div class="toolbar sheet-toolbar"><input id="cage-sheet-search" type="search" class="search" aria-label="Find cages or animals" placeholder="Find cage, animal, genotype, manager…" value="${esc(state.search)}"><div class="filters">${select('cage-sheet-room','All rooms',rooms,state.room)}${select('cage-sheet-rack','All racks',racks,state.rack)}</div>${!hooks.readOnly?`<div class="sheet-transfer-actions"><button id="cage-sheet-sync" type="button" class="button primary"${state.saving||importing||!state.drafts.size?' disabled':''} title="Cage edits → Mouse Data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg><span>${state.saving?'Saving…':`Save to Mouse Data${state.drafts.size?' · '+state.drafts.size:''}`}</span></button>${canImport()?`<button id="cage-sheet-import" type="button" class="button secondary"${state.saving||importing||state.drafts.size?' disabled':''} title="${esc(importTitle())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>${importing?'Opening…':'Import from Animal sheet'}</span></button>`:''}</div><button type="button" class="button secondary" id="cage-sheet-discard"${!state.drafts.size||state.saving||importing?' disabled':''}>Discard</button>`:''}${managersError?'<button type="button" class="text-button" id="cage-sheet-managers-retry">Reload manager list</button>':''}<button type="button" class="text-button" id="cage-sheet-help">Help</button></div>${state.selectedCage||state.selectedSlot?`<div class="sheet-move-notice">Moving cage ${esc(state.selectedSlot?record(viewDataset,'locations',state.selectedSlot)?.label||state.selectedSlot:state.selectedCage)} · choose a destination in any room. <button type="button" class="text-button" id="cage-sheet-cancel-move">Cancel move</button></div>`:''}<p id="cage-sheet-status" class="${state.error?'alert error':'small muted'}" role="status">${esc(state.message|| (state.drafts.size?`${state.drafts.size} pending edits · not yet saved`:statusLabel))}</p>${groups.map(g=>{
@@ -373,6 +417,18 @@ export function renderCageSheet(host,dataset,hooks={}){
     if(editButton)return openAnimalEditor(editButton.dataset.sheetAnimal,editButton.dataset.sheetEditAnimal);
     if(event.target.closest('[data-sheet-editor-done]')){await finishInlineEditor();if(!inlineEditor)paint();return;}
     if(inlineEditor){const node=editorNode(inlineEditor.key);if(node&&!node.contains(event.target)){const saved=await finishInlineEditor();if(saved||inlineEditor)return;}}
+    const addMouse=event.target.closest('[data-sheet-add-mouse]');
+    if(addMouse){
+      if(renderToken!==renderSequence||state.context!==context||String(hooks.currentContext?.()??accountContext)!==accountContext)return;
+      const item=newMouseTargets.get(addMouse.dataset.sheetAddMouse),target=item&&mouseEntryTarget(item);if(!target)return;
+      if(state.drafts.size){state.message='Save or discard pending edits before adding a mouse.';state.error=false;updateDraftControls();return;}
+      const newborn=addMouse.dataset.sheetNewborn==='true'&&cageLayout(item).isBreeding===true;
+      creatingMouse=true;
+      try{await hooks.newMouse({...target,newborn});}
+      catch(error){if(renderToken===renderSequence&&state.context===context){state.message=error?.message||'Could not open mouse registration.';state.error=true;updateDraftControls();}}
+      finally{creatingMouse=false;}
+      return;
+    }
     const command=event.target.closest('[data-sheet-move],[data-sheet-move-slot],[data-sheet-remove],[data-sheet-destination],[data-sheet-new]');
     if(command){if(!canEdit('cages'))return;const d=command.dataset;if(d.sheetMoveSlot){try{verifySlotSource(d.sheetMoveSlot);state.selectedSlot=d.sheetMoveSlot;state.selectedCage=null;paint();}catch(error){state.message=error.message;state.error=true;paint();}}else if(d.sheetMove){if(!canMoveCage(d.sheetMove))return;state.selectedCage=d.sheetMove;state.selectedSlot=null;paint();}else if(d.sheetRemove){try{stage(planCageRemoval(viewDataset,d.sheetRemove));}catch(error){state.message=error.message;state.error=true;paint();}}else if(d.sheetDestination){if(state.selectedSlot)moveSlot(d.sheetDestination);else move(d.sheetDestination);}else if(d.sheetNew){if(state.drafts.size){state.message='Save or discard pending edits before creating a cage.';paint();}else hooks.newCage?.(d.sheetNew);}return;}
     if(!event.target.closest('button,input,select,textarea,a,summary,details,.sheet-animal-editor')&&!hooks.readOnly){const cage=event.target.closest('.sheet-cage');if(cage){if((state.selectedCage||state.selectedSlot)&&cage.dataset.sheetSlot){if(state.selectedSlot)moveSlot(cage.dataset.sheetSlot);else move(cage.dataset.sheetSlot);}else if(cage.dataset.sheetSlot){try{verifySlotSource(cage.dataset.sheetSlot);state.selectedSlot=cage.dataset.sheetSlot;state.selectedCage=null;paint();}catch(error){state.message=error.message;state.error=true;updateDraftControls();}}else if(canMoveCage(cage.dataset.cage)&&canEdit('cages')){state.selectedCage=cage.dataset.cage;state.selectedSlot=null;paint();}return;}}

@@ -226,3 +226,18 @@
 .lac-fees .fee-unavailable{display:block;font-size:12px;line-height:1.25;font-weight:400;color:var(--muted,#61656b)}
 
 .lac-fees .exp-stats{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:16px}
+
+/* Compact cage registration and breeding family rows. */
+.sheet-cage.sheet-breeding{border-color:#b55d0c;box-shadow:inset 0 0 0 1px #b55d0c}
+.sheet-cage.sheet-breeding>header{background:#e9a765;border-color:#b55d0c}
+.sheet-cage .sheet-breeding-label{flex-shrink:0;padding:2px 4px;border-radius:3px;background:#934309;color:#fff;font-size:9px;font-weight:600;line-height:1.3}
+.sheet-cage .sheet-parent-separator{border:0;border-top:2px solid #b55d0c;margin:3px 0}
+.sheet-cage tr.sheet-parent-separator{margin:0}
+.sheet-cage tr.sheet-parent-separator>td{border:0;padding:0;height:4px}
+.sheet-cage .sheet-empty-mouse{display:block;box-sizing:border-box;width:100%;height:29px;min-height:29px;margin:0;padding:2px 5px;border:0;border-bottom:1px solid #d8e0e6;border-radius:0;background:transparent;text-align:left;color:#697d8c;font-size:12px;line-height:1.35}
+.sheet-cage button.sheet-empty-mouse:hover{background:#eef5fa;color:#194f7a}
+.sheet-cage button.sheet-empty-mouse:focus-visible{outline:2px solid #216aa0;outline-offset:-2px}
+.sheet-cage .sheet-add-mouse-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;padding:3px}
+.sheet-cage .sheet-add-mouse{min-height:24px;padding:2px 4px;font-size:10px;line-height:1.35}
+.sheet-cage .sheet-empty-mouse-row>td{padding:0}
+@media(pointer:coarse){.sheet-cage .sheet-empty-mouse{height:37px;min-height:37px}.sheet-cage .sheet-add-mouse{min-height:32px}}

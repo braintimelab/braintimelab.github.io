@@ -123,14 +123,36 @@ function managedRow(mouse,locationId){
 export function cageSheetAnimals(dataset,item={}){
  const position=item.position||{},locationId=text(position.location_id)||null;
  const observations=cageObservations(position),mice=(dataset?.tables?.mice||[]).filter(active),index=new Map();
- for(const mouse of mice){const tag=text(mouse.physical_tag),id=text(mouse.mouse_sid);if(!id||!tag)continue;const identifiers=[{value:tag,requiresDob:false}];if(/[-\s][MF]$/.test(tag)&&/^\d+$/.test(id))identifiers.push({value:tag+id,requiresDob:false});if(shorthand(tag)&&sex(mouse.sex)&&/^\d+$/.test(id))identifiers.push({value:`${tag}-${sex(mouse.sex)[0]}${id}`,requiresDob:true});for(const {value,requiresDob} of identifiers){const key=identifierKey(value),matches=index.get(key)||[];if(!matches.some(m=>m.mouse===mouse))matches.push({mouse,requiresDob});index.set(key,matches);}}
- const sourceCounts=new Map();for(const animal of observations.animals){const key=identifierKey(animal.tag);sourceCounts.set(key,(sourceCounts.get(key)||0)+1);}
+ for(const mouse of mice){
+  const tag=text(mouse.physical_tag),id=text(mouse.mouse_sid);if(!id)continue;
+  const identifiers=tag?[{value:tag,requiresDob:false,alias:false}]:[];
+  if(/[-\s][MF]$/.test(tag)&&/^\d+$/.test(id))identifiers.push({value:tag+id,requiresDob:false,alias:false});
+  if(shorthand(tag)&&sex(mouse.sex)&&/^\d+$/.test(id))identifiers.push({value:`${tag}-${sex(mouse.sex)[0]}${id}`,requiresDob:true,alias:false});
+  if(Array.isArray(mouse.physical_tag_aliases))for(const alias of mouse.physical_tag_aliases)if(typeof alias==='string'&&text(alias))identifiers.push({value:alias,requiresDob:true,alias:true});
+  for(const {value,requiresDob,alias} of identifiers){
+   const key=identifierKey(value),matches=index.get(key)||[],existing=matches.find(m=>m.mouse===mouse);
+   if(existing){existing.alias||=alias;existing.requiresDob&&=requiresDob;}else matches.push({mouse,requiresDob,alias});
+   index.set(key,matches);
+  }
+ }
+ const sourceByTag=new Map();for(const animal of observations.animals){const key=identifierKey(animal.tag),same=sourceByTag.get(key)||[];same.push(animal);sourceByTag.set(key,same);}
  const rows=observations.animals.map(animal=>{
-  const key=identifierKey(animal.tag),literal=(animal.sourceCell?index.get(key)||[]:[]).filter(m=>!m.requiresDob||(animal.dateOfBirth&&(animal.dateOfBirth===date(m.mouse.date_of_birth)||override(m.mouse,'date_of_birth')))).map(m=>m.mouse),retained=dataset?.history_projection?.read_only===true?[]:linkedMice(mice,position,animal,observations),candidates=[...new Set([...literal,...retained])],unique=candidates.length===1&&sourceCounts.get(key)===1?candidates[0]:null;
+  const key=identifierKey(animal.tag),entries=animal.sourceCell?index.get(key)||[]:[];
+  const retained=dataset?.history_projection?.read_only===true?[]:linkedMice(mice,position,animal,observations);
+  const possible=[...new Set([...entries.map(entry=>entry.mouse),...retained])];
+  // Reused tag aliases identify a DOB cohort, not the animal whose SID happens
+  // to resemble the suffix. An override or old link cannot select another cohort.
+  const cohortSensitive=entries.some(entry=>entry.alias)||possible.length>1;
+  const missingCohortDate=!animal.dateOfBirth&&possible.length>1;
+  const literal=entries.filter(entry=>cohortSensitive?animal.dateOfBirth&&animal.dateOfBirth===date(entry.mouse.date_of_birth):!entry.requiresDob||(animal.dateOfBirth&&(animal.dateOfBirth===date(entry.mouse.date_of_birth)||override(entry.mouse,'date_of_birth')))).map(entry=>entry.mouse);
+  const keptLinks=cohortSensitive?retained.filter(mouse=>animal.dateOfBirth&&animal.dateOfBirth===date(mouse.date_of_birth)):retained;
+  const candidates=[...new Set([...literal,...keptLinks])];
+  const sameSource=sourceByTag.get(key)||[],sourceCount=!animal.dateOfBirth||sameSource.some(other=>!other.dateOfBirth)?sameSource.length:sameSource.filter(other=>other.dateOfBirth===animal.dateOfBirth).length;
+  const unique=candidates.length===1&&sourceCount===1&&!missingCohortDate?candidates[0]:null;
   const conflicting=unique&&(unique.state==='Ended'||animal.requiresReview||(animal.sex&&sex(unique.sex)&&animal.sex!==sex(unique.sex))||(animal.dateOfBirth&&date(unique.date_of_birth)&&animal.dateOfBirth!==date(unique.date_of_birth)&&!override(unique,'date_of_birth')));
-  const status=candidates.length>1||sourceCounts.get(key)>1?'ambiguous':conflicting?'conflict':unique?'matched':'unlinked',mouse=status==='matched'?unique:null;
+  const status=missingCohortDate||candidates.length>1||sourceCount>1?'ambiguous':conflicting?'conflict':unique?'matched':'unlinked',mouse=status==='matched'?unique:null;
   const take=(key,source,stored)=>mouse&&override(mouse,key)?stored:source??stored;
-  return {...animal,tag:mouse&&override(mouse,'physical_tag')?managedRow(mouse,locationId).tag:animal.tag,sourceTag:animal.tag,mouseSid:mouse?text(mouse.mouse_sid):null,dateOfBirth:take('date_of_birth',animal.dateOfBirth,mouse?date(mouse.date_of_birth):null),earMark:take('ear_mark',animal.earMark,mouse?text(mouse.ear_mark)||null:null),note:mouse&&override(mouse,'comment')?text(mouse.comment):animal.note||text(mouse?.comment),sourceNote:animal.note,sex:animal.sex||sex(mouse?.sex),locationId,matchStatus:status};
+  return {...animal,tag:mouse&&(override(mouse,'physical_tag')||entries.some(entry=>entry.mouse===mouse&&entry.alias))?managedRow(mouse,locationId).tag:animal.tag,sourceTag:animal.tag,mouseSid:mouse?text(mouse.mouse_sid):null,dateOfBirth:take('date_of_birth',animal.dateOfBirth,mouse?date(mouse.date_of_birth):null),earMark:take('ear_mark',animal.earMark,mouse?text(mouse.ear_mark)||null:null),note:mouse&&override(mouse,'comment')?text(mouse.comment):animal.note||text(mouse?.comment),sourceNote:animal.note,sex:animal.sex||sex(mouse?.sex),locationId,matchStatus:status};
  }).filter(row=>{
   if(row.matchStatus!=='matched')return true;
   const mouse=mice.find(m=>text(m.mouse_sid)===row.mouseSid);

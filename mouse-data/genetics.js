@@ -194,6 +194,7 @@ export function rankPairs(config,candidates) {
     const record=candidate?.record;
     if(candidate?.app_archived_at||candidate?.archived===true||record?.app_archived_at||record?.archived===true)reasons.push('Archived animals are excluded.');
     if(candidate?.state==='Ended'||record?.state==='Ended')reasons.push('Ended animals are excluded.');
+    else if([candidate?.state,record?.state].some(state=>state!=null&&state!=='Stock'))reasons.push('Only current Stock animals are eligible; current status needs review.');
     if(isObject(candidate)&&['Male','Female'].includes(candidate.sex))reasons.push(...validateParent(candidate,candidate.sex,config.loci,{confirmedOnly:true}).errors);
     if(reasons.length)result.excluded.push({id,reason:unique(reasons).join(' ')});
     else (candidate.sex==='Male'?sires:dams).push(candidate);
