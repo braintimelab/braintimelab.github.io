@@ -77,6 +77,8 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
 .tool-card p { font-size: 14px; color: var(--muted); margin-bottom: 28px; max-width: 350px; }
 .tool-link { display: flex; gap: 20px; align-items: center; justify-content: space-between; min-height: 44px; margin-top: auto; font-size: 14px; text-decoration: none; font-weight: 550; border-top: 1px solid var(--line); padding-top: 16px; }
 .tool-link:hover { text-decoration: underline; }
+.tool-link-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.google-file-icon { width: 18px; height: 18px; flex: 0 0 18px; object-fit: contain; }
 .tool-links { display: flex; flex-direction: column; align-items: stretch; gap: 0; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
 .tool-links .tool-link { gap: 6px; justify-content: flex-start; margin-top: 0; border: 0; padding-top: 0; }
 .document-links { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
