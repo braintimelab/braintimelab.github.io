@@ -47,3 +47,5 @@ th.sortable{padding:0}th .sort-button{display:flex;align-items:center;gap:7px;wi
 th .sort-button:hover{background:#e2e9e8;color:var(--blue)}th .sort-button:focus-visible{outline:2px solid var(--blue);outline-offset:-3px}th[aria-sort=ascending],th[aria-sort=descending]{color:var(--blue)}
 @media(max-width:650px){th .sort-button{padding:10px}}
 @media print{th .sort-button{display:block!important}th .sort-indicator{display:none}}
+
+.usage-filters{display:flex;align-items:end;gap:8px;flex-wrap:wrap}.usage-filters label{display:grid;gap:3px;font-size:11px}.usage-filters input[type=date]{width:145px}.usage-table th:nth-child(1){width:150px}.usage-table td:nth-child(3),.usage-table td:nth-child(4){white-space:nowrap;font-variant-numeric:tabular-nums}

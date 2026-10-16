@@ -14,11 +14,26 @@ export function hazardous(p) {
   const known=value=>Array.isArray(value)?value.some(known):!['','unknown','unverified','none','n','no','無','未確認','未分類','not recorded'].includes(text(value).trim().toLowerCase());
   return p.safety?.flagged===true || p.safety?.regulated===true || [p.safety?.hazard_codes,p.safety?.classification,p.safety?.regulatory_list,p.hazard_statements].some(known);
 }
-export function quantity(p) {return typeof p.remaining_amount==='number'&&Number.isFinite(p.remaining_amount)?`${p.remaining_amount} ${p.unit||'(unit unknown)'}`:text(p.quantity_text||(p.remaining_amount??p.amount??'Unknown'));}
+export function quantity(p) {
+  if(typeof p.remaining_amount==='number'&&Number.isFinite(p.remaining_amount)&&p.remaining_amount>=0)return `${p.remaining_amount} ${p.unit||'(unit unknown)'}`;
+  for(const value of [p.quantity_text,p.remaining_amount])if(value!=null&&(typeof value!=='number'||Number.isFinite(value)&&value>=0)&&text(value).trim())return text(value);
+  const packaging=[['Pack',p.package_size_raw],['Containers',p.container_count_raw]].filter(([,value])=>value!=null&&text(value).trim()).map(([label,value])=>`${label}: ${text(value)}`);
+  if(packaging.length)return packaging.join(' · ');
+  return p.amount!=null&&text(p.amount).trim()?text(p.amount):'Unknown';
+}
 export function itemName(r) {return text(r.payload?.name||r.payload?.title||r.id);}
-export function filterItems(rows,{query='',category='',status='',location='',dangerous=false}={}) {
+export function itemClassification(row) {
+  const p=row.payload||row,normalize=value=>text(value).trim().toLocaleLowerCase().replace(/\s*\/\s*/g,'/').replace(/\s+/g,' ');
+  const labels={equipment:'Equipment',equipments:'Equipment',ab:'Antibody',antibody:'Antibody',antibodies:'Antibody',chemical:'Chemicals',chemicals:'Chemicals','surgical/animal':'Surgical / animal','plastic/mol. bio':'Plastic / Mol. bio','optics/chamber':'Optics / chamber',consumable:'Consumable',consumables:'Consumable'};
+  if([row.kind,p.inventory_type].some(value=>['equipment','equipments'].includes(normalize(value))))return 'Equipment';
+  for(const value of [p.inventory_classification,p.source_sheet,p.source_ref?.sheet?.title,p.source_ref?.sheet,p.sheet,p.source_fields?.sheet,p.inventory_type,p.category]){
+    const label=labels[normalize(value)];if(label)return label;
+  }
+  return 'Unclassified';
+}
+export function filterItems(rows,{query='',category='',classification='',status='',location='',dangerous=false}={}) {
   const q=query.trim().toLocaleLowerCase();
-  return rows.filter(r=>!r.archived&&(!category||r.payload.category===category)&&(!status||r.payload.status===status)&&(!location||r.payload.location===location)&&(!dangerous||hazardous(r.payload))&&(!q||text(r.payload).toLocaleLowerCase().includes(q))).sort((a,b)=>itemName(a).localeCompare(itemName(b))||a.id.localeCompare(b.id));
+  return rows.filter(r=>!r.archived&&(!category||itemClassification(r)===category)&&(!classification||itemClassification(r)===classification)&&(!status||r.payload.status===status)&&(!location||r.payload.location===location)&&(!dangerous||(r.kind!=='equipment'&&hazardous(r.payload)))&&(!q||text(r.payload).toLocaleLowerCase().includes(q))).sort((a,b)=>itemName(a).localeCompare(itemName(b))||a.id.localeCompare(b.id));
 }
 export function stockStats(rows,today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'})) {
   const p=rows.filter(r=>!r.archived).map(r=>r.payload);
@@ -29,12 +44,40 @@ export function numeric(value,label,{optional=true,min=0}={}) {
   const valueType=typeof value;if(!['string','number'].includes(valueType)||valueType==='string'&&!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()))throw Error(`${label} must be a decimal number.`);
   const n=Number(value);if(!Number.isFinite(n)||n<min)throw Error(`${label} must be a number of at least ${min}.`);return n;
 }
+function decimalDifference(left,right) {
+  // Align the decimal values that JSON sends to PostgreSQL NUMERIC, including exponents.
+  const parts=value=>{const [mantissa,exponent='0']=String(value).split(/e/i);return {digits:BigInt(mantissa.replace('.','')),scale:(mantissa.split('.')[1]||'').length-Number(exponent)};};
+  const a=parts(left),b=parts(right),scale=Math.max(0,a.scale,b.scale);
+  const digits=(a.digits*10n**BigInt(scale-a.scale)-b.digits*10n**BigInt(scale-b.scale)).toString().padStart(scale+1,'0');
+  return Number(scale?digits.slice(0,-scale)+'.'+digits.slice(-scale):digits);
+}
 export function usageEvent(values,item,id,today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'})) {
   const amount=numeric(values.amount,'Amount',{optional:false,min:Number.MIN_VALUE}),unit=text(values.unit).trim();
   if(!unit||unit.length>40)throw Error('Enter a quantity unit of at most 40 characters.');
   if(!validDate(values.event_date)||values.event_date>today)throw Error('Choose a valid usage date no later than today.');
   if(values.apply_balance&&(typeof item.remaining_amount!=='number'||!Number.isFinite(item.remaining_amount)||item.remaining_amount<0||item.unit!==unit||amount>item.remaining_amount))throw Error('To subtract stock, use the exact recorded unit and an amount within the known balance.');
-  return {id,name:text(item.name),amount,unit,event_date:values.event_date,local_time:values.local_time||'',timezone:'Asia/Taipei',operator:values.operator||'',purpose:values.purpose||'',notes:values.notes||''};
+  return {id,name:text(item.name),amount,unit,event_date:values.event_date,local_time:values.local_time||'',timezone:'Asia/Taipei',operator:values.operator||'',purpose:values.purpose||'',notes:values.notes||'',...(values.apply_balance===true?{remaining_amount:decimalDifference(item.remaining_amount,amount),remaining_unit:unit}:{})};
+}
+// Historical usage records retain the units in their original column headings.
+// A recorded balance is an observation at that date, never a calculated stock total.
+export function usageSummary(row) {
+  const p=row.payload||row,fields={...p.fields,...p.source_fields,...p.original_fields};
+  // record_date may be the import snapshot, not the date of use.
+  const rawDate=[p.event_date,p.used_at,p.date,p.period].find(value=>value!=null&&text(value).trim())??'';
+  const period=text(rawDate).trim(),candidate=period.slice(0,10),date=validDate(candidate)&&(period.length===10||/^[T ]/.test(period.slice(10)))?candidate:'';
+  const sourceUnit=prefix=>{const units=[...new Set(Object.keys(fields).map(key=>key.match(prefix)?.[1]?.trim()).filter(Boolean))];return units.length===1?units[0]:'';};
+  const usedUnit=text(p.unit).trim()||sourceUnit(/^Used\s+(?:volume|amount)\s*\(([^)]+)\)$/i);
+  const remainingUnit=text(p.remaining_unit).trim()||sourceUnit(/^Remaining\s+(?:vol\.?|volume|amount)\s*\(([^)]+)\)$/i)||(p.remaining_amount!=null?text(p.unit).trim():'');
+  const value=values=>values.find(value=>value!=null&&text(value).trim()!=='');
+  const usedRaw=value([p.amount,p.used_amount_raw,p.used_amount,p.quantity_text]),remainingRaw=value([p.remaining_amount,p.remaining_raw,p.remaining]);
+  const amount=value=>{try{return numeric(value,'Quantity');}catch{return null;}};
+  const usedAmount=amount(usedRaw),remainingAmount=amount(remainingRaw);
+  const display=(raw,number,unit)=>number!=null?`${number}${unit?' '+unit:' (unit unknown)'}`:raw!=null&&typeof raw!=='number'&&text(raw).trim()?text(raw):'—';
+  return {period:date||period||'—',date,used:display(usedRaw,usedAmount,usedUnit),remaining:display(remainingRaw,remainingAmount,remainingUnit),usedAmount,usedUnit,remainingAmount,remainingUnit,operator:text(p.operator)};
+}
+export function usageInPeriod(rows,{fromDate='',toDate=''}={}) {
+  if((fromDate&&!validDate(fromDate))||(toDate&&!validDate(toDate))||(fromDate&&toDate&&fromDate>toDate))throw Error('Choose a valid usage date range.');
+  return rows.filter(row=>{if(row.archived)return false;if(!fromDate&&!toDate)return true;const {date}=usageSummary(row);return !!date&&(!fromDate||date>=fromDate)&&(!toDate||date<=toDate);});
 }
 export function validateBundle(bundle) {
   if(!bundle||bundle.schema_version!==1||!['sources','records','observations'].every(k=>Array.isArray(bundle[k])))throw Error('Choose a Braintime Reagents import package (schema version 1).');
