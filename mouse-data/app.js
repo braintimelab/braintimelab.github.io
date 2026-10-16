@@ -1,4 +1,4 @@
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=81';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=82';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=73';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=41';
 import * as store from './data-store.js?v=76';
@@ -21,7 +21,7 @@ import { createAccessActivity } from './access-activity.js?v=69';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=80';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
 import { sortRooms, compareRooms } from './room-order.js?v=24';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=81';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=82';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=81';
 import { renderCageLabelEditor } from './cage-label.js?v=58';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=74';

@@ -5,7 +5,7 @@ import { projectAnimalSheet } from './animal-sheet-export.js?v=48';
 import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=76';
 import { lightClock } from './husbandry.js?v=81';
 import { cageObservations, cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=81';
-import { cageBreedingLayout } from './mouse-registration.js?v=81';
+import { cageBreedingLayout } from './mouse-registration.js?v=82';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};

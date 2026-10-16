@@ -52,7 +52,7 @@ export function separateReusedMouseTag(dataset,draft) {
  const same=matches.find(m=>m.date_of_birth===dob);
  if(same)return {draft,readDependencies:dependencies,error:`This tag and DOB already belong to SID ${same.mouse_sid}. Open that mouse instead.`};
  const exact=matches.some(m=>identifiers(m).includes(key(tag)));
- const suffix=tag.match(/^(.*?[-\s][MF])(\d{4})$/);
+ const suffix=tag.match(/^(.*?[-\s][MF])(\d{1,6})$/);
  if(exact&&!suffix)return {draft,readDependencies:dependencies,error:'This reused tag needs a distinct physical tag before saving.'};
  const padded=exact?`${suffix[1]}0${suffix[2]}`:tag;
  if(exact&&mice(dataset).some(m=>identifiers(m).includes(key(padded))))return {draft,readDependencies:dependencies,error:'The padded tag already exists. Review this mouse before creating another record.'};
