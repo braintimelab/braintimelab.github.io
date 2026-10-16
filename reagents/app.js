@@ -1,10 +1,10 @@
-import * as store from '../mouse-data/data-store.js?v=91';
-import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=91';
-import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=91';
+import * as store from '../mouse-data/data-store.js?v=92';
+import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=92';
+import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=92';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=91';
-import {createAccessActivity} from '../mouse-data/access-activity.js?v=91';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=92';
+import {createAccessActivity} from '../mouse-data/access-activity.js?v=92';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=3';
 import {SECTIONS,canReviewHistory,canViewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=5';
 
@@ -62,6 +62,13 @@ const sourceHistoryFields=new Set(['source_fields','original_fields','source_ref
 function ownerHistoryAccess(){return member&&canViewHistory(permissions)&&store.getCloudStatus().signedIn&&store.getCloudStatus().role==='owner';}
 function requireHistoryAccess(){if(ownerHistoryAccess())return;const error=Error('History is available only to the owner.');if(member&&canViewHistory(permissions))accessFailure(error);throw error;}
 function withoutSourceHistory(payload){return Object.fromEntries(Object.entries(payload||{}).filter(([key])=>!sourceHistoryFields.has(key)).map(([key,value])=>[key,key==='safety'?withoutSourceHistory(value):value]));}
+function showIdentity(account){
+ const name=text(account.name).trim()||text(account.username).trim()||'Lab member',parts=name.split(/\s+/).filter(Boolean);
+ const initials=text(account.acronym).trim().slice(0,4)||(parts.length>1?parts[0][0]+parts.at(-1)[0]:parts[0]?.slice(0,2)||'BT');
+ const role=permissions.role==='owner'?'Owner':permissions.role==='manager'?'Manager':'';
+ $('identity').innerHTML=`<span class="account-initials" aria-hidden="true">${esc(initials.toUpperCase())}</span><span class="account-details"><a class="account-name" href="../mouse-data/#settings" title="Account settings">${esc(name)}</a>${role?`<span class="account-role">${role}</span>`:''}</span>`;
+ $('identity').hidden=false;$('sidebar-account').hidden=false;$('sign-out').hidden=false;
+}
 function resetPrivate(){
  closeExportPreview();$('sheet-import').hidden=true;$('sheet-import-dialog').close();$('import-preview').innerHTML='';
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();
@@ -69,7 +76,7 @@ function resetPrivate(){
  setImporting(false);member=false;permissions={};items=[];records.clear();sourceRows=[];selected=null;editAction=null;importing=false;listKind=null;viewGeneration++;clearTimeout(searchTimer);
  filters={query:'',category:'',status:'',location:''};offset=0;historySource='';historyQuery='';historyOffset=0;
  $('editor').close();$('edit-fields').innerHTML='';$('edit-title').textContent='';$('edit-error').textContent='';$('import-file').value='';$('order-catalog-file').value='';
- $('navigation').innerHTML='';$('identity').textContent='';$('sign-out').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
+ $('navigation').innerHTML='';$('identity').textContent='';$('identity').hidden=true;$('sidebar-account').hidden=!store.getCloudStatus().signedIn;$('sign-out').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
 }
 function context(){const c=store.getCloudStatus();return JSON.stringify([c.url,c.colonyId,c.email,c.username,c.signedIn,c.setupRequired,c.passwordRecovery,c.role,c.exportLevel]);}
 function fence(){const g=generation,c=context();return ()=>{if(g!==generation||!member||context()!==c)throw Error('Your session changed. Reopen Reagents.');};}
@@ -101,7 +108,7 @@ async function start({force=false}={}){
   if(current.setupRequired||current.passwordRecovery){main.innerHTML='<div class="empty"><h2>Complete your account</h2><p>Finish account setup or password recovery before opening Reagents.</p><a href="../mouse-data/#settings">Continue in Mouse Data →</a></div>';return;}
   const checked=await store.verifyCloudMembership();if(attempt!==generation)return;if(!checked.signedIn||checked.passwordRecovery||checked.setupRequired||!['owner','manager','editor','viewer'].includes(checked.role)||checked.url!==PUBLIC_CONFIG.url||checked.colonyId!==PUBLIC_CONFIG.colonyId)throw Error('Your lab access could not be verified. Sign in again.');member=true;
   const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;observeAccess();
-  $('identity').textContent=checked.name||checked.email||checked.username||'Lab member';$('sign-out').hidden=false;
+  showIdentity(checked);
   const loaded=await loadInventory();if(attempt!==generation)return;items=loaded;items.forEach(r=>records.set(r.id,r));status();await render();
  }catch(err){if(attempt!==generation)return;accessActivity.reset();resetPrivate();signInView(err.message);}
 }
@@ -271,7 +278,7 @@ $('pdf-export').addEventListener('cancel',closeExportPreview);
 $('sheet-import').addEventListener('click',openSheetImport);
 $('sheet-import-dialog').addEventListener('cancel',event=>{if(importing)event.preventDefault();});
 $('sheet-import-dialog').addEventListener('close',()=>{$('import-preview').innerHTML='';$('sheet-import-status').textContent='';if(member&&!importing)void render();});
-$('help').addEventListener('click',()=>$('help-dialog').showModal());$('refresh').addEventListener('click',()=>void start());$('sign-out').addEventListener('click',async()=>{accessActivity.signOut(section());const g=++generation;resetPrivate();try{await store.signOut();}finally{if(g===generation){signInView();$('sign-out').hidden=true;}}});
+$('help').addEventListener('click',()=>$('help-dialog').showModal());$('refresh').addEventListener('click',()=>void start());$('sign-out').addEventListener('click',async()=>{accessActivity.signOut(section());const g=++generation;resetPrivate();try{await store.signOut();}finally{if(g===generation){signInView();$('sign-out').hidden=true;$('sidebar-account').hidden=true;}}});
 $('import-file').addEventListener('change',e=>{const g=generation;void chooseImport(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 $('order-catalog-file').addEventListener('change',e=>{const g=generation;void chooseOrderCatalog(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:''};void render();});

@@ -1,7 +1,7 @@
 /* Owner-only roster. Every read and write is authorized by its server RPC.
  * Email invitations require an explicit owner confirmation and a server-authorized hook.
  * This component never stores passwords. */
-import {PUBLIC_CONFIG} from './config.js?v=91';
+import {PUBLIC_CONFIG} from './config.js?v=92';
 const mounts=new WeakMap();
 export function clearLabMembers(container){const state=mounts.get(container);if(!state)return;state.clear?.();mounts.delete(container);container.innerHTML='';container.onclick=null;container.oninput=null;container.onchange=null;container.onsubmit=null;}
 export function verifiedInvitationLink(result,{origin=PUBLIC_CONFIG.url,redirectUrl='https://braintimelab.github.io/mouse-data/'}={}){

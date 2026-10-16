@@ -1,13 +1,13 @@
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=91';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=91';
-import { sortRooms } from './room-order.js?v=91';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=91';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=91';
-import { lightClock } from './husbandry.js?v=91';
-import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=91';
-import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=91';
-import { cageBreedingLayout } from './mouse-registration.js?v=91';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=91';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=92';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=92';
+import { sortRooms } from './room-order.js?v=92';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=92';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=92';
+import { lightClock } from './husbandry.js?v=92';
+import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=92';
+import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=92';
+import { cageBreedingLayout } from './mouse-registration.js?v=92';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=92';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id'};
