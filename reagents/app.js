@@ -3,8 +3,8 @@ import {PUBLIC_CONFIG} from '../mouse-data/config.js';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=1';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=1';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=28';
-import {createAccessActivity} from '../mouse-data/access-activity.js?v=28';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=69';
+import {createAccessActivity} from '../mouse-data/access-activity.js?v=69';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=1';
 import {SECTIONS,canReviewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=3';
 
