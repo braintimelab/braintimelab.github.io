@@ -1535,6 +1535,22 @@ export async function getAnimalSheetImportConflicts({offset=0,limit=100}={}){
  if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==actor)throw new Error('The account changed. Reopen Settings.');return result;
 }
 
+async function experimentSheetImportRequest(name,args={}){
+ const c=configuration(),actor=session()?.user?.id,generation=authGeneration,config=stable(c);
+ if(!c||!actor)throw new Error('Sign in to use Experiment Sheet imports.');
+ const check=()=>{if(generation!==authGeneration||stable(configuration())!==config||session()?.user?.id!==actor||session()?.passwordRecovery||pendingAccount(session()))throw new Error('The account changed. Reopen Experiment Sheet imports.');};
+ check();await membership({check});check();
+ const current=session(),permitted=['owner','editor'].includes(current.role)||current.role==='manager'&&current.permissions?.imports===true&&current.permissions?.experiments===true;
+ if(!permitted)throw new Error('Experiment and import permissions are required.');
+ const result=await request('rpc/'+name,{method:'POST',body:{p_colony_id:c.colonyId,...args}});check();return result;
+}
+export function startExperimentSheetImport(){return experimentSheetImportRequest('request_experiment_sheet_import');}
+export function getExperimentSheetImportStatus(){return experimentSheetImportRequest('get_experiment_sheet_import_status');}
+export function getExperimentSheetImportConflicts({offset=0,limit=100}={}){
+ if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)return Promise.reject(new Error('Choose a valid conflict page.'));
+ return experimentSheetImportRequest('get_experiment_sheet_import_conflicts',{p_offset:offset,p_limit:limit});
+}
+
 
 // Monitoring is readable from High upward; all bot mutations remain owner-only.
 async function brainbotRequest(name,body={}){

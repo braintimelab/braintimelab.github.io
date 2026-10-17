@@ -7,7 +7,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=118';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=119';
+import * as store from './data-store.js?v=120';
 import * as model from './model.js?v=118';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=118';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=118';
@@ -39,10 +39,11 @@ import { renderBreedingPlanner } from './breeding-planner.js?v=118';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=118';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=118';
 import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=118';
-import { renderExperiments, experimentHelpHTML } from './experiments.js?v=100';
+import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=120';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
 import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=118';
 import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=100';
+import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=120';
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=100';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=100';
 import { protocolsForEntity } from './iacuc-model.js?v=100';
@@ -122,7 +123,7 @@ const titles = {overview:'Animal Overview',mice:'Mice',strains:'Strains',matings
 let accessLogsCleanup=null,labUserDirectoryRequest=0,historyLoadState=null,historyLoadFailure=null;
 const deferredHistoryTables=()=>store.getDeferredHistoryTables?.(dataset)||[];
 const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id,archiveTable]);
-function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts()||route==='strains'&&hasStrainDrafts($('main'))||route==='cryo'&&hasCryopreservationDraft($('main')));}
+function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts()||route==='strains'&&hasStrainDrafts($('main'))||route==='cryo'&&hasCryopreservationDraft($('main'))||route==='experiments'&&hasExperimentDrafts($('main')));}
 async function loadHistoryTables(tables){
  if(cachedPreview||startupLoading||cloud.mode==='cloud'&&!cloudReady)throw new Error('Synchronizing. Try again shortly.');
  if(historyDraftOpen())throw new Error('Save or discard changes before loading history.');
@@ -262,7 +263,7 @@ function panel(title,body,action='') { return `<section class="panel"><div class
 function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`; }
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
-async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
+async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 function renderConnection() {
  renderSidebarAccount();
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
@@ -277,7 +278,7 @@ function navigation() { $('navigation').innerHTML=Object.entries(titles).filter(
 function navigate(view,id=null) { if(brainbotReviewPending){showToast('BB review is running.');return;}if(sidebarMenuOpen)setSidebarMenuOpen(false,false);if(cloud.role==='pending')view='settings';route=titles[view]?view:'overview';detail=id&&entity[route]?{type:route,id:String(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;resetTableWindow();selectedMice.clear();location.hash=detail?`${route}/${encodeURIComponent(detail.id)}`:route;render(); }
 function render() {
  const generation=++pageRenderGeneration;
- if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();
+ if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();
  if(startupLoading){renderStartupLoading();return;}
  clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));if(cloud.role==='pending'){route='settings';detail=null;dataset=null;}accessActivity.observe(route==='review'?'mice':route==='strains'?'planner':route);
  renderMigrationNotice();
@@ -375,7 +376,7 @@ function renderCryo(){
  renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:!index&&deferredHistoryTables().includes('historical_observations'),historyIndex:index,historyLoading:false});
 }
 function renderExperimentSection(){
- renderExperiments($('main'),dataset,{reloadPage:()=>location.reload(),canLoadHistory:()=>!cachedPreview&&!startupLoading&&cloudReady,historyDeferred:deferredHistoryTables().some(name=>['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage'].includes(name)),loadSourceHistory:async()=>loadHistoryTables(['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage']),isCurrent:()=>route==='experiments',initialMouseId:experimentMouseId,initialRecordId:experimentRecordId,canEdit:canEditRecords,openMouse:id=>navigate('mice',id),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});experimentMouseId=null;experimentRecordId=null;
+ renderExperiments($('main'),dataset,{reloadPage:()=>location.reload(),canLoadHistory:()=>!cachedPreview&&!startupLoading&&cloudReady,historyDeferred:deferredHistoryTables().some(name=>['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage'].includes(name)),loadSourceHistory:async()=>loadHistoryTables(['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage']),isCurrent:()=>route==='experiments',initialMouseId:experimentMouseId,initialRecordId:experimentRecordId,canEdit:canEditRecords,canImport:canImportExperimentSheet,importFromSheet:openExperimentSheetImport,openMouse:id=>navigate('mice',id),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});experimentMouseId=null;experimentRecordId=null;
 }
 function renderWelcome() {
  $('main').innerHTML=`<section class="welcome"><span class="eyebrow">Braintime Mouse Data</span><h2>Manage your colony.</h2><p>Mice, breeding, cages and light history.</p><div class="actions">${cloud.configured?button(cloud.signedIn?'Open shared colony':'Sign in',cloud.signedIn?'cloud-pull':'settings',true):button('Import records','import',true)}${button('Try demo','demo')}${button('Start empty','empty-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG)}</section><div class="welcome-steps"><article><span class="step-number">1</span><h3>Bring your records</h3><p>Import your reconstructed JSON.</p></article><article><span class="step-number">2</span><h3>Share with your lab</h3>${button('Connect cloud','settings')}</article><article><span class="step-number">3</span><h3>Install on any device</h3>${button('Install & help','help')}</article></div>`;
@@ -492,7 +493,29 @@ async function openCageSummaryOptions(){
  renderCageSummaryOptions($('cage-summary-options-content'),dataset,{canEdit:()=>canEditRecords('housing'),saveDataset:async next=>{if(!canEditRecords())throw new Error('Read-only access.');await store.saveDataset(next);dataset=await store.loadDataset();render()},reloadDataset:async()=>{dataset=await store.loadDataset();render();return dataset},toast:showToast});
 }
 function cageSummaryHelpHTML(){return `<p class="subtle">Cages being used counts distinct cage SIDs assigned to living Stock mice. Total cages is the current registered inventory: Active or Occupied cages, plus cages referenced by living mice. Historical inactive cages without living residents are excluded. Search, table filters and pagination do not change these totals.</p><p class="subtle">Room counts use current cage, position, rack and room assignments. Several mice in one cage count as one cage. SHLAC Conventional and SHLAC SPF show filled cage grids versus all current registered cage grids, including empty grids. Multiple animals in one grid count once; notes alone do not fill a grid. SHLAC Rat room cages count as LocoBoxes. Ani Beh cages also count, except cages with Cage type set to Temporary storage or positions selected under Options → Ani Beh temporary storage. Position exclusions stay with the slot; Cage type follows a moved cage. SHLAC Rat room always counts as LocoBoxes. The default is one box per occupied cage. Options defines the rooms, locobox capacities and how locoboxes are identified. Conventional and SPF capacities update from physical positions in Housing. A capacity of zero is valid; blank means unknown. Capacity counts cages or boxes, not mice.</p><p class="subtle">For a layout with one box per position, choose One box per registered position. If a box contains several cage positions, choose Group positions by Locobox ID and enter the same Locobox ID on those positions under Housing &amp; light → Positions. Identical box labels in different rooms remain separate. New rooms can be included in Options; new positions in the selected rooms contribute automatically.</p><p class="subtle">— means not yet established. ≥ is a confirmed minimum while assignments remain incomplete. For Conventional and SPF, mapped positions are the cage grids counted toward capacity. Locobox capacities remain the totals set in Options. ≈ includes estimated filled grids or occupied locoboxes from the current Animal Sheet, with source dates shown. Only recognizable animal tags in current source positions qualify; arbitrary notes, historical snapshots and conflicts do not. These estimates never create mouse identities or assignments. Linked cages take precedence, and shared Locobox IDs are counted once. Link cages to positions in Housing &amp; light, assign living mice to cages, and enter verified locobox capacities in Options. Conflicting, missing or archived housing references require review. Changes appear after a save or shared-colony refresh.</p>`}
-let cageImportSession=null;
+let cageImportSession=null,experimentImportSession=null;
+function canImportExperimentSheet(){return cloud.mode==='cloud'&&canEditRecords('imports')&&canEditRecords('experiments')&&canWriteCloud();}
+async function openExperimentSheetImport(){
+ if(!canImportExperimentSheet()){showToast('Experiment and import access are required.',true);return;}
+ if(historyDraftOpen()){showToast('Save or discard changes before importing.',true);return;}
+ let dialog=$('experiment-import-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='experiment-import-dialog';document.body.appendChild(dialog);}
+ experimentImportSession?.close();
+ const context=labUserDirectoryContext(store.getCloudStatus());let snapshot=dataset,cleanup=null,closed=false;
+ const valid=()=>!closed&&dialog.open&&route==='experiments'&&!detail&&context===labUserDirectoryContext(store.getCloudStatus())&&canImportExperimentSheet();
+ const check=()=>{if(!valid())throw new Error('Reopen Experiment Sheet imports for the current colony.');if(dataset!==snapshot||historyDraftOpen())throw new Error('Records changed. Reopen Experiment Sheet imports after saving or discarding edits.');};
+ const close=()=>{closed=true;cleanup?.();cleanup=null;dialog.innerHTML='';if(dialog.open)dialog.close();if(experimentImportSession?.close===close)experimentImportSession=null;};
+ const guarded=async action=>{check();try{const value=await action();check();return value;}catch(error){if(!valid())close();throw error;}};
+ dialog.innerHTML='<div class="dialog-heading"><h2>Experiment Sheet</h2><button class="icon-button" id="experiment-import-close" aria-label="Close Experiment Sheet import">×</button></div><div class="dialog-content" id="experiment-import-content"></div>';
+ $('experiment-import-close').onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=()=>{if(!dialog.open)close();};dialog.showModal();experimentImportSession={valid,close};
+ cleanup=await renderExperimentSheetImport($('experiment-import-content'),{
+  isCurrent:valid,canImport:()=>valid()&&dataset===snapshot&&!historyDraftOpen(),
+  getStatus:()=>guarded(()=>store.getExperimentSheetImportStatus()),
+  start:()=>guarded(()=>store.startExperimentSheetImport()),
+  getConflicts:options=>guarded(()=>store.getExperimentSheetImportConflicts(options)),
+  onComplete:async()=>{check();const fresh=await store.pullFromCloud({deferHistory:true});check();dataset=fresh;snapshot=fresh;cloudReady=true;resetExperimentSourceView($('main'));await refreshCloud();if(!valid())return;render();showToast('Experiment sheet updated.');}
+ });
+ if(closed)cleanup?.();
+}
 function canImportAnimalsSheet(){return cloud.mode==='cloud'&&canEditRecords('housing')&&canWriteCloud();}
 async function openCageSheetImport(){
  if(!canImportAnimalsSheet()){showToast('Housing and import access are required.',true);return;}

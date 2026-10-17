@@ -31,6 +31,7 @@ cryopreservation-model.js
 cryopreservation.js
 data-store.js
 experiment-model.js
+experiment-sheet-import.js
 experiment-source-timing.js
 experiment-sources.js
 experiment-timing.js
