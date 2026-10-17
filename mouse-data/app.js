@@ -43,7 +43,7 @@ import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperi
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
 import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=118';
 import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=100';
-import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=120';
+import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126';
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=100';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=100';
 import { protocolsForEntity } from './iacuc-model.js?v=100';
