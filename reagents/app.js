@@ -24,7 +24,7 @@ function recordedSafetyClassifications(payload){
  const classification=payload.safety?.classification,values=Array.isArray(classification)?classification:[classification];
  return values.filter(value=>typeof value==='string').map(value=>value.trim()).filter(value=>!SAFETY_ABSENT.has(value.toLocaleLowerCase()));
 }
-function safetyLabel(payload){return [...new Set(recordedSafetyClassifications(payload))].join(' · ')||(hazardous(payload)?'Review SDS':'');}
+function safetyLabel(payload){return toxicityClassifications(payload).join(' · ')||(hazardous(payload)?'Review SDS':'');}
 function toxicityClassifications(payload){
  const labels=new Map();
  const add=token=>{const value=token.trim(),key=value.toLocaleLowerCase();if(value&&!SAFETY_ABSENT.has(key))labels.set(key,TOXICITY_LABELS.get(key)||value);};
@@ -44,7 +44,7 @@ function toxicityOptions(rows){
  for(const row of filterItems(rows,{dangerous:true})){const values=toxicityClassifications(row.payload);if(!values.length)unclassified=true;for(const label of values)labels.set(label.toLocaleLowerCase(),label);}
  return [...labels].map(([value,label])=>({value,label})).sort((a,b)=>a.label.localeCompare(b.label)).concat(unclassified?[{value:'__unclassified',label:'Unclassified'}]:[]);
 }
-function safetyCell(payload){const classification=safetyLabel(payload);return classification?`<span class="badge danger safety-label">${esc(classification)}</span>`:'<span class="muted">—</span>';}
+function safetyCell(payload){const classifications=toxicityClassifications(payload);if(!classifications.length&&hazardous(payload))classifications.push('Review SDS');return classifications.length?`<span class="safety-badges">${classifications.map(classification=>`<span class="badge danger safety-label">${esc(classification)}</span>`).join('')}</span>`:'<span class="muted">—</span>';}
 function inventoryValue(row,key){const p=row.payload;return ({classification:itemClassification(row),name:[itemName(row),p.cas_number||p.cas_raw,p.catalog_number],location:[p.location,p.storage],quantity:typeof p.remaining_amount==='number'?p.remaining_amount:(p.quantity_text||p.amount),status:label(p.status||'unverified'),safety:safetyLabel(p)||null})[key];}
 function recordValue(row,key){if(row.kind==='usage'){const u=usageSummary(row);return ({name:itemName(row),date:u.date||u.period,used:[u.usedUnit,u.usedAmount??u.used],remaining:[u.remainingUnit,u.remainingAmount??u.remaining],logger:usageLogger(row)})[key];}const p=row.payload;return ({name:itemName(row),date:p.event_date||p.date||row.record_date,status:p.status?label(p.status):p.amount,details:text(p.summary||p.purpose||p.notes||p.supplier||'')})[key];}
 const headers=(scope,columns)=>columns.map(([key,title])=>sortHeader(scope,key,title,tableSorts.get(scope)||(scope==='records:usage'?{key:'date',direction:'desc'}:null))).join('');
@@ -77,7 +77,7 @@ function observeAccess(){const current=section();if(current==='history'&&!ownerH
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
 const date=v=>v?text(v).slice(0,10):'Date unknown';
 function status(message='',error=false){$('status').textContent=message;$('status').dataset.error=String(error);if($('sheet-import-dialog').open){$('sheet-import-status').textContent=message;$('sheet-import-status').dataset.error=String(error);}}
-function badge(value){return `<span class="badge ${['depleted','disposed','out_of_stock','historical'].includes(value)?'gray':['unverified','listed_current','low_stock','open'].includes(value)?'warn':''}">${esc(label(value||'unverified'))}</span>`;}
+function badge(value){if(value==='listed_current')value='in_stock';return `<span class="badge ${['depleted','disposed','out_of_stock','historical'].includes(value)?'gray':['unverified','listed_current','low_stock','open'].includes(value)?'warn':''}">${esc(label(value||'unverified'))}</span>`;}
 function link(url,title){const safe=safeURL(url);return safe?`<a href="${esc(safe)}" target="_blank" rel="noopener noreferrer">${esc(title)}</a>`:esc(title);}
 function raw(value){if(value==null)return '<span class="muted">Not recorded</span>';if(typeof value!=='object')return esc(value);return `<dl class="raw-values">${Object.entries(value).filter(([,v])=>v!==''&&v!=null).map(([k,v])=>`<dt>${esc(k.replaceAll('_',' '))}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`;}
 function stats(){const s=stockStats(items);return `<div class="stats">${[['Listed items',s.listed],['Need stock check',s.needsCheck],['Safety flagged',s.dangerous],['Past expiry date',s.expired]].map(([k,v])=>`<div class="stat"><span>${k}</span><strong>${v.toLocaleString()}</strong></div>`).join('')}</div>`;}

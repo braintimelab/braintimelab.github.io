@@ -50,4 +50,4 @@ th .sort-button:hover{background:#e2e9e8;color:var(--blue)}th .sort-button:focus
 
 .usage-filters{display:flex;align-items:end;gap:8px;flex-wrap:wrap}.usage-filters label{display:grid;gap:3px;font-size:11px}.usage-filters input[type=date]{width:145px}.usage-table th:nth-child(1){width:150px}.usage-table td:nth-child(3),.usage-table td:nth-child(4){white-space:nowrap;font-variant-numeric:tabular-nums}
 
-.safety-label{max-width:20em;white-space:normal;overflow-wrap:anywhere}
+.safety-badges{display:flex;flex-wrap:wrap;gap:4px;align-items:flex-start}.safety-label{max-width:20em;white-space:normal;overflow-wrap:anywhere}

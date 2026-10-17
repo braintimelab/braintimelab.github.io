@@ -32,9 +32,9 @@ function fixture(rows,{route='safety'}={}){
 }
 
 test('Dangerous chemicals shows the recorded Irritant classification instead of generic SDS text',()=>{
- const f=fixture([item('bay','Irritant',{name:'Bay K8644'})]);f.app.inventoryView(true);
+ const f=fixture([item('bay','Irritant',{name:'Bay K8644',status:'listed_current'})]);f.app.inventoryView(true);
  assert.match(f.safetyCell('bay'),/>Irritant<\/span>/);assert.doesNotMatch(f.safetyCell('bay'),/Review SDS/);
- assert.match(f.element('main').innerHTML,/Bay K8644/);
+ assert.match(f.element('main').innerHTML,/Bay K8644/);assert.match(f.renderedRows()[0].cells[4],/>In stock<\/span>/);
  // Ordinary readers receive the same useful label without safety-edit access.
  assert.doesNotMatch(f.element('main').innerHTML,/data-action="safety-edit"/);
 });
@@ -49,8 +49,9 @@ test('Safety retains Review SDS for flagged unknowns and an em dash when no clas
 });
 
 test('Safety shows unique recorded classifications from an array without unknown sentinel labels',()=>{
- const f=fixture([item('multiple',[' unknown ',' Irritant ','Corrosive','Irritant',null,'n/a'])]);f.app.inventoryView(true);
- assert.match(f.safetyCell('multiple'),/>Irritant · Corrosive<\/span>/);
+ const f=fixture([item('multiple',[' unknown ',' Irritant ','Corrosive','Irritant',null,'n/a']),item('combined','Danger, CMR, corrosive')]);f.app.inventoryView(true);
+ assert.deepEqual([...f.safetyCell('multiple').matchAll(/class="badge danger safety-label">([^<]+)<\/span>/g)].map(match=>match[1]),['Irritant','Corrosive']);
+ assert.deepEqual([...f.safetyCell('combined').matchAll(/class="badge danger safety-label">([^<]+)<\/span>/g)].map(match=>match[1]),['Danger','CMR','Corrosive']);
  assert.doesNotMatch(f.safetyCell('multiple'),/unknown|n\/a|Review SDS/);
 });
 
