@@ -51,3 +51,8 @@
 .breeding-planner .planner-quick-plans .button[aria-pressed="true"]{background:var(--blue-bg);border-color:var(--blue-line)}
 .breeding-planner .planner-quick-note{font-size:10px;line-height:1.4;margin:0;padding:8px 12px}
 @media(max-width:650px){.breeding-planner .planner-quick-plans th,.breeding-planner .planner-quick-plans td{padding:6px 8px}.breeding-planner .planner-quick-plans .button{min-height:30px}}
+.breeding-planner .planner-family-crosses>summary{font-size:13px;padding:10px 14px}
+.breeding-planner .planner-family-crosses table{font-size:11px;white-space:nowrap;margin:0}
+.breeding-planner .planner-family-crosses th,.breeding-planner .planner-family-crosses td{padding:6px 10px;vertical-align:middle}
+.breeding-planner .planner-family-crosses .settings-actions{gap:5px;flex-wrap:nowrap;margin:0}
+.breeding-planner .planner-family-crosses .button{font-size:11px;min-height:28px;padding:4px 8px}
