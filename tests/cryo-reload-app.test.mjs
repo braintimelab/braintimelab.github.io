@@ -21,7 +21,9 @@ function fixture(){
   startupProgress:()=>{},showToast:(message,error)=>calls.push({message,error}),confirmAction:async()=>{calls.push({confirm:true});return state.confirm;},
   render:()=>{calls.push({render:true});elements.main.innerHTML=state.cryoDraft?'Retained draft: '+state.cryoDraft.notes:'Latest view';},
   navigate:view=>{calls.push({navigate:view});vm.runInContext(`route=${JSON.stringify(view)}`,context);},
-  renderCryopreservation:(_container,_dataset,hooks)=>{state.cryoHooks=hooks;},model:{validateRecord:()=>({errors:[],warnings:[]})},loadHistoryTables:async()=>state.shared,loadCryoHistory:async()=>null,
+  renderCryopreservation:(_container,_dataset,hooks)=>{state.cryoHooks=hooks;},model:{validateRecord:()=>({errors:[],warnings:[]})},historyDraftOpen:()=>Boolean(state.cryoDraft),
+  loadHistoryTables:async tables=>{calls.push({sourceTables:tables});if(state.historyError)throw state.historyError;vm.runInContext('dataset=state.shared',context);return state.shared;},
+  loadCryoHistory:async()=>{calls.push({sourceIndex:true});if(state.indexError)throw state.indexError;return state.index??null;},
  });
  vm.runInContext('let dataset=state.original,route="cryo",detail={type:"cryo",id:"source-case"},cloud={...status},cloudReady=true,manualPullPending=false,startupLoading=false,cachedPreview=false,editor=null,busy=false,historyLoadState=null,cloudLoadError="",startupProgressValue=null,startupMessage="",brainbotReviewPending=false,sidebarProfile=null,sidebarProfileContext="",cryoRenderToken=0,cryoHistoryContext="",cryoHistoryIndex=null;',context);
  vm.runInContext(between('const deferredHistoryTables=','const historyViewKey='),context);
@@ -49,20 +51,30 @@ test('cryo editing requires owner or an authorized manager, including when a pre
  for(const flag of ['startupLoading','brainbotReviewPending','historyLoadState']){f.run(`cloud.role="owner";${flag}=true`);assert.equal(f.run('canEditCryopreservation()'),false,flag);f.run(`${flag}=false`);}
 });
 
-test('shared reload retains cryo route, source history and entered draft without a page reload',async()=>{
+test('shared reload retains cryo route and entered draft without loading unrelated source history',async()=>{
  const f=fixture(),draft=f.state.cryoDraft;await f.reload({preserveView:true,confirm:false,throwOnError:true});
  assert.equal(f.state.cryoDraft,draft);assert.match(f.elements.main.innerHTML,/Keep entered notes/);assert.equal(f.run('route'),'cryo');assert.equal(f.run('detail.id'),'source-case');assert.equal(f.run('cloudReady'),true);assert.equal(f.run('startupLoading'),false);assert.equal(f.run('manualPullPending'),false);
- assert.equal(f.calls.filter(call=>call.pull).length,1);assert.equal(f.calls.find(call=>call.pull).pull.deferHistory,true);assert.deepEqual(JSON.parse(JSON.stringify(f.calls.find(call=>call.history).history.tables)),['historical_observations']);assert.equal(f.run('dataset.source_archive_deferred.loaded_tables.includes("historical_observations")'),true);
+ assert.equal(f.calls.filter(call=>call.pull).length,1);assert.equal(f.calls.find(call=>call.pull).pull.deferHistory,true);assert(!f.calls.some(call=>call.history||call.sourceTables||call.sourceIndex));assert.equal(f.run('dataset.source_archive_deferred.loaded_tables.includes("historical_observations")'),false);
  assert(!f.calls.some(call=>call.confirm||call.navigate));assert(f.calls.some(call=>call.message==='Shared data reloaded.'));
 });
 
-test('a failed pull or source-history reload keeps the existing draft and supports retry',async()=>{
- for(const stage of ['pull','history']){
-  const f=fixture(),draft=f.state.cryoDraft;f.state[stage+'Error']=new Error('Synthetic '+stage+' unavailable');
-  await assert.rejects(f.reload({preserveView:true,confirm:false,throwOnError:true}),/unavailable/);
-  assert.equal(f.state.cryoDraft,draft);assert.equal(f.run('dataset===state.original'),true);assert.match(f.elements.main.innerHTML,/Keep entered notes/);assert.equal(f.run('route'),'cryo');assert.equal(f.run('cloudReady'),false);assert.equal(f.run('startupLoading'),false);assert.equal(f.run('manualPullPending'),false);assert(!f.calls.some(call=>call.navigate||call.message==='Shared data reloaded.'));
-  f.state[stage+'Error']=null;await f.reload({preserveView:true,confirm:false,throwOnError:true});assert.equal(f.run('cloudReady'),true);assert.equal(f.state.cryoDraft,draft);
- }
+test('a failed shared pull keeps the existing draft and supports retry',async()=>{
+ const f=fixture(),draft=f.state.cryoDraft;f.state.pullError=new Error('Synthetic pull unavailable');
+ await assert.rejects(f.reload({preserveView:true,confirm:false,throwOnError:true}),/unavailable/);
+ assert.equal(f.state.cryoDraft,draft);assert.equal(f.run('dataset===state.original'),true);assert.match(f.elements.main.innerHTML,/Keep entered notes/);assert.equal(f.run('route'),'cryo');assert.equal(f.run('cloudReady'),false);assert.equal(f.run('startupLoading'),false);assert.equal(f.run('manualPullPending'),false);assert(!f.calls.some(call=>call.navigate||call.message==='Shared data reloaded.'));
+ f.state.pullError=null;await f.reload({preserveView:true,confirm:false,throwOnError:true});assert.equal(f.run('cloudReady'),true);assert.equal(f.state.cryoDraft,draft);assert(!f.calls.some(call=>call.history));
+});
+
+test('cryo loads the verified source-cell index before considering general historical observations',async()=>{
+ const f=fixture();f.state.cryoDraft=null;f.state.index={sources:[],sheets:[],cells:[]};f.run('dataset=state.shared;renderCryo()');await f.state.cryoHooks.loadHistory();
+ assert.deepEqual(f.calls.filter(call=>call.sourceIndex||call.sourceTables),[{sourceIndex:true}]);assert.equal(f.state.cryoHooks.historyIndex,f.state.index);assert.equal(f.state.cryoHooks.historyDeferred,false);assert.equal(f.run('dataset.source_archive_deferred.loaded_tables.includes("historical_observations")'),false);
+ const fallback=fixture();fallback.state.cryoDraft=null;fallback.run('dataset=state.shared;renderCryo()');await fallback.state.cryoHooks.loadHistory();
+ assert.deepEqual(JSON.parse(JSON.stringify(fallback.calls.filter(call=>call.sourceIndex||call.sourceTables))),[{sourceIndex:true},{sourceTables:['historical_observations']}]);assert.equal(fallback.state.cryoHooks.historyDeferred,false);
+});
+
+test('a cached verified cryo index remains usable after a lightweight shared reload',()=>{
+ const f=fixture();f.state.index={sources:[],sheets:[],cells:[]};f.run('dataset=state.shared;cryoHistoryContext=labUserDirectoryContext(store.getCloudStatus());cryoHistoryIndex=state.index;renderCryo()');
+ assert.equal(f.state.cryoHooks.historyIndex,f.state.index);assert.equal(f.state.cryoHooks.historyDeferred,false);assert(!f.calls.some(call=>call.sourceIndex||call.sourceTables||call.history));
 });
 
 test('reload rejects other open record or cage drafts and concurrent history/module operations',async()=>{

@@ -318,7 +318,6 @@ async function loadSharedColony({preserveView=false,confirm=true,throwOnError=fa
  if(!fromCryoEditor&&isCryopreservationBusy($('main')))throw new Error('Wait for the current save to finish.');
  if(editor||busy||hasCageSheetDrafts())throw new Error('Save or cancel changes before reloading.');
  const view=route,selection=detail,keepCryoDraft=route==='cryo'&&hasCryopreservationDraft($('main'));
- const restoreCryoHistory=preserveView&&view==='cryo'&&!deferredHistoryTables().includes('historical_observations');
  if(keepCryoDraft&&!preserveView)throw new Error('Save or cancel the cryopreservation draft first.');
  manualPullPending=true;let loading=false,openingContext=null;
  let failure=null;
@@ -328,7 +327,6 @@ async function loadSharedColony({preserveView=false,confirm=true,throwOnError=fa
   openingContext=accessContext();loading=true;cloudLoadError='';cloudReady=false;startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
   let fresh=await store.pullFromCloud({onProgress:startupProgress,deferHistory:true});await refreshCloud();
   if(accessContext()!==openingContext||store.getCloudStatus().readyForEdits===false||!fresh)throw new Error('Access changed during reconnect. Sign in and load the shared colony again.');
-  if(restoreCryoHistory)fresh=await store.ensureHistory(fresh,{tables:['historical_observations'],onProgress:startupProgress});
   if(accessContext()!==openingContext)throw new Error('Account changed during reload.');
   dataset=fresh;cloudReady=true;
  }catch(error){
@@ -360,8 +358,9 @@ async function loadCryoHistory(){
 function renderCryo(){
  const token=++cryoRenderToken,context=labUserDirectoryContext(store.getCloudStatus());
  const current=()=>route==='cryo'&&token===cryoRenderToken&&context===labUserDirectoryContext(store.getCloudStatus());
- const hooks={draftContext:context,reloadShared:()=>loadSharedColony({preserveView:true,confirm:false,throwOnError:true,fromCryoEditor:true}),canEdit:canEditCryopreservation,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const fresh=await loadHistoryTables(['historical_observations']);if(!current())return;const index=await loadCryoHistory();if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{if(!canEditCryopreservation())throw new Error('Manager or owner access is required.');await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
- renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:deferredHistoryTables().includes('historical_observations'),historyIndex:cryoHistoryContext===context?cryoHistoryIndex:null,historyLoading:false});
+ const index=cryoHistoryContext===context?cryoHistoryIndex:null;
+ const hooks={draftContext:context,reloadShared:()=>loadSharedColony({preserveView:true,confirm:false,throwOnError:true,fromCryoEditor:true}),canEdit:canEditCryopreservation,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const index=await loadCryoHistory();if(!current())return;const fresh=index?dataset:await loadHistoryTables(['historical_observations']);if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{if(!canEditCryopreservation())throw new Error('Manager or owner access is required.');await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
+ renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:!index&&deferredHistoryTables().includes('historical_observations'),historyIndex:index,historyLoading:false});
 }
 function renderExperimentSection(){
  renderExperiments($('main'),dataset,{reloadPage:()=>location.reload(),canLoadHistory:()=>!cachedPreview&&!startupLoading&&cloudReady,historyDeferred:deferredHistoryTables().some(name=>['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage'].includes(name)),loadSourceHistory:async()=>loadHistoryTables(['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage']),isCurrent:()=>route==='experiments',initialMouseId:experimentMouseId,initialRecordId:experimentRecordId,canEdit:canEditRecords,openMouse:id=>navigate('mice',id),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});experimentMouseId=null;experimentRecordId=null;
