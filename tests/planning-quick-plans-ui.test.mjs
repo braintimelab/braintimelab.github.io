@@ -14,6 +14,16 @@ test('every preset immediately loads a virtual route and remains editable withou
 test('quick-plan reset is explicit heterozygous default and existing manual calculation still works',async()=>{
  const h=await harness();await h.click('quick-plan',{preset:'fpb'});h.change('design-copies','homozygous',{locus:'bmal1'});await h.click('quick-plan',{preset:'fpb'});assert.match(h.container.innerHTML,/\+ \/ fl/);assert.doesNotMatch(h.container.innerHTML.match(/<section class="panel planner-target-board">[\s\S]*?<\/section>/)[0],/fl \/ fl/);await h.click('design');await h.click('use-ideal',{index:'0'});assert.match(h.container.innerHTML,/aria-selected="true"[^>]+data-tab="cross"/);await h.click('calculate');assert.match(h.container.innerHTML,/Target probability/);assert.doesNotMatch(h.container.innerHTML,/genotype evidence is unknown/);assert.equal(h.saves,0);
 });
+test('an active quick family toggles off, reopening manual target selection without changing colony data',async()=>{
+ const h=await harness(),before=structuredClone(h.dataset);
+ for(const preset of ['pb','fpb','adfpb']){
+  await h.click('quick-plan',{preset});assert.match(h.container.innerHTML,new RegExp(`aria-label="Deselect [^"]+ quick plan" aria-pressed="true"`));
+  await h.click('quick-plan',{preset});assert.doesNotMatch(h.container.innerHTML,/data-preset="[^"]+"[^>]+aria-pressed="true"/);assert.doesNotMatch(h.container.innerHTML,/planner-strategy-results/);assert.match(h.container.innerHTML,/data-planner-catalogue open/);
+ }
+ h.change('design-copies','homozygous',{locus:'bmal1'});assert.match(h.container.innerHTML,/fl \/ fl/);await h.click('design');assert.match(h.container.innerHTML,/planner-strategy-results/);assert.doesNotMatch(h.container.innerHTML,/data-preset="[^"]+"[^>]+aria-pressed="true"/);
+ await h.click('quick-plan',{preset:'pb'});assert.match(h.container.innerHTML,/data-preset="pb"[^>]+aria-pressed="true"/);await h.click('quick-plan',{preset:'fpb'});assert.match(h.container.innerHTML,/data-preset="fpb"[^>]+aria-pressed="true"/);assert.doesNotMatch(h.container.innerHTML,/data-preset="pb"[^>]+aria-pressed="true"/);
+ assert.deepEqual(h.dataset,before);assert.equal(h.saves,0);
+});
 test('missing strains disable only affected families and cannot be manufactured by an action',async()=>{
  const h=await harness({genotype:'PER2::LUC; Bmal1(fl/+)'}),before=structuredClone(h.dataset);assert.match(h.container.innerHTML,/data-preset="pb"[^>]*>/);assert.match(h.container.innerHTML,/data-preset="fpb"[^>]+disabled/);assert.match(h.container.innerHTML,/data-preset="adfpb"[^>]+disabled/);await h.click('quick-plan',{preset:'adfpb'});assert.match(h.container.innerHTML,/required strains are not available/);assert.doesNotMatch(h.container.innerHTML,/planner-strategy-results/);assert.deepEqual(h.dataset,before);assert.equal(h.saves,0);
 });
