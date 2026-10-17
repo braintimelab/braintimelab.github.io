@@ -19,6 +19,7 @@ cage-history.js
 cage-label.js
 cage-managers.js
 cage-movement.js
+cage-note-badges.js
 cage-observations.js
 cage-sheet.js
 cage-start.js

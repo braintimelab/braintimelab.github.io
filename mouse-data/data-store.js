@@ -1374,6 +1374,24 @@ export async function listCageManagers(){
  // Keep the contact-free directory in memory only, never in colony records/cache.
  return {managers:result.managers.filter(row=>row&&typeof row.person_id==='string'&&typeof row.name==='string'&&['current','historical'].includes(row.status)).map(row=>({person_id:row.person_id,name:row.name,acronym:typeof row.acronym==='string'?row.acronym:null,nickname:typeof row.nickname==='string'?row.nickname:null,status:row.status}))};
 }
+// Fixed phrases only. Keep aligned with sql/cage-note-hints.sql; raw Sheet
+// blocks and arbitrary cell text must never enter this member-facing response.
+const CAGE_NOTE_HINTS=new Set(['Genotyping','Genotyping done','no genotyping needed','Experiment','Experiment done','no experiment planned','PIR!','PIR not good but usable','PIR not good','PIR fixed','PIR normal','no PIR problem','LED!','LED not good but usable','LED not good','LED fixed','LED normal','no LED problem']);
+export async function listCageNoteHints(){
+ const c=configuration(),s=session(),actor=s?.user?.id,generation=authGeneration,config=stable(c);
+ if(!c||!s?.access_token||!actor||s.passwordRecovery||pendingAccount(s))throw new Error('Sign in to load cage note badges.');
+ const check=()=>{const current=session();if(generation!==authGeneration||config!==stable(configuration())||current?.user?.id!==actor||!current?.access_token||current.passwordRecovery||pendingAccount(current))throw new Error('The account or colony changed. Reload cage note badges.');};
+ let result;try{result=await request('rpc/list_cage_note_hints',{method:'POST',body:{p_colony_id:c.colonyId}});}catch(error){check();throw error;}
+ check();
+ if(!Array.isArray(result)||result.length>4096)throw new Error('Cage note badges are unavailable.');
+ const seen=new Set(),hints=[];
+ for(const row of result){
+  if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).length!==2||!Object.hasOwn(row,'location_id')||!Object.hasOwn(row,'notes')||typeof row.location_id!=='string'||!row.location_id||row.location_id!==row.location_id.trim()||row.location_id.length>256||/[\u0000-\u001f\u007f]/.test(row.location_id)||seen.has(row.location_id)||!Array.isArray(row.notes)||!row.notes.length||row.notes.length>CAGE_NOTE_HINTS.size||new Set(row.notes).size!==row.notes.length||row.notes.some(note=>!CAGE_NOTE_HINTS.has(note)))throw new Error('Cage note badges are unavailable.');
+  seen.add(row.location_id);hints.push({location_id:row.location_id,notes:[...row.notes]});
+ }
+ // Used by the live cage view only, never merged into records, exports or cache.
+ return hints;
+}
 export async function saveLabMember(person){
  if(await membership()!=='owner')throw new Error('Only the owner can edit lab-member records.');
  return request('rpc/save_lab_member',{method:'POST',body:{p_colony_id:configuration().colonyId,p_person:person}});

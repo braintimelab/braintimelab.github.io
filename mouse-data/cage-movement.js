@@ -2,6 +2,7 @@
 import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=100';
 import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=100';
 import {cageEntrainmentForCard,cageEntrainmentLinkChanges} from './cage-entrainment.js?v=100';
+import {inferNoteBadges,noteTextsFromPosition,sourceBadgeTarget,sourceBadgeRows,planSourceBadgeEdit,applySourceBadgeDrafts} from './cage-note-badges.js?v=103';
 const startFields=start=>start.basis==='unknown'?{}:{start_date:start.date,cage_start:{schemaVersion:1,basis:start.basis,date:start.date,...(start.evidence.length?{evidence:structuredClone(start.evidence)}:{})}};
 const present=v=>v!==null&&v!==undefined&&v!=='';
 const active=r=>r&&!r.app_archived_at&&!r.archived;
@@ -199,6 +200,9 @@ function slotGroup(dataset,locationId,{checkOtherPositions=true,readContext=null
   if(!match)unresolved.push({sourceCell:animal.sourceCell??null,tag:animal.tag,reason:'unlinked'});
  }
  const existing=cage?.cage_sheet_card,card={schemaVersion:1,source_location_id:cardSource.source_location_id,observation:structuredClone(observation),unresolved_rows:unresolved};
+ const original=reads.observations.locations.get(cardSource.source_location_id),sourceTarget=sourceBadgeTarget(cardSource.source_location_id,observation),sameObservation=sourceTarget&&original&&sourceBadgeTarget(cardSource.source_location_id,reads.observations.observation(original))?.id===sourceTarget.id;
+ if(Array.isArray(existing?.task_notes))card.task_notes=existing.task_notes.filter(note=>typeof note==='string').slice(0,200);
+ else if(sameObservation&&typeof original.source_block_text==='string')card.task_notes=inferNoteBadges(noteTextsFromPosition(original,{exclude:observation.animals.map(row=>row.note)}).join('\n')).filter(row=>['genotyping','experiment'].includes(row.kind)).map(row=>row.note);
  // Preserve the original reason and ordering on later moves, including rows
  // that could now accidentally match a newly imported animal.
  if(existing?.schemaVersion===1&&Array.isArray(existing.unresolved_rows))card.unresolved_rows=structuredClone(existing.unresolved_rows);
@@ -259,8 +263,28 @@ export function cageSlotMoveEligibility(dataset,locationId){
  return {locationId,cageSid:group.cage?.cage_sid??null,animalCount:group.rows.length};
 }
 /** Stage complete source-backed groups without altering imported snapshots. */
-export function planCageSlotMove(dataset,sourceLocationId,destinationLocationId,{newCageIds={}}={}){
- return buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds);
+export function planCageSlotMove(dataset,sourceLocationId,destinationLocationId,{newCageIds={},noteHints=[]}={}){
+ const plan=buildSlotMove(dataset,sourceLocationId,destinationLocationId,newCageIds);
+ if(!plan.changes.length||!Array.isArray(noteHints)||!noteHints.length)return plan;
+ const hints=new Map(noteHints.filter(row=>row&&typeof row.location_id==='string'&&Array.isArray(row.notes)).map(row=>[row.location_id,row.notes.filter(note=>typeof note==='string')]));
+ const proof=plan.changes[0].cageSlotMove,changes=new Map();let statuses=dataset;
+ for(const group of proof.groups){
+  const card=group.card,sourceId=card?.source_location_id,position=(dataset.tables.locations||[]).find(row=>row.location_id===sourceId);
+  if(!position||typeof position.source_block_text==='string'||Array.isArray(card.task_notes))continue;
+  const target=sourceBadgeTarget(sourceId,card.observation);
+  // Hints describe the current source cohort. They cannot be attached to an
+  // older retained card after the original slot has acquired new occupants.
+  if(!target||sourceBadgeTarget(sourceId,cageObservations(position))?.id!==target.id)continue;
+  const cage=(dataset.tables.cages||[]).find(row=>String(row.cage_sid)===String(group.cageSid)),saved=new Set([...sourceBadgeRows(statuses,target),...(Array.isArray(cage?.work_badges)?cage.work_badges:[])].map(row=>row.kind));
+  for(const badge of inferNoteBadges((hints.get(sourceId)||[]).join('\n')).filter(row=>['genotyping','experiment'].includes(row.kind)&&!saved.has(row.kind))){
+   const status=planSourceBadgeEdit(statuses,target,{...badge,status:'open'});
+   for(const change of status.changes){const prior=changes.get(change.id);changes.set(change.id,{...change,base:prior?prior.base:change.base});}
+   statuses=applySourceBadgeDrafts(statuses,status.changes);saved.add(badge.kind);
+  }
+ }
+ // Source statuses are ordinary guarded edits. They stay outside the physical
+ // movement proof so fresh movement validation remains independent of hints.
+ return changes.size?{...plan,changes:[...plan.changes,...changes.values()]}:plan;
 }
 function validateSlotMoveDrafts(dataset,drafts,readContext=null){
  const proofs=[...new Map(drafts.filter(c=>c.cageSlotMove).map(c=>[JSON.stringify(c.cageSlotMove),c.cageSlotMove])).values()];

@@ -2,6 +2,8 @@
  * physical position, in one editable husbandry status record, never an import
  * override or an inferred task from an unknown genotype. */
 import {listExperiments,experimentMouseSids} from './experiment-model.js?v=100';
+import {cageCardObservation,createCageObservationContext} from './cage-observations.js?v=100';
+import {inferNoteBadges,noteTextsFromPosition,sourceBadgeTarget,buildSourceBadgeIndex,sourceBadgeRows,planSourceBadgeEdit} from './cage-note-badges.js?v=103';
 
 export const BADGE_TYPES=Object.freeze([
   {kind:'genotyping',label:'Genotyping',types:['mice','cages']},
@@ -85,7 +87,9 @@ function equipmentRecord(dataset,locationId){
 const taipeiDay=at=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(at));
 
 /** Upsert one kind. Done rows remain available to reopen in the editor. */
-export function planWorkBadgeEdit(dataset,{type,id}={},badge,{at=new Date().toISOString()}={}){
+export function planWorkBadgeEdit(dataset,target={},badge,{at=new Date().toISOString()}={}){
+  if(target.type==='source_cards')return planSourceBadgeEdit(dataset,target,badge,{at});
+  const {type}=target;let {id}=target;
   if(!timestamp(at))throw new Error('Choose a valid badge update time.');
   const record=editableRecord(dataset,type,id);id=text(record[keys[type]]);
   const equipment=type==='locations'?equipmentRecord(dataset,id):null;
@@ -148,9 +152,11 @@ const visibleRows=(type,rows)=>list(rows).filter(row=>validateWorkBadges(type,[r
 const descriptor=(type,id,row)=>({kind:row.kind,label:badgeLabel(row),status:row.status,note:row.note||'',assignee:row.assignee||'',due_date:row.due_date??null,type,id});
 
 /** Build once per rendered dataset, never scan all animals/events per cage. */
-export function createCageBadgeIndex(dataset,{historical:historicalView=false}={}){
-  const tables=dataset?.tables||{},index={historical:historicalView||dataset?.history_projection?.read_only===true,mice:recordMap(tables.mice,'mice'),cages:recordMap(tables.cages,'cages'),locations:recordMap(tables.locations,'locations'),miceByCage:new Map(),equipmentByLocation:new Map(),experimentsByMouse:new Map()};
+export function createCageBadgeIndex(dataset,{historical:historicalView=false,observationContext=null,noteHints=[]}={}){
+  const tables=dataset?.tables||{},index={historical:historicalView||dataset?.history_projection?.read_only===true,mice:recordMap(tables.mice,'mice'),cages:recordMap(tables.cages,'cages'),locations:recordMap(tables.locations,'locations'),miceByCage:new Map(),equipmentByLocation:new Map(),experimentsByMouse:new Map(),sourceBadges:buildSourceBadgeIndex(dataset),noteContext:observationContext||createCageObservationContext(dataset),noteTexts:new Map(),noteCache:new Map()};
   if(index.historical)return index;
+  const hints=new Map(noteHints.map(row=>[row.location_id,row.notes]));
+  for(const [id,position]of index.locations)index.noteTexts.set(id,typeof position.source_block_text==='string'?noteTextsFromPosition(position):hints.get(id)||[]);
   for(const [sid,mouse]of index.mice){if(mouse.state!=='Stock')continue;const cageId=text(mouse.cage_sid);if(!cageId)continue;const group=index.miceByCage.get(cageId)||[];group.push(sid);index.miceByCage.set(cageId,group);}
   const equipmentGroups=new Map();
   for(const event of list(tables.husbandry_events))if(event?.event_type==='cage_equipment_status'){
@@ -172,6 +178,43 @@ export function createCageBadgeIndex(dataset,{historical:historicalView=false}={
   return index;
 }
 
+/** Current literal notes supply suggestions. A saved decision, including Done,
+ * wins over the same kind of suggestion without rewriting its source text. */
+export function cageNoteBadgesForItem(index,item={},rows,{includeDone=false}={}){
+  if(!index||index.historical||historical(item.cage)||historical(item.position))return [];
+  const key=JSON.stringify([item.position?.location_id||item.locationId||'',item.cageId||item.cage?.cage_sid||'']);
+  const cached=index.noteCache.get(key);
+  if(cached&&cached.rows===rows)return cached.entries.filter(row=>includeDone||row.status!=='done');
+  const cageId=text(item.cageId||item.cage?.cage_sid),cage=index.cages.get(cageId),positionId=text(item.position?.location_id||item.locationId||cage?.location_id),position=index.locations.get(positionId),result=[];
+  const context=index.noteContext,card=cageCardObservation(context.dataset,item,context),observation=card.observation,sourceId=text(card.source_location_id),sourcePosition=index.locations.get(sourceId);
+  const suggest=(target,sourceTarget,notes)=>{
+    if(!target)return;
+    const saved=target.type==='cages'?index.cages.get(target.id)?.work_badges:target.type==='mice'?index.mice.get(target.id)?.work_badges:[];
+    const sourceSaved=sourceTarget?sourceBadgeRows(index.sourceBadges,sourceTarget):[],primary=new Set(list(saved).map(row=>row.kind));
+    for(const row of sourceSaved)if(!primary.has(row.kind))result.push({...descriptor('source_cards',sourceTarget.id,row),name:sourceTarget.name,source:sourceTarget.source,inferred:false});
+    const suppressed=new Set([...primary,...sourceSaved.map(row=>row.kind)]);
+    for(const row of inferNoteBadges(notes).filter(row=>['genotyping','experiment'].includes(row.kind)))if(!suppressed.has(row.kind)){
+      result.push({...descriptor(target.type,target.id,{...row,status:'open'}),name:target.name,source:target.source,inferred:true,...(target.type==='mice'?{mouseSids:[target.id]}:{})});
+    }
+  };
+  const literalRows=Array.isArray(rows)?rows:observation.animals;
+  for(const animal of observation.animals){
+    const row=literalRows.find(row=>row.sourceCell===animal.sourceCell&&(row.sourceTag||row.tag)===animal.tag);if(!row)continue;
+    const sourceTarget=sourceBadgeTarget(sourceId,observation,animal),mouse=row.mouseSid&&index.mice.get(String(row.mouseSid)),target=mouse?{type:'mice',id:String(row.mouseSid),name:row.tag}:sourceTarget;
+    suggest(target,sourceTarget,animal.note);
+  }
+  const sourceTarget=sourceBadgeTarget(sourceId,observation),sameObservation=sourceTarget&&sourcePosition&&sourceBadgeTarget(sourceId,context.observation(sourcePosition))?.id===sourceTarget.id;
+  const excluded=new Set(observation.animals.flatMap(row=>text(row.note).split(/\r?\n/)).map(text).filter(Boolean));
+  const retainedNotes=item.cage?.cage_sheet_card?.task_notes;
+  const taskNotes=Array.isArray(retainedNotes)?retainedNotes.filter(note=>typeof note==='string').slice(0,200):sameObservation?(index.noteTexts.get(sourceId)||[]).filter(note=>!excluded.has(text(note))):[];
+  if(observation.animals.length||sourceBadgeRows(index.sourceBadges,sourceTarget).length)suggest(cage?{type:'cages',id:cageId,name:'Whole cage'}:sourceTarget,sourceTarget,taskNotes.join('\n'));
+  if(position){
+    const saved=index.equipmentByLocation.get(positionId)?.equipment_status.work_badges||[],suppressed=new Set(saved.map(row=>row.kind));
+    for(const row of inferNoteBadges((index.noteTexts.get(positionId)||[]).join('\n')).filter(row=>['pir','led'].includes(row.kind)))if(!suppressed.has(row.kind))result.push({...descriptor('locations',positionId,{...row,status:'open'}),inferred:true});
+  }
+  index.noteCache.set(key,{rows,entries:result});return result.filter(row=>includeDone||row.status!=='done');
+}
+
 /** Source tags never establish identity. Only linked row SIDs can lend a task
  * to a source card. A position fault is independent of animal occupancy. */
 export function cageBadgesForItem(index,item={},rows){
@@ -186,5 +229,6 @@ export function cageBadgesForItem(index,item={},rows){
   }
   result.push(...experiments.values());
   if(position)for(const row of visibleRows('locations',index.equipmentByLocation.get(locationId)?.equipment_status.work_badges))result.push(descriptor('locations',locationId,row));
+  result.push(...cageNoteBadgesForItem(index,item,rows));
   return result;
 }
