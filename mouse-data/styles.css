@@ -301,6 +301,7 @@
 .sheet-work-badges{display:flex;gap:3px;flex-wrap:wrap;padding:3px 4px}
 .sheet-cage .sheet-work-badge{display:inline-flex;align-items:center;max-width:100%;padding:2px 4px;border:1px solid #d6b657;border-radius:3px;font:inherit;font-size:9px;line-height:1.3;text-align:left;white-space:normal;cursor:pointer;background:#fff2c9;color:#624a08}
 .sheet-cage .sheet-condition-label{font-weight:700}
+.sheet-cage .sheet-cage-person .sheet-cage-badges .sheet-breeding-label{font-weight:400}
 .sheet-cage .sheet-work-display{font-size:8px;font-weight:400;line-height:1.25;padding:1px 3px;min-height:0;max-width:56px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
 .sheet-cage-badges .sheet-work-badges{display:contents}
 .sheet-cage .sheet-work-fault{border-color:#d8958d;background:#fbe2de;color:#8b3027}
