@@ -16,8 +16,9 @@ const TOXICITY_LABELS=new Map(['Irritant','Toxic','Corrosive','Flammable','CMR',
 let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=new Map(),sourceRows=[],selected=null,editAction=null,importing=false,searchTimer=null,listKind=null,accessCheck=null;
 const importControls=new Map();
 const tableSorts=new Map(),recordSortCache=new Map();
-let memberRows=[];
-let connectionState='checking';
+let memberRows=[],memberAccessBaseline=new Map();
+let connectionState='checking',reloadPending=false,pendingWrites=0;
+const readActions=new Set(['access','list','sources','observations','history','order_search','order_list','order_locations']);
 const inventoryScope=()=>section()==='safety'?'dangerous':'inventory';
 const inventorySort=()=>tableSorts.get(inventoryScope());
 function recordedSafetyClassifications(payload){
@@ -86,7 +87,7 @@ function pager(start,total,action='page'){return `<div class="pagination"><span>
 function setImporting(value){
  importing=value;
  if(value){
-  for(const control of [$('refresh'),$('sheet-import'),$('import-file'),$('import-confirm'),$('order-catalog-file'),$('order-catalog-confirm'),...document.querySelectorAll('[data-section], [data-action="choose-import"], [data-action="open-sheet-import"], [data-action="choose-order-catalog"], [data-action="access-save"]')]){
+  for(const control of [$('refresh'),$('sidebar-reload'),$('sheet-import'),$('import-file'),$('import-confirm'),$('order-catalog-file'),$('order-catalog-confirm'),...document.querySelectorAll('[data-section], [data-action="choose-import"], [data-action="open-sheet-import"], [data-action="choose-order-catalog"], [data-action="access-save"]')]){
    if(control&&!importControls.has(control)){importControls.set(control,control.disabled);control.disabled=true;}
   }
  }else{for(const [control,disabled] of importControls)control.disabled=disabled;importControls.clear();}
@@ -113,25 +114,26 @@ function showIdentity(account){
  const role=permissions.role==='owner'?'Owner':permissions.role==='manager'?'Manager':'';
  const connection=connectionIndicator();
  $('identity').innerHTML=`<span class="account-initials" aria-hidden="true">${esc(initials.toUpperCase())}</span><span class="account-details"><a class="account-name" href="../mouse-data/#settings" title="Account settings">${esc(name)}</a><span class="account-status">${role?`<span class="account-role">${role}</span>`:''}<span id="account-connection" class="${connection.className}" role="img" aria-label="${connection.label}" title="${connection.label}"></span></span></span>`;
- $('identity').hidden=false;$('sidebar-account').hidden=false;$('sign-out').hidden=false;
+ $('identity').hidden=false;$('sidebar-account').hidden=false;$('sidebar-reload').hidden=false;
 }
 function resetPrivate(){
  connectionState='checking';usagePeople=null;
  closeExportPreview();$('sheet-import').hidden=true;$('sheet-import-dialog').close();$('import-preview').innerHTML='';
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();
- tableSorts.clear();recordSortCache.clear();memberRows=[];
+ tableSorts.clear();recordSortCache.clear();memberRows=[];memberAccessBaseline.clear();
  setImporting(false);member=false;permissions={};items=[];records.clear();sourceRows=[];selected=null;editAction=null;importing=false;listKind=null;viewGeneration++;clearTimeout(searchTimer);
  filters={query:'',category:'',status:'',location:'',toxicity:''};offset=0;historySource='';historyQuery='';historyOffset=0;
  $('editor').close();$('edit-fields').innerHTML='';$('edit-title').textContent='';$('edit-error').textContent='';$('import-file').value='';$('order-catalog-file').value='';
- $('navigation').innerHTML='';$('identity').textContent='';$('identity').hidden=true;$('sidebar-account').hidden=!store.getCloudStatus().signedIn;$('sign-out').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
+ $('navigation').innerHTML='';$('identity').textContent='';$('identity').hidden=true;$('sidebar-account').hidden=!store.getCloudStatus().signedIn;$('sidebar-reload').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
 }
 function context(){const c=store.getCloudStatus();return JSON.stringify([c.url,c.colonyId,c.email,c.username,c.signedIn,c.setupRequired,c.passwordRecovery,c.role,c.exportLevel]);}
 function fence(){const g=generation,c=context();return ()=>{if(g!==generation||!member||context()!==c)throw Error('Your session changed. Reopen Reagents.');};}
 function accessFailure(error){generation++;accessActivity.reset();resetPrivate();signInView(error.message||'Your access changed. Sign in again.');}
 async function rpc(action,args={}){
- const g=generation,check=fence();
+ const g=generation,check=fence(),writing=!readActions.has(action);if(writing)pendingWrites++;
  try{check();if(historyActions.has(action))requireHistoryAccess();const result=await store.callReagents(action,args);check();if(historyActions.has(action))requireHistoryAccess();if(permissions.role&&result?.permissions&&JSON.stringify(permissions)!==JSON.stringify(result.permissions))throw Object.assign(Error('Your access changed. Reopen Reagents.'),{reagentsAccessChanged:true});updateConnectionIndicator('connected');return result;}
  catch(error){if(g===generation){if(error.connectionUnavailable||/network|failed to fetch|load failed|connection (?:unavailable|timed out)/i.test(error.message))updateConnectionIndicator('unavailable');if(error.reagentsAccessChanged||/session changed|account changed|not an active member|session expired|sign.in|permission for this cloud operation/i.test(error.message))accessFailure(error);}throw error;}
+ finally{if(writing)pendingWrites--;}
 }
 async function collect(action,args={}){
  if(historyActions.has(action))requireHistoryAccess();
@@ -146,6 +148,33 @@ function signInView(message=''){
  main.innerHTML=`<section class="sign-in"><h2>Welcome to Reagents</h2><p>Use your Braintime Lab account.</p><form id="login-form"><label>ID or email<input name="identifier" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="primary" type="submit">Sign in</button></form><p>${link(new URL('../internal/',location.href).href,'Forgot password or first login?')}</p>${backupViewerLinkHTML(PUBLIC_CONFIG)}</section>`;
  $('login-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),pw=f.get('password');e.currentTarget.elements.password.value='';const attempt=++generation;status('Signing in…');try{await store.signIn(text(f.get('identifier')).trim(),pw);if(attempt===generation)await start();}catch(err){if(attempt===generation)status(err.message,true);}});
  status(message,!!message);
+}
+function hasUnsavedChanges(){
+ if($('purchase-form')?.elements?.name?.value?.trim())return true;
+ if(memberRows.some(row=>{const saved=memberAccessBaseline.get(row.user_id);return saved&&(saved.can_write!==row.can_write||saved.can_manage_safety!==row.can_manage_safety);}))return true;
+ return [...document.querySelectorAll('#main input, #main textarea, #main select, #editor input, #editor textarea, #editor select')].some(control=>{
+  if(control.disabled||['submit','button','hidden'].includes(control.type))return false;
+  if(['checkbox','radio'].includes(control.type))return control.checked!==control.defaultChecked;
+  if(control.tagName==='SELECT'){
+   const options=[...control.options],defaults=options.map(option=>option.defaultSelected);if(!control.multiple&&!defaults.some(Boolean)&&options.length)defaults[0]=true;
+   return options.some((option,index)=>option.selected!==defaults[index]);
+  }
+  return control.value!==control.defaultValue;
+ });
+}
+async function reloadShared(){
+ if(reloadPending)return;
+ if(importing||pendingWrites||$('editor').open&&$('save').disabled){status('Wait for the current save or import to finish.',true);return;}
+ if(hasUnsavedChanges()&&!window.confirm('Reload shared data and discard unsaved changes?'))return;
+ reloadPending=true;for(const id of ['refresh','sidebar-reload'])$(id).disabled=true;
+ try{await start();if(member)status('Shared data reloaded.');}
+ finally{reloadPending=false;for(const id of ['refresh','sidebar-reload'])$(id).disabled=importing;}
+}
+async function signOut(){
+ if(importing||pendingWrites||reloadPending){status('Wait for the current save or import to finish.',true);return;}
+ if(hasUnsavedChanges()&&!window.confirm('Sign out and discard unsaved changes?'))return;
+ accessActivity.signOut(section());const g=++generation;resetPrivate();
+ try{await store.signOut();}finally{if(g===generation){signInView();$('sidebar-reload').hidden=true;$('sidebar-account').hidden=true;}}
 }
 async function start({force=false,resumeActivity=false}={}){
  if(importing&&!force)return;
@@ -233,7 +262,7 @@ async function historyView(v){
  $('history-search').addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.currentTarget);historySource=f.get('source');historyQuery=f.get('query');historyOffset=0;void historyView(++viewGeneration);});
 }
 function memberTable(){return `<table class="permissions-table"><thead><tr>${headers('members',[['name','Member'],['role','Role'],['can_write','Edit records'],['can_manage_safety','Edit safety']])}<th></th></tr></thead><tbody>${sortRows(memberRows,tableSorts.get('members'),(m,key)=>key==='name'?(m.name||m.email||m.user_id):m[key]).map(m=>`<tr data-member="${esc(m.user_id)}"><td>${esc(m.name||m.email||m.user_id)}<span class="secondary-line">${esc(m.email||'')}${m.active?'':' · Inactive'}</span></td><td>${esc(m.role)}</td><td><input type="checkbox" aria-label="Edit records for ${esc(m.name||m.email||m.user_id)}" name="write" ${m.can_write?'checked':''} ${m.role==='owner'||!m.active||m.role==='viewer'?'disabled':''}></td><td><input type="checkbox" aria-label="Edit safety for ${esc(m.name||m.email||m.user_id)}" name="safety" ${m.can_manage_safety?'checked':''} ${m.role==='owner'||!m.active||m.role==='viewer'?'disabled':''}></td><td>${m.role!=='owner'&&m.active&&m.role!=='viewer'?`<button data-action="access-save" data-id="${esc(m.user_id)}">Save</button>`:'—'}</td></tr>`).join('')}</tbody></table>`;}
-async function settingsView(v){closeAccessLogs();const a=await rpc('access');if(v!==viewGeneration)return;permissions=a.permissions;memberRows=(a.members||[]).map(m=>({...m}));main.innerHTML=`<section class="panel"><h2>Your access</h2><dl class="key-values"><dt>Role</dt><dd>${esc(label(permissions.role))}</dd><dt>Record editing</dt><dd>${permissions.can_write?'Read & write':'Read only'}</dd><dt>Safety editing</dt><dd>${permissions.can_manage_safety?'Allowed':'Read only'}</dd><dt>History</dt><dd>${esc(permissions.export_level?.toUpperCase())}${permissions.history_cutoff?` · Since ${esc(permissions.history_cutoff)}`:' · All dates'}</dd></dl><a href="../mouse-data/#settings">Account and lab membership →</a>${backupViewerLinkHTML(PUBLIC_CONFIG)}</section>${permissions.can_import?`<section class="panel"><h2>Order catalogue</h2><button data-action="choose-order-catalog">Import historical order catalogue</button><div id="order-catalog-preview"></div></section><section class="panel"><h2>Source import</h2><button data-action="open-sheet-import">Import from Reagent sheet</button></section><section class="panel"><h2>Member permissions</h2><p class="small muted">These options restrict Reagents access. Lab membership and history levels are shared with Mouse Data.</p><div class="table-wrap"><div id="member-table">${memberTable()}</div></div></section>`:''}${ownerAccessLogs()?'<div id="access-log-panel"></div>':''}`;
+async function settingsView(v){closeAccessLogs();const a=await rpc('access');if(v!==viewGeneration)return;permissions=a.permissions;memberRows=(a.members||[]).map(m=>({...m}));memberAccessBaseline=new Map(memberRows.map(row=>[row.user_id,{...row}]));main.innerHTML=`<section class="panel"><h2>Your access</h2><dl class="key-values"><dt>Role</dt><dd>${esc(label(permissions.role))}</dd><dt>Record editing</dt><dd>${permissions.can_write?'Read & write':'Read only'}</dd><dt>Safety editing</dt><dd>${permissions.can_manage_safety?'Allowed':'Read only'}</dd><dt>History</dt><dd>${esc(permissions.export_level?.toUpperCase())}${permissions.history_cutoff?` · Since ${esc(permissions.history_cutoff)}`:' · All dates'}</dd></dl><div class="settings-account-actions"><a href="../mouse-data/#settings">Account and lab membership →</a><button type="button" data-action="sign-out">Sign out</button></div>${backupViewerLinkHTML(PUBLIC_CONFIG)}</section>${permissions.can_import?`<section class="panel"><h2>Order catalogue</h2><button data-action="choose-order-catalog">Import historical order catalogue</button><div id="order-catalog-preview"></div></section><section class="panel"><h2>Source import</h2><button data-action="open-sheet-import">Import from Reagent sheet</button></section><section class="panel"><h2>Member permissions</h2><p class="small muted">These options restrict Reagents access. Lab membership and history levels are shared with Mouse Data.</p><div class="table-wrap"><div id="member-table">${memberTable()}</div></div></section>`:''}${ownerAccessLogs()?'<div id="access-log-panel"></div>':''}`;
  if(ownerAccessLogs())disposeAccessLogs=renderAccessLogs($('access-log-panel'),{listLogs:store.listAppAccess,getRole:()=>ownerAccessLogs()?'owner':null,getContext:()=>JSON.stringify([generation,viewGeneration,context()]),initialApp:'reagents'});
 }
 
@@ -333,13 +362,13 @@ async function runImport(bundle){
 
 $('edit-form').addEventListener('submit',async e=>{e.preventDefault();if(!member||!editAction||$('save').disabled)return;const g=generation,action=editAction;$('save').disabled=true;$('edit-error').textContent='';const values=Object.fromEntries(new FormData(e.currentTarget));for(const check of e.currentTarget.querySelectorAll('input[type=checkbox]'))values[check.name]=check.checked;try{await action(values);}catch(err){if(g===generation)$('edit-error').textContent=err.message;}finally{if(g===generation)$('save').disabled=false;}});
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.hasAttribute('data-close')){if(importing&&b.closest('dialog')?.id==='sheet-import-dialog')return;b.closest('dialog').close();return;}if(b.dataset.section){if(importing)return;location.hash=b.dataset.section;return;}const a=b.dataset.action;if(!a||!member||importing)return;const g=generation;try{
- const r=records.get(b.dataset.id);switch(a){case'sort':await sortTable(b.dataset.sortScope,b.dataset.sortKey);break;case'open':await detail(b.dataset.id);break;case'back':await render();break;case'edit':editRecord(r);break;case'use':if(r)useRecord(r);break;case'safety-edit':if(r)editSafety(r);break;case'new-item':editRecord();break;case'new-record':editRecord(null,b.dataset.kind);break;case'new-safety':editRecord(null,'safety');break;case'all-safety':offset=0;await recordList(++viewGeneration,'safety','safety');break;case'page':offset=Number(b.dataset.offset);if(listKind)await recordList(++viewGeneration,section(),listKind);else await render();break;case'changes-page':if(selected)await detailPage(selected.id,'changes',Number(b.dataset.offset));break;case'observations-page':if(selected)await detailPage(selected.id,'observations',Number(b.dataset.offset));break;case'history-page':requireHistoryAccess();historyOffset=Number(b.dataset.offset);await historyView(++viewGeneration);break;case'source':requireHistoryAccess();historySource=b.dataset.source;historyQuery='';historyOffset=0;location.hash='history';if(section()==='history')await historyView(++viewGeneration);break;case'export-items':await exportRows();break;case'export-pdf':await exportRows('item','pdf');break;case'print-export':await printExportPreview();break;case'close-export':closeExportPreview();break;case'export-records':await exportRows(b.dataset.kind);break;case'export-history':{requireHistoryAccess();const check=fence();status('Preparing permitted history…');const access=(await rpc('access')).permissions;const sources=await collect('sources'),rows=await collect('observations',{p_source_id:historySource||null,p_query:historyQuery});check();if(JSON.stringify(access)!==JSON.stringify(permissions)){const error=Error('Your history access changed. Refresh before exporting.');accessFailure(error);throw error;}requireHistoryAccess();download(new Blob([JSON.stringify({exported_at:new Date().toISOString(),access:permissions,sources,observations:rows},null,2)],{type:'application/json'}),'Braintime-Reagents-history.json');status(`Exported ${rows.length.toLocaleString()} permitted source rows.`);break;}case'open-sheet-import':openSheetImport();break;case'choose-import':if(permissions.can_import)$('import-file').click();break;case'choose-order-catalog':if(permissions.role==='owner')$('order-catalog-file').click();break;case'access-save':{const row=b.closest('tr');await rpc('set_access',{p_user_id:b.dataset.id,p_can_write:row.querySelector('[name=write]').checked,p_can_manage_safety:row.querySelector('[name=safety]').checked});status('Reagents permissions saved.');await settingsView(++viewGeneration);break;}}
+ const r=records.get(b.dataset.id);switch(a){case'sign-out':await signOut();break;case'sort':await sortTable(b.dataset.sortScope,b.dataset.sortKey);break;case'open':await detail(b.dataset.id);break;case'back':await render();break;case'edit':editRecord(r);break;case'use':if(r)useRecord(r);break;case'safety-edit':if(r)editSafety(r);break;case'new-item':editRecord();break;case'new-record':editRecord(null,b.dataset.kind);break;case'new-safety':editRecord(null,'safety');break;case'all-safety':offset=0;await recordList(++viewGeneration,'safety','safety');break;case'page':offset=Number(b.dataset.offset);if(listKind)await recordList(++viewGeneration,section(),listKind);else await render();break;case'changes-page':if(selected)await detailPage(selected.id,'changes',Number(b.dataset.offset));break;case'observations-page':if(selected)await detailPage(selected.id,'observations',Number(b.dataset.offset));break;case'history-page':requireHistoryAccess();historyOffset=Number(b.dataset.offset);await historyView(++viewGeneration);break;case'source':requireHistoryAccess();historySource=b.dataset.source;historyQuery='';historyOffset=0;location.hash='history';if(section()==='history')await historyView(++viewGeneration);break;case'export-items':await exportRows();break;case'export-pdf':await exportRows('item','pdf');break;case'print-export':await printExportPreview();break;case'close-export':closeExportPreview();break;case'export-records':await exportRows(b.dataset.kind);break;case'export-history':{requireHistoryAccess();const check=fence();status('Preparing permitted history…');const access=(await rpc('access')).permissions;const sources=await collect('sources'),rows=await collect('observations',{p_source_id:historySource||null,p_query:historyQuery});check();if(JSON.stringify(access)!==JSON.stringify(permissions)){const error=Error('Your history access changed. Refresh before exporting.');accessFailure(error);throw error;}requireHistoryAccess();download(new Blob([JSON.stringify({exported_at:new Date().toISOString(),access:permissions,sources,observations:rows},null,2)],{type:'application/json'}),'Braintime-Reagents-history.json');status(`Exported ${rows.length.toLocaleString()} permitted source rows.`);break;}case'open-sheet-import':openSheetImport();break;case'choose-import':if(permissions.can_import)$('import-file').click();break;case'choose-order-catalog':if(permissions.role==='owner')$('order-catalog-file').click();break;case'access-save':{const row=b.closest('tr');await rpc('set_access',{p_user_id:b.dataset.id,p_can_write:row.querySelector('[name=write]').checked,p_can_manage_safety:row.querySelector('[name=safety]').checked});status('Reagents permissions saved.');await settingsView(++viewGeneration);break;}}
  }catch(err){if(g===generation)status(err.message,true);}});
 $('pdf-export').addEventListener('cancel',closeExportPreview);
 $('sheet-import').addEventListener('click',openSheetImport);
 $('sheet-import-dialog').addEventListener('cancel',event=>{if(importing)event.preventDefault();});
 $('sheet-import-dialog').addEventListener('close',()=>{$('import-preview').innerHTML='';$('sheet-import-status').textContent='';if(member&&!importing)void render();});
-$('help').addEventListener('click',()=>$('help-dialog').showModal());$('refresh').addEventListener('click',()=>void start());$('sign-out').addEventListener('click',async()=>{accessActivity.signOut(section());const g=++generation;resetPrivate();try{await store.signOut();}finally{if(g===generation){signInView();$('sign-out').hidden=true;$('sidebar-account').hidden=true;}}});
+$('help').addEventListener('click',()=>$('help-dialog').showModal());for(const id of ['refresh','sidebar-reload'])$(id).addEventListener('click',()=>void reloadShared());
 $('import-file').addEventListener('change',e=>{const g=generation;void chooseImport(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 $('order-catalog-file').addEventListener('change',e=>{const g=generation;void chooseOrderCatalog(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:'',toxicity:''};void render();});
