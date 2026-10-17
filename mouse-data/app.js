@@ -38,7 +38,7 @@ import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
 import { renderBreedingPlanner } from './breeding-planner.js?v=115';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=115';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=115';
-import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=115';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=116';
 import { renderExperiments, experimentHelpHTML } from './experiments.js?v=100';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
 import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=115';
@@ -78,6 +78,7 @@ let experimentMouseId=null, experimentRecordId=null, iacucEntity=null,locoboxCag
 let familyClassifications = new Map();
 let plannerRenderToken = 0;
 let pageRenderGeneration = 0;
+let cryoLinkFocus=null,cryoLinkRequest=0;
 let cryoRenderToken = 0, cryoHistoryPending = null, cryoHistoryIndex = null, cryoHistoryContext = '';
 let strainIndexDataset=null, strainAssignments=new Map();
 let breedingScope='living', cageView='rack', cageDate='', cageHistoryArchivedLayouts=false;
@@ -261,7 +262,7 @@ function panel(title,body,action='') { return `<section class="panel"><div class
 function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`; }
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
-async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
+async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 function renderConnection() {
  renderSidebarAccount();
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
@@ -292,7 +293,7 @@ function render() {
  if(route==='overview'){renderOverview();return}
  if(route==='cages'){renderCages();return}
  if(route==='family'){renderFamily();return}
- if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:()=>navigate('cryo'),openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
+ if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:(id)=>{cryoLinkFocus={id,key:++cryoLinkRequest};navigate('cryo');},openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
  if(route==='strains'){renderStrains();return}
  if(route==='planner'){renderPlanner();return}
  if(route==='cryo'){renderCryo();return}
@@ -370,7 +371,7 @@ function renderCryo(){
  const token=++cryoRenderToken,context=labUserDirectoryContext(store.getCloudStatus());
  const current=()=>route==='cryo'&&token===cryoRenderToken&&context===labUserDirectoryContext(store.getCloudStatus());
  const index=cryoHistoryContext===context?cryoHistoryIndex:null;
- const hooks={draftContext:context,reloadShared:()=>loadSharedColony({preserveView:true,confirm:false,throwOnError:true,fromCryoEditor:true}),canEdit:canEditCryopreservation,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const index=await loadCryoHistory();if(!current())return;const fresh=index?dataset:await loadHistoryTables(['historical_observations']);if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{if(!canEditCryopreservation())throw new Error('Manager or owner access is required.');await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
+ const hooks={initialFocus:cryoLinkFocus,draftContext:context,reloadShared:()=>loadSharedColony({preserveView:true,confirm:false,throwOnError:true,fromCryoEditor:true}),canEdit:canEditCryopreservation,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const index=await loadCryoHistory();if(!current())return;const fresh=index?dataset:await loadHistoryTables(['historical_observations']);if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{if(!canEditCryopreservation())throw new Error('Manager or owner access is required.');await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
  renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:!index&&deferredHistoryTables().includes('historical_observations'),historyIndex:index,historyLoading:false});
 }
 function renderExperimentSection(){

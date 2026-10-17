@@ -25,7 +25,7 @@ function fixture(){
   loadHistoryTables:async tables=>{calls.push({sourceTables:tables});if(state.historyError)throw state.historyError;vm.runInContext('dataset=state.shared',context);return state.shared;},
   loadCryoHistory:async()=>{calls.push({sourceIndex:true});if(state.indexError)throw state.indexError;return state.index??null;},
  });
- vm.runInContext('let dataset=state.original,route="cryo",detail={type:"cryo",id:"source-case"},cloud={...status},cloudReady=true,manualPullPending=false,startupLoading=false,cachedPreview=false,editor=null,busy=false,historyLoadState=null,cloudLoadError="",startupProgressValue=null,startupMessage="",brainbotReviewPending=false,sidebarProfile=null,sidebarProfileContext="",cryoRenderToken=0,cryoHistoryContext="",cryoHistoryIndex=null;',context);
+ vm.runInContext('let dataset=state.original,route="cryo",detail={type:"cryo",id:"source-case"},cloud={...status},cloudReady=true,manualPullPending=false,startupLoading=false,cachedPreview=false,editor=null,busy=false,historyLoadState=null,cloudLoadError="",startupProgressValue=null,startupMessage="",brainbotReviewPending=false,sidebarProfile=null,sidebarProfileContext="",cryoLinkFocus=null,cryoRenderToken=0,cryoHistoryContext="",cryoHistoryIndex=null;',context);
  vm.runInContext(between('const deferredHistoryTables=','const historyViewKey='),context);
  vm.runInContext(between('function canEditRecords(','function canArchiveRecords('),context);
  vm.runInContext(between('function renderSidebarAccount(){','function adoptSidebarProfile('),context);

@@ -57,6 +57,11 @@ export function renderCryopreservation(container,dataset,hooks) {
     state.discoveryDataset=dataset;state.discoveryIndex=hooks.historyIndex||null;state.discoveryDeferred=historyDeferred();
   }
   if(changed&&!state.saving){if(state.reloadRequired){state.reloadRequired=false;state.historyReloadRequired=false;state.error=''}if(state.editor)reconcileDraft()}
+  const focus=hooks.initialFocus,focusKey=focus?.key;
+  const validFocusKey=typeof focusKey==='string'&&focusKey.length>0||typeof focusKey==='number'&&Number.isFinite(focusKey);
+  if(validFocusKey&&focusKey!==state.lastFocusKey&&typeof focus.id==='string'&&(findLot(focus.id)||groups().some(row=>row.id===focus.id))){
+    state.selected=focus.id;state.tab='inventory';state.lastFocusKey=focusKey;
+  }
 
   function reconcileDraft(acceptConflicts=false) {
     const editor=state.editor;if(!editor)return;state.error='';
