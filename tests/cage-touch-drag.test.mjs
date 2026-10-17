@@ -57,7 +57,7 @@ function sheetHost() {
 function node(host, tag, values = {}, parent = null) {
   const classes = new Set((values.class || '').split(/\s+/).filter(Boolean));
   const result = {
-    dataset: dataAttrs(values), classes, parentElement: parent, isConnected: true,
+    dataset: dataAttrs(values), classes, parentElement: parent, isConnected: true, draggable: values.draggable === 'true',
     classList: { add(...names) { names.forEach(name => classes.add(name)); }, remove(...names) { names.forEach(name => classes.delete(name)); } },
     hasAttribute: key => Object.hasOwn(values, key),
     matches(selector) { return selector.split(',').some(part => part.startsWith('.') ? classes.has(part.slice(1)) : /^\[[\w-]+\]$/.test(part) ? this.hasAttribute(part.slice(1, -1)) : part === tag); },
@@ -98,23 +98,24 @@ function send(ui, type, touches, changedTouches = touches, { cancelable = true }
   for (const listener of ui.host.listeners.get(type) || []) listener(event);
   return event;
 }
-function twoFingerDrop(ui, source, destination, { move = true } = {}) {
-  const first = touch(1, source, 10, 10), second = touch(2, source, 30, 10);
-  send(ui, 'touchstart', [first], [first]);
-  const armed = send(ui, 'touchstart', [first, second], [second]);
-  ui.host.hit = destination;
-  const moved = move ? send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 130, 10)]) : null;
-  const ended = send(ui, 'touchend', [touch(2, source, 130, 10)], [touch(1, source, 110, 10)]);
-  send(ui, 'touchend', [], [touch(2, source, 130, 10)]);
-  return { armed, moved, ended };
+function clock(t) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.parse('2026-10-17T12:00:00Z') });
+  return ms => t.mock.timers.tick(ms);
+}
+function holdDrop(ui, source, destination, tick) {
+  const start = send(ui, 'touchstart', [touch(1, source)]);
+  assert.equal(start.prevented, false, 'The pending hold must not prevent normal scrolling');
+  tick(500); ui.host.hit = destination;
+  const move = send(ui, 'touchmove', [touch(1, source, 110, 10)]);
+  const end = send(ui, 'touchend', [], [touch(1, source, 110, 10)]);
+  return { start, move, end };
 }
 
-test('one-finger panning stays native and cannot stage a cage move through Pointer Events', () => {
-  const ui = harness(), source = cageTarget(ui.host, 'P1'), destination = cageTarget(ui.host, 'P2');
-  assert.match(ui.host.innerHTML, /\.sheet-cage-drag-region,\[data-sheet-drag-mouse\]\{touch-action:auto;/);
-  const start = send(ui, 'touchstart', [touch(1, source)]);
-  ui.host.hit = destination;
-  const move = send(ui, 'touchmove', [touch(1, source, 110, 10)]);
+test('one-finger scrolling before activation stays native and cannot bypass the hold through Pointer Events', t => {
+  const tick = clock(t), ui = harness(), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
+  assert.match(ui.host.innerHTML, /touch-action:auto/);
+  const start = send(ui, 'touchstart', [touch(1, source)]); tick(100);
+  const move = send(ui, 'touchmove', [touch(1, source, 110, 10)]); tick(1000);
   let prevented = false;
   for (const event of ['onpointerdown', 'onpointermove', 'onpointerup']) ui.host[event]({ pointerType: 'touch', pointerId: 1, target: source, clientX: event === 'onpointerdown' ? 10 : 110, clientY: 10, preventDefault() { prevented = true; } });
   const end = send(ui, 'touchend', [], [touch(1, source, 110, 10)]);
@@ -124,147 +125,158 @@ test('one-finger panning stays native and cannot stage a cage move through Point
   assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0);
 });
 
-test('two fingers on a cage header stage a cross-room swap, then Save updates cages and resident mice together', async () => {
-  const ui = harness(), before = structuredClone(ui.data), source = cageTarget(ui.host, 'P1'), destination = cageTarget(ui.host, 'P2');
-  const { armed, moved } = twoFingerDrop(ui, source, destination);
-  assert.equal(armed.prevented, true); assert.equal(moved.prevented, true);
-  assert.equal(hasCageSheetDrafts(), true); assert.equal(ui.saved.length, 0); assert.deepEqual(ui.data, before);
+test('holding a cage header activates its border at 500ms; movement then stages a cross-room swap until Save', async t => {
+  const tick = clock(t), ui = harness(), before = structuredClone(ui.data), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
+  assert.equal(source.header.draggable, true);
+  assert.equal(send(ui, 'touchstart', [touch(1, source)]).prevented, false);
+  assert.equal(source.header.draggable, false, 'A pending hold disables the native HTML drag callout');
+  tick(499); assert.equal(source.card.classes.has('sheet-touch-armed'), false); assert.equal(hasCageSheetDrafts(), false);
+  tick(1); assert.equal(source.card.classes.has('sheet-touch-armed'), true); assert.equal(hasCageSheetDrafts(), false);
+  const move = send(ui, 'touchmove', [touch(1, source, 110, 10)]); assert.equal(move.prevented, true);
+  send(ui, 'touchend', [], [touch(1, source, 110, 10)]);
+  assert.equal(source.header.draggable, true, 'Native desktop dragging is restored after the gesture');
+  assert.equal(source.card.classes.has('sheet-touch-armed'), false); assert.equal(hasCageSheetDrafts(), true); assert.equal(ui.saved.length, 0); assert.deepEqual(ui.data, before);
   await ui.sync(); assert.equal(ui.saved.length, 1);
   const { next, options } = ui.saved[0];
   assert.deepEqual(next.tables.cages.map(c => [c.cage_sid, c.location_id, c.cage_tag, c.room_id, c.rack_id]), [['C1', 'P2', 'B2', 'R2', 'K2'], ['C2', 'P1', 'A1', 'R1', 'K1']]);
   assert.deepEqual(next.tables.mice.map(m => [m.mouse_sid, m.cage_sid, m.cage_tag]), [['10001', 'C1', 'B2'], ['10002', 'C2', 'A1']]);
-  assert.equal(next.tables.husbandry_events.filter(e => e.event_type === 'cage_location_assignment').length, 2);
-  assert.ok(Array.isArray(options.readDependencies));
+  assert.equal(next.tables.husbandry_events.filter(e => e.event_type === 'cage_location_assignment').length, 2); assert.ok(Array.isArray(options.readDependencies));
 });
 
-test('source-only cage uses the same gesture and is registered only when its draft is saved', async () => {
-  const ui = harness(sample({ source: true, occupied: false })), before = structuredClone(ui.data);
-  twoFingerDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'));
+test('source-only cage hold materializes a cage only when Save is pressed', async t => {
+  const tick = clock(t), ui = harness(sample({ source: true, occupied: false })), before = structuredClone(ui.data);
+  holdDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'), tick);
   assert.equal(ui.saved.length, 0); assert.equal(hasCageSheetDrafts(), true); assert.deepEqual(ui.data, before);
   await ui.sync(); const next = ui.saved[0].next, cage = next.tables.cages[0];
   assert.equal(next.tables.cages.length, 1); assert.equal(cage.location_id, 'P2'); assert.equal(cage.cage_tag, 'B2');
   assert.equal(cage.start_date, '2026-09-01'); assert.equal(next.tables.mice[0].cage_sid, cage.cage_sid); assert.equal(next.tables.mice[0].cage_tag, 'B2');
 });
 
-test('Save rechecks a fresh destination and retains the touch draft when another cage arrived', async () => {
-  const data = sample({ occupied: false }), fresh = structuredClone(data), ui = harness(data, { loadFresh: async () => fresh });
-  twoFingerDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'));
+test('Save rechecks a fresh destination and retains the touch draft when another cage arrived', async t => {
+  const tick = clock(t), data = sample({ occupied: false }), fresh = structuredClone(data), ui = harness(data, { loadFresh: async () => fresh });
+  holdDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'), tick);
   fresh.tables.cages.push({ cage_sid: 'REMOTE', cage_tag: 'B2', state: 'Active', location_id: 'P2', room_id: 'R2', rack_id: 'K2' });
   await ui.sync(); assert.equal(ui.saved.length, 0); assert.equal(hasCageSheetDrafts(), true);
   assert.match(ui.host.innerHTML, /changed|occupied/); assert.equal(data.tables.cages[0].location_id, 'P1');
 });
 
-test('two source-only cages exchange positions without duplicating source animals', async () => {
-  const ui = harness(sample({ source: true }));
-  twoFingerDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'));
-  assert.equal(ui.saved.length, 0); await ui.sync();
-  const next = ui.saved[0].next;
+test('two source-only cages exchange positions without duplicating source animals after a held drag', async t => {
+  const tick = clock(t), ui = harness(sample({ source: true })); holdDrop(ui, cageTarget(ui.host, 'P1'), cageTarget(ui.host, 'P2'), tick);
+  assert.equal(ui.saved.length, 0); await ui.sync(); const next = ui.saved[0].next;
   assert.equal(next.tables.cages.length, 2); assert.equal(next.tables.mice.length, 2);
   for (const [mouseSid, position] of [['10001', 'P2'], ['10002', 'P1']]) {
-    const mouse = next.tables.mice.find(m => m.mouse_sid === mouseSid);
-    assert.equal(next.tables.cages.find(c => c.cage_sid === mouse.cage_sid).location_id, position);
+    const mouse = next.tables.mice.find(m => m.mouse_sid === mouseSid); assert.equal(next.tables.cages.find(c => c.cage_sid === mouse.cage_sid).location_id, position);
   }
 });
 
-test('a second finger arriving after one-finger scrolling cannot convert navigation into a move', () => {
-  const ui = harness(), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
-  send(ui, 'touchstart', [touch(1, source)]); assert.equal(send(ui, 'touchmove', [touch(1, source, 20, 10)]).prevented, false);
-  const joined = send(ui, 'touchstart', [touch(1, source, 20, 10), touch(2, source, 40, 10)], [touch(2, source, 40, 10)]);
-  const moved = send(ui, 'touchmove', [touch(1, source, 120, 10), touch(2, source, 140, 10)]);
-  send(ui, 'touchend', [touch(2, source)], [touch(1, source)]);
-  assert.equal(joined.prevented || moved.prevented, false); assert.equal(hasCageSheetDrafts(), false);
-});
-
-test('sub-threshold two-finger contact and a pinch do not stage a cage move', () => {
-  for (const pinch of [false, true]) {
+test('a quick tap or release after holding without movement never changes cage assignments', t => {
+  const tick = clock(t);
+  for (const wait of [100, 499, 500, 800]) {
     const ui = harness(), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
-    send(ui, 'touchstart', [touch(1, source)]); send(ui, 'touchstart', [touch(1, source), touch(2, source, 30, 10)]);
-    send(ui, 'touchmove', [touch(1, source, pinch ? -10 : 13, 10), touch(2, source, pinch ? 50 : 33, 10)]);
-    if (pinch) send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 170, 10)]);
-    send(ui, 'touchend', [touch(2, source)], [touch(1, source)]);
-    assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0);
+    send(ui, 'touchstart', [touch(1, source)]); tick(wait); send(ui, 'touchend', [], [touch(1, source)]);
+    ui.host.onclick({ target: source, preventDefault() {} }); assert.doesNotMatch(ui.host.innerHTML, /class="sheet-move-notice"/); tick(1000);
+    assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
   }
 });
 
-test('two-finger starts across different cages or nested controls cannot grab a cage', () => {
-  for (const control of ['button', 'input', 'select', 'textarea', 'a', 'summary', 'details', null]) {
-    const ui = harness(), source = cageTarget(ui.host, 'P1'), other = control ? node(ui.host, control, {}, source.header) : cageTarget(ui.host, 'P2');
-    send(ui, 'touchstart', [touch(1, source)]); const start = send(ui, 'touchstart', [touch(1, source), touch(2, other, 30, 10)]);
-    ui.host.hit = cageTarget(ui.host, 'P2'); send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, other, 130, 10)]); send(ui, 'touchend', [], [touch(1, source), touch(2, other)]);
-    assert.equal(start.prevented, false, control || 'different cages'); assert.equal(hasCageSheetDrafts(), false);
+test('a quick tap on a print control still opens its normal action without activating drag', async t => {
+  const tick = clock(t); let printed = 0;
+  const ui = harness(sample(), { printLabel: () => printed++ }), source = cageTarget(ui.host, 'P1');
+  const article = [...ui.host.innerHTML.matchAll(/<article\b([^>]*)>([\s\S]*?)<\/article>/g)].find(([, values]) => attrs(values)['data-sheet-slot'] === 'P1')[2];
+  const values = [...article.matchAll(/<button\b([^>]*)>/g)].map(([, values]) => attrs(values)).find(values => values['data-sheet-label'] === 'C1');
+  assert.ok(values); const control = node(ui.host, 'button', values, source.header);
+  send(ui, 'touchstart', [touch(1, control)]); tick(100); send(ui, 'touchend', [], [touch(1, control)]);
+  await ui.host.onclick({ target: control, preventDefault() {} });
+  assert.equal(printed, 1); assert.equal(hasCageSheetDrafts(), false); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
+});
+
+test('native long-press callouts are suppressed only for the drag candidate and restored after cancellation', t => {
+  const tick = clock(t), ui = harness(), source = cageTarget(ui.host, 'P1'), control = node(ui.host, 'button', {}, source.header);
+  send(ui, 'touchstart', [touch(1, source)]); tick(100);
+  let pendingPrevented = false, controlPrevented = false, afterCancelPrevented = false;
+  ui.host.oncontextmenu({ target: source, preventDefault() { pendingPrevented = true; } });
+  ui.host.oncontextmenu({ target: control, preventDefault() { controlPrevented = true; } });
+  assert.equal(pendingPrevented, true); assert.equal(controlPrevented, false);
+  send(ui, 'touchcancel', [], [touch(1, source)]); tick(1000);
+  ui.host.oncontextmenu({ target: source, preventDefault() { afterCancelPrevented = true; } });
+  assert.equal(afterCancelPrevented, false); assert.equal(source.header.draggable, true); assert.equal(hasCageSheetDrafts(), false);
+});
+
+test('holding nested header controls or display badges cannot arm a cage move', t => {
+  const tick = clock(t);
+  for (const control of ['button', 'input', 'select', 'textarea', 'a', 'summary', 'details', '.sheet-work-display']) {
+    const ui = harness(), source = cageTarget(ui.host, 'P1'), target = node(ui.host, control.startsWith('.') ? 'span' : control, { class: control.startsWith('.') ? control.slice(1) : '' }, source.header); ui.host.hit = cageTarget(ui.host, 'P2');
+    const start = send(ui, 'touchstart', [touch(1, target)]); tick(800); const move = send(ui, 'touchmove', [touch(1, target, 110, 10)]); send(ui, 'touchend', [], [touch(1, target, 110, 10)]);
+    assert.equal(start.prevented || move.prevented, false, control); assert.equal(hasCageSheetDrafts(), false); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
   }
 });
 
-test('third finger, cancellation and uncancelable events discard the gesture without changes', () => {
-  for (const reason of ['third', 'cancel', 'uncancelable', 'uncancelable-end']) {
+test('a second or third finger cancels both pending and active holds without preventing pinch gestures', t => {
+  const tick = clock(t);
+  for (const activated of [false, true]) for (const count of [2, 3]) {
     const ui = harness(), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
-    send(ui, 'touchstart', [touch(1, source)]); send(ui, 'touchstart', [touch(1, source), touch(2, source, 30, 10)]);
-    send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 130, 10)]);
-    if (reason === 'third') send(ui, 'touchstart', [touch(1, source), touch(2, source), touch(3, source)], [touch(3, source)]);
-    if (reason === 'cancel') send(ui, 'touchcancel', [], [touch(1, source), touch(2, source)]);
-    if (reason === 'uncancelable') send(ui, 'touchmove', [touch(1, source, 115, 10), touch(2, source, 135, 10)], undefined, { cancelable: false });
-    send(ui, 'touchend', [], [touch(1, source), touch(2, source)], { cancelable: reason !== 'uncancelable-end' });
-    assert.equal(hasCageSheetDrafts(), false, reason); assert.equal(ui.saved.length, 0);
+    send(ui, 'touchstart', [touch(1, source)]); tick(activated ? 500 : 100);
+    const points = Array.from({ length: count }, (_, i) => touch(i + 1, source, 10 + i * 20, 10));
+    const start = send(ui, 'touchstart', points); tick(1000); const move = send(ui, 'touchmove', points.map(p => ({ ...p, clientX: p.clientX + 100 })));
+    send(ui, 'touchend', [], points); assert.equal(start.prevented || move.prevented, false); assert.equal(hasCageSheetDrafts(), false); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
   }
 });
 
-test('readonly, missing housing permission and changed account forbid touch movement', () => {
-  for (const mode of ['readonly', 'permission', 'account']) {
+test('cancellation and uncancelable events remove activation without staging changes', t => {
+  const tick = clock(t);
+  for (const reason of ['cancel', 'uncancelable', 'uncancelable-end']) {
+    const ui = harness(), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
+    send(ui, 'touchstart', [touch(1, source)]); tick(500); send(ui, 'touchmove', [touch(1, source, 110, 10)]);
+    if (reason === 'cancel') send(ui, 'touchcancel', [], [touch(1, source)]);
+    if (reason === 'uncancelable') send(ui, 'touchmove', [touch(1, source, 115, 10)], undefined, { cancelable: false });
+    send(ui, 'touchend', [], [touch(1, source, 110, 10)], { cancelable: reason !== 'uncancelable-end' });
+    assert.equal(hasCageSheetDrafts(), false, reason); assert.equal(ui.saved.length, 0); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
+  }
+});
+
+test('readonly, revoked housing permission and changed account forbid both activation and a later drop', t => {
+  const tick = clock(t);
+  for (const mode of ['readonly', 'permission', 'account']) for (const afterActivation of [false, true]) {
     let context = 'touch-fixture', allowed = true;
-    const ui = harness(sample(), { readOnly: mode === 'readonly', canEdit: () => allowed, currentContext: () => context });
-    const source = cageTarget(ui.host, 'P1'), destination = cageTarget(ui.host, 'P2');
-    send(ui, 'touchstart', [touch(1, source)]); send(ui, 'touchstart', [touch(1, source), touch(2, source, 30, 10)]);
+    const ui = harness(sample(), { readOnly: mode === 'readonly', canEdit: () => allowed, currentContext: () => context }), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
+    send(ui, 'touchstart', [touch(1, source)]); if (afterActivation) tick(500);
     if (mode === 'permission') allowed = false; if (mode === 'account') context = 'different-account';
-    ui.host.hit = destination; send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 130, 10)]); send(ui, 'touchend', [], [touch(1, source), touch(2, source)]);
+    tick(500); send(ui, 'touchmove', [touch(1, source, 110, 10)]); send(ui, 'touchend', [], [touch(1, source, 110, 10)]);
     assert.equal(hasCageSheetDrafts(), false, mode); assert.equal(ui.saved.length, 0);
   }
 });
 
-test('native HTML drag cannot bypass recent touch, while the desktop pointer path still works', async () => {
-  const ui = harness(), source = cageTarget(ui.host, 'P1'), destination = cageTarget(ui.host, 'P2');
+test('native HTML drag cannot bypass recent touch, while desktop pointer movement remains available', async t => {
+  clock(t); const ui = harness(), source = cageTarget(ui.host, 'P1'), destination = cageTarget(ui.host, 'P2');
   send(ui, 'touchstart', [touch(1, source)]); let blocked = false;
   ui.host.ondragstart({ target: source, preventDefault() { blocked = true; }, dataTransfer: { setData() { assert.fail('touch started native drag'); } } });
-  assert.equal(blocked, true); send(ui, 'touchend', [], [touch(1, source)]); assert.equal(hasCageSheetDrafts(), false);
-  ui.host.hit = destination;
+  assert.equal(blocked, true); send(ui, 'touchend', [], [touch(1, source)]); assert.equal(hasCageSheetDrafts(), false); ui.host.hit = destination;
   ui.host.onpointerdown({ pointerType: 'mouse', pointerId: 7, button: 0, target: source, clientX: 10, clientY: 10 });
   ui.host.onpointermove({ pointerType: 'mouse', pointerId: 7, target: source, clientX: 110, clientY: 10, preventDefault() {} });
   ui.host.onpointerup({ pointerType: 'mouse', pointerId: 7, target: source, clientX: 110, clientY: 10, preventDefault() {} });
   assert.equal(hasCageSheetDrafts(), true); assert.equal(ui.saved.length, 0); await ui.sync(); assert.equal(ui.saved.length, 1);
 });
 
-test('rerender removes old non-passive listeners and cancels captured gestures', () => {
-  const ui = harness(), source = cageTarget(ui.host, 'P1');
-  send(ui, 'touchstart', [touch(1, source)]); send(ui, 'touchstart', [touch(1, source), touch(2, source, 30, 10)]);
-  const oldListeners = [...ui.host.listeners].flatMap(([type, set]) => [...set].map(listener => ({ type, listener })));
-  ui.rerender();
+test('rerender removes old non-passive listeners and cancels pending hold timers', t => {
+  const tick = clock(t), ui = harness(), source = cageTarget(ui.host, 'P1'); send(ui, 'touchstart', [touch(1, source)]);
+  const oldListeners = [...ui.host.listeners].flatMap(([type, set]) => [...set].map(listener => ({ type, listener }))); tick(200); ui.rerender(); tick(1000);
   for (const { type, listener } of oldListeners) assert.equal(ui.host.listeners.get(type)?.has(listener), false);
-  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
-    assert.equal(ui.host.listeners.get(type)?.size, 1, type);
-    assert.ok(ui.host.listenerAdds.filter(entry => entry.type === type).every(entry => entry.options?.passive === false));
-  }
-  ui.host.hit = cageTarget(ui.host, 'P2'); send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 130, 10)]); send(ui, 'touchend', [], [touch(1, source), touch(2, source)]);
-  assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0);
+  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) { assert.equal(ui.host.listeners.get(type)?.size, 1, type); assert.ok(ui.host.listenerAdds.filter(entry => entry.type === type).every(entry => entry.options?.passive === false)); }
+  ui.host.hit = cageTarget(ui.host, 'P2'); send(ui, 'touchmove', [touch(1, source, 110, 10)]); send(ui, 'touchend', [], [touch(1, source, 110, 10)]);
+  assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
 });
 
-test('an asynchronous manager refresh cancels the gesture before replacing its origin', async () => {
-  let finish;
-  const ui = harness(sample(), { loadManagers: () => new Promise(resolve => { finish = resolve; }) });
-  const source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
-  send(ui, 'touchstart', [touch(1, source)]); send(ui, 'touchstart', [touch(1, source), touch(2, source, 30, 10)]);
-  send(ui, 'touchmove', [touch(1, source, 110, 10), touch(2, source, 130, 10)]);
-  finish([]); await Promise.resolve();
-  assert.equal(source.isConnected, false);
-  ui.host.hit = cageTarget(ui.host, 'P2'); send(ui, 'touchend', [], [touch(1, source), touch(2, source)]);
-  assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0);
-  assert.equal(ui.host.listeners.get('touchstart').size, 1);
+test('asynchronous manager refresh cancels a highlighted hold before replacing its origin', async t => {
+  const tick = clock(t); let finish;
+  const ui = harness(sample(), { loadManagers: () => new Promise(resolve => { finish = resolve; }) }), source = cageTarget(ui.host, 'P1'); ui.host.hit = cageTarget(ui.host, 'P2');
+  send(ui, 'touchstart', [touch(1, source)]); tick(500); finish([]); await Promise.resolve(); assert.equal(source.isConnected, false);
+  ui.host.hit = cageTarget(ui.host, 'P2'); send(ui, 'touchend', [], [touch(1, source)]);
+  assert.equal(hasCageSheetDrafts(), false); assert.equal(ui.saved.length, 0); assert.equal(ui.host.listeners.get('touchstart').size, 1); assert.equal(source.card.classes.has('sheet-touch-armed'), false);
 });
 
-test('two-finger mouse badge movement stages only its animal and Save retains identity and cage dependencies', async () => {
-  const ui = harness(), { badge, line } = badgeTarget(ui.host, 'P1'), second = node(ui.host, 'span', {}, line), destination = cageTarget(ui.host, 'P2');
-  send(ui, 'touchstart', [touch(1, badge)]); const start = send(ui, 'touchstart', [touch(1, badge), touch(2, second, 30, 10)], [touch(2, second, 30, 10)]);
-  ui.host.hit = destination; send(ui, 'touchmove', [touch(1, badge, 110, 10), touch(2, second, 130, 10)]); send(ui, 'touchend', [], [touch(1, badge), touch(2, second)]);
-  assert.equal(start.prevented, true); assert.equal(hasCageSheetDrafts(), true); assert.equal(ui.saved.length, 0);
-  await ui.sync(); const { next, options } = ui.saved[0];
+test('holding a mouse badge stages only that animal and Save retains identity and destination dependencies', async t => {
+  const tick = clock(t), ui = harness(), { badge } = badgeTarget(ui.host, 'P1'); holdDrop(ui, badge, cageTarget(ui.host, 'P2'), tick);
+  assert.equal(hasCageSheetDrafts(), true); assert.equal(ui.saved.length, 0); await ui.sync(); const { next, options } = ui.saved[0];
   assert.deepEqual(next.tables.mice.map(m => [m.mouse_sid, m.cage_sid, m.cage_tag]), [['10001', 'C2', 'B2'], ['10002', 'C2', 'B2']]);
   assert.equal(next.tables.cages[0].location_id, 'P1'); assert.equal(next.tables.cages[1].location_id, 'P2');
   assert.ok(options.readDependencies.some(d => d.type === 'locations' && d.id === 'P2')); assert.ok(options.readDependencies.some(d => d.type === 'cages' && d.id === 'C2'));
