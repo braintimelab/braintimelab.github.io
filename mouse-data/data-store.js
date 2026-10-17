@@ -259,10 +259,24 @@ async function establishMembershipOrSetup(action){
   action?.check();if(!setupProfileAllowed(profile))throw new Error('This account is not an active member of the configured colony.');
   saveSession({...session(),role:'pending',setupRequired:true});
 }
+// This deployment's resolver exposes no directory. Ordinary emails pass through;
+// a configured owner alias supplies the exact identity to verify after Auth.
+async function resolveLoginEmail(identifier,action){
+  const c=configuration(),email=identifier.trim().toLowerCase();
+  if(c?.url!==PUBLIC_CONFIG.url||c?.colonyId!==PUBLIC_CONFIG.colonyId)return {email:identifier.trim(),user_id:null,alias:false};
+  const {response,result}=await cloudJSON(`${c.url}/rest/v1/rpc/resolve_lab_login`,{method:'POST',cache:'no-store',redirect:'error',headers:{apikey:publicKey(c.anonKey),'Content-Type':'application/json'},body:JSON.stringify({p_colony_id:c.colonyId,p_identifier:email})});
+  action.check();
+  if(!response.ok){
+    throw new Error('Sign-in verification is temporarily unavailable. Try again later.');
+  }
+  const validEmail=value=>typeof value==='string'&&value.length<=254&&value===value.trim().toLowerCase()&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if(!result||typeof result!=='object'||Array.isArray(result)||Object.keys(result).length!==3||!validEmail(result.email)||!['email','user_id','alias'].every(key=>Object.hasOwn(result,key))||!(result.alias===false&&result.user_id===null&&result.email===email||result.alias===true&&typeof result.user_id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.user_id)))throw new Error('Sign-in could not be confirmed. Try again later.');
+  return result;
+}
 export async function signIn(email,password){
   if(typeof email!=='string'||typeof password!=='string'||!email.trim()||!password)throw new Error('Enter your email or username and password.');
-  const action=beginAuthAction();saveSession(null);invalidate();let result;
-  if(email.includes('@'))result=await authRequest('token?grant_type=password',{email:email.trim(),password});
+  const action=beginAuthAction();saveSession(null);invalidate();let result,identity=null;
+  if(email.includes('@')){identity=await resolveLoginEmail(email,action);action.check();result=await authRequest('token?grant_type=password',{email:identity.email,password});}
   else {
     const c=configuration();if(!c)throw new Error('Configure the cloud project first.');
     const defaultGateway=c.url===PUBLIC_CONFIG.url&&c.colonyId===PUBLIC_CONFIG.colonyId?PUBLIC_CONFIG.usernameAnonKey:null;
@@ -271,8 +285,8 @@ export async function signIn(email,password){
     const {response,result:reply}=await cloudJSON(`${c.url}/functions/v1/username-sign-in`,{method:'POST',cache:'no-store',redirect:'error',headers:{apikey:anonKey,Authorization:`Bearer ${anonKey}`,'Content-Type':'application/json'},body:JSON.stringify({username:email.trim(),password})});
     result=reply;if(!response.ok)throw new Error(result?.message||'Username sign-in was rejected.');
   }
-  action.check();saveSession(normalizeSession(result));invalidate();
-  try{await establishMembershipOrSetup(action);action.check();statusMessage='Signed in.';}catch(e){if(action.current()){saveSession(null);statusMessage=e.message;}throw e;}
+  action.check();if(identity?.alias&&result?.user?.id!==identity.user_id)throw new Error('Sign-in could not be confirmed. Try again later.');saveSession(normalizeSession(result));invalidate();
+  try{await establishMembershipOrSetup(action);action.check();if(identity?.alias&&session()?.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');statusMessage='Signed in.';}catch(e){if(action.current()){saveSession(null);statusMessage=e.message;}throw e;}
   return getCloudStatus();
 }
 function emailAddress(email){

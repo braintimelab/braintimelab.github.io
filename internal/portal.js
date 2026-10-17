@@ -129,7 +129,7 @@ export function createPortalController({store, config, location, navigate, onSta
 
 export async function mountPortal(document, window) {
   const [store, {PUBLIC_CONFIG}] = await Promise.all([
-    import('../mouse-data/data-store.js?v=26'),
+    import('../mouse-data/data-store.js?v=119'),
     import('../mouse-data/config.js')
   ]);
   const element = id => document.getElementById(id);

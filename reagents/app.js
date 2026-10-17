@@ -1,4 +1,4 @@
-import * as store from '../mouse-data/data-store.js?v=103';
+import * as store from '../mouse-data/data-store.js?v=119';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=95';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';
