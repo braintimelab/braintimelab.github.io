@@ -1,7 +1,8 @@
 import { predictCross, validateScenario, rankPairs } from './genetics.js?v=100';
 import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=118';
-import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=118';
+import {canonicalLocusName,strainNamingWarning,legacyVgatCreName,getStrainRegistry} from './strain-registry.js?v=118';
 import { validateFamilyTargetDraft } from './family-targets.js?v=118';
+import { designBreedingStrategy } from './breeding-strategy.js?v=121';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -44,7 +45,7 @@ function exampleScenario() {
 export function renderBreedingPlanner(container,dataset,hooks) {
   let state=mounts.get(container);
   const freshMount=!state;
-  if(!state){state={tab:'cross',scenario:exampleScenario(),illustrative:true,result:null,ranking:null,profileId:'',profileCalls:{},profileNotes:'',planName:'',loadedPlan:'',error:'',notice:'',sourceWarnings:[],busy:false,candidateSearch:'',catalogue:[],catalogueDataset:null,sourceCache:new Map(),catalogueOpen:false};mounts.set(container,state)}
+  if(!state){state={tab:'design',scenario:exampleScenario(),illustrative:true,result:null,strategy:null,strategyRoute:'',founderCopies:{},wildTypeAvailable:true,timing:{founderReadyDay:0,breedingAgeDays:56,gestationDays:21,weaningAgeDays:21},ranking:null,profileId:'',profileCalls:{},profileNotes:'',planName:'',loadedPlan:'',error:'',notice:'',sourceWarnings:[],busy:false,candidateSearch:'',catalogue:[],catalogueDataset:null,sourceCache:new Map(),catalogueOpen:false};mounts.set(container,state)}
   const datasetChanged=state.catalogueDataset!==null&&state.catalogueDataset!==dataset;
   state.context={container,dataset,hooks};
   const data=()=>state.context.dataset;
@@ -64,10 +65,12 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   const disabled=()=>state.busy||state.historyLoading?' disabled':'';
   const currentCalls=(record,locus)=>reviewedCall(record,locus).call;
   const call=(owner,id)=>owner.calls[id]||(owner.calls[id]=unknown());
-  const invalidate=()=>{state.result=null;state.ranking=null;state.error='';state.notice='';state.loadedPlan='';container.querySelector?.('.planner-results')?.remove();container.querySelector?.('[data-planner-ranking]')?.remove()};
+  const invalidate=()=>{state.result=null;state.strategy=null;state.strategyRoute='';state.ranking=null;state.error='';state.notice='';state.loadedPlan='';container.querySelector?.('.planner-results')?.remove();container.querySelector?.('.planner-strategy-results')?.remove();container.querySelector?.('[data-planner-ranking]')?.remove()};
   if(state.catalogueDataset!==dataset||state.catalogueHistory!==(hooks.historyIndex||null)){state.catalogue=discoverGenotypes(dataset,hooks.historyIndex||null);state.catalogueDataset=dataset;state.catalogueHistory=hooks.historyIndex||null;state.sourceCache.clear()}
+  if(freshMount&&state.illustrative)state.scenario.targets=Object.fromEntries(state.scenario.loci.map(locus=>[locus.id,{mode:'exact',alleles:['+',locus.alleles[1]]}]));
   if(freshMount&&state.catalogue.length&&!dataset.synthetic&&!dataset.demo&&!dataset.is_demo){state.scenario.loci=[];state.scenario.targets={};state.scenario.sire.calls={};state.scenario.dam.calls={};state.illustrative=false;state.catalogueOpen=true}
   if(datasetChanged){
+    state.strategy=null;state.strategyRoute='';
     state.ranking=null;
     if(!state.loadedPlan){state.result=null;for(const role of ['sire','dam'])if(state.scenario[role].id){
       const record=mouse(state.scenario[role].id),valid=record&&!archived(record)&&record.sex===(role==='sire'?'Male':'Female');
@@ -89,8 +92,8 @@ export function renderBreedingPlanner(container,dataset,hooks) {
       invalidate();
       state.scenario={loci:clone(draft.loci),targets:clone(draft.targets),sire:{sex:'Male',calls:{}},dam:{sex:'Female',calls:{}},sex:'Any',independentAssortment:false,desiredCount:1,confidence:0.95,litterSize:6};
       for(const role of ['sire','dam'])state.scenario[role].calls=Object.fromEntries(state.scenario.loci.map(locus=>[locus.id,unknown()]));
-      state.tab='cross';state.illustrative=false;state.catalogueOpen=false;state.sourceWarnings=[];state.planName='';state.profileId='';state.profileCalls={};state.profileNotes='';state.candidateSearch='';
-      state.notice=typeof draft.notice==='string'&&draft.notice.trim()?draft.notice:'Target draft from Family tree. Choose parents and review their allele calls before calculating.';
+      state.tab='design';state.illustrative=false;state.catalogueOpen=false;state.sourceWarnings=[];state.planName='';state.profileId='';state.profileCalls={};state.profileNotes='';state.candidateSearch='';
+      state.notice=typeof draft.notice==='string'&&draft.notice.trim()?draft.notice:'Target from Family tree. Review the genotype, then design a breeding route.';
     }
   } else if(hooks.initialMouseId){
     const profile=mouse(hooks.initialMouseId)?.genetic_profile;
@@ -144,6 +147,39 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     }).join('')}</div>`:historyDeferred()?'<p class="muted">Historical catalogue is not loaded.</p>':'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
   }
 
+  function targetVariant(locus){const target=state.scenario.targets[locus.id];return target?.mode==='carrier'?target.allele:target?.mode==='exact'?target.alleles?.find(allele=>allele!=='+')||locus.alleles.find(allele=>allele!=='+'):locus.alleles.find(allele=>allele!=='+');}
+  function targetCopies(locus){const target=state.scenario.targets[locus.id],variant=targetVariant(locus);if(target?.mode!=='exact'||!variant||target.alleles?.length!==2||target.alleles.some(allele=>allele!=='+'&&allele!==variant))return 'advanced';const copies=target.alleles.filter(allele=>allele===variant).length;return copies===1?'heterozygous':copies===2?'homozygous':'advanced';}
+  function designLocusName(locus){const allele=targetVariant(locus);return canonicalLocusName(catalogueStrains(state.catalogue).find(entry=>entry.id===locus.id&&entry.allele===allele)||locus);}
+  function setDesignTarget(locus,variant,copies){if(!locus.alleles.includes('+')||!variant||!locus.alleles.includes(variant)||variant==='+')throw new Error('Choose a declared variant allele.');state.scenario.targets[locus.id]={mode:'exact',alleles:copies==='homozygous'?[variant,variant]:['+',variant]};invalidate();state.illustrative=false;}
+  function targetBoard(){
+    const rows=state.scenario.loci.map(locus=>{const variant=targetVariant(locus),copies=targetCopies(locus),variants=locus.alleles.filter(allele=>allele!=='+');return `<div class="planner-target-row"><strong>${esc(designLocusName(locus))}</strong>${variants.length>1?`<select data-planner-field="design-allele" data-locus="${esc(locus.id)}" aria-label="${esc(locus.name+' target allele')}">${variants.map(allele=>option(allele,allele,variant)).join('')}</select>`:`<span class="small muted">${esc(variant||'Choose allele in Manual cross')}</span>`}<select data-planner-field="design-copies" data-locus="${esc(locus.id)}" aria-label="${esc(locus.name+' target copies')}">${copies==='advanced'?option('advanced','Advanced target',copies):''}${option('heterozygous','Heterozygous',copies)}${option('homozygous','Homozygous',copies)}</select><span class="planner-target-pair">${esc(state.scenario.targets[locus.id]?.mode==='exact'?state.scenario.targets[locus.id].alleles.join(' / '):state.scenario.targets[locus.id]?.mode==='carrier'?`Carries ${variant}`:'Any genotype')}</span>${button('remove-locus','×',`data-locus="${esc(locus.id)}" aria-label="${esc('Remove '+designLocusName(locus))}"`)}</div>`;});
+    return `<section class="panel planner-target-board"><div class="panel-head"><h2>Target genotype</h2><span class="small muted">Virtual breeding design</span></div><div class="panel-body">${rows.length?rows.join(''):'<p class="small muted">Select strains below.</p>'}</div></section>`;
+  }
+  function designAssumptions(){return `<details class="panel planner-design-assumptions"><summary>Starting stocks &amp; timing</summary><div class="panel-body"><p class="small muted">Hypothetical single-strain stocks, both sexes. Review availability before starting.</p><label class="check"><input type="checkbox" data-planner-field="founder-wildtype"${state.wildTypeAvailable?' checked':''}> Include a hypothetical wild-type stock</label><div class="planner-founder-grid">${state.scenario.loci.map(locus=>`<label>${esc(designLocusName(locus))}<select data-planner-field="founder-copies" data-locus="${esc(locus.id)}" aria-label="${esc(locus.name+' starting stock')}">${option('1','Heterozygous',String(state.founderCopies[locus.id]??1))}${option('2','Homozygous',String(state.founderCopies[locus.id]??1))}</select></label>`).join('')}</div><div class="planner-timing-grid">${[['founderReadyDay','Stock ready, day'],['breedingAgeDays','Breeding age, days'],['gestationDays','Gestation, days'],['weaningAgeDays','Weaning age, days']].map(([key,label])=>`<label>${label}<input type="number" min="0" max="365" value="${esc(state.timing[key])}" data-planner-field="design-timing" data-key="${key}"></label>`).join('')}</div></div></details>`;}
+  function strategyInput(){
+    if(state.scenario.loci.length>1&&state.scenario.independentAssortment!==true)throw new Error('Confirm independent assortment before combining multiple loci.');
+    const loci=state.scenario.loci.map(locus=>{if(targetCopies(locus)==='advanced')throw new Error('Choose heterozygous or homozygous for each target. Advanced allele combinations remain available in Manual cross.');const variant=targetVariant(locus);if(!locus.alleles.includes('+')||!variant)throw new Error('Target design needs a wild-type (+) and one variant allele at each locus. Use Manual cross for other alleles.');const catalog=state.catalogue.find(entry=>entry.id===locus.id),sameDefinition=catalog&&canonicalLocusName(catalog)===canonicalLocusName(locus)&&['kind','chromosome'].every(key=>catalog[key]===locus[key])&&catalog.alleles.length===locus.alleles.length&&catalog.alleles.every(allele=>locus.alleles.includes(allele)),selected=sameDefinition?catalogueStrains([catalog]).find(entry=>!entry.allele||entry.allele===variant):null,reference=selected?getStrainRegistry(data()).find(row=>canonicalLocusName(row)===canonicalLocusName(selected)):null;return {...locus,alleles:['+',variant],...(reference?.stockReference?{stockReference:reference.stockReference}:{})};});
+    return {loci,targets:clone(state.scenario.targets),sex:state.scenario.sex,desiredCount:state.scenario.desiredCount,confidence:state.scenario.confidence,litterSize:state.scenario.litterSize,independentAssortment:state.scenario.independentAssortment,founders:{copiesByLocus:Object.fromEntries(loci.map(locus=>[locus.id,state.founderCopies[locus.id]??1])),wildTypeAvailable:state.wildTypeAvailable},timing:clone(state.timing)};
+  }
+  function virtualGenotype(parent){const calls=parent?.calls||{};return state.scenario.loci.map(locus=>{const value=calls[locus.id],alleles=Array.isArray(value)?value:value?.alleles;return `<span><b>${esc(designLocusName(locus))}</b> ${esc(alleles?.join(' / ')||'Unknown')}</span>`;}).join('');}
+  function strategySources(sources){return Array.isArray(sources)?`<ul class="planner-source-links">${sources.flatMap(source=>{try{const url=new URL(source.url);return url.protocol==='https:'&&!url.username&&!url.password?[`<li><a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">${esc(source.label||'Source')}</a></li>`]:[];}catch{return [];}}).join('')}</ul>`:'';}
+  function lineageChart(route){
+    const rows=(route.pedigree?.nodes||[]).filter(node=>node&&typeof node.id==='string').slice(0,64),groups=new Map(),positions=new Map(),boxWidth=216,gap=72,margin=18,top=35,lineHeight=14,boxHeight=43+state.scenario.loci.length*lineHeight;
+    for(const node of rows){const generation=Number.isSafeInteger(node.generation)&&node.generation>=0&&node.generation<=12?node.generation:0;if(!groups.has(generation))groups.set(generation,[]);groups.get(generation).push(node);}
+    const generations=[...groups.keys()].sort((a,b)=>a-b),maxRows=Math.max(1,...[...groups.values()].map(nodes=>nodes.length)),width=margin*2+generations.length*boxWidth+Math.max(0,generations.length-1)*gap,height=top+maxRows*(boxHeight+18),suffix=String(route.id).replace(/[^a-z0-9_-]/gi,'');
+    for(const [column,generation]of generations.entries())for(const [row,node]of groups.get(generation).entries())positions.set(node.id,{x:margin+column*(boxWidth+gap),y:top+row*(boxHeight+18),node});
+    const short=(value,max=29)=>{const text=String(value??'');return text.length>max?text.slice(0,max-1)+'…':text;};
+    const edges=(route.pedigree?.edges||[]).filter(edge=>positions.has(edge.from)&&positions.has(edge.to)&&['sire','dam'].includes(edge.role)).map(edge=>{const a=positions.get(edge.from),b=positions.get(edge.to),offset=edge.role==='sire'?-7:7,x1=a.x+boxWidth,y1=a.y+boxHeight/2+offset,x2=b.x,y2=b.y+boxHeight/2+offset,mid=(x1+x2)/2;return `<path class="planner-lineage-edge is-${edge.role}" d="M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}" marker-end="url(#planner-lineage-${edge.role}-${suffix})"><title>${esc(edge.role==='sire'?'Sire selection':'Dam selection')}: ${esc(edge.from)} → ${esc(edge.to)}</title></path>`;}).join('');
+    const nodes=[...positions.values()].map(({x,y,node})=>`<g class="planner-lineage-node" data-lineage-node="${esc(node.id)}"><title>${esc(node.label||node.id)} · Hypothetical genotype cohort</title><rect x="${x}" y="${y}" width="${boxWidth}" height="${boxHeight}" rx="7"/><text x="${x+10}" y="${y+17}" class="planner-lineage-label">${esc(short(node.label||node.id))}</text>${state.scenario.loci.map((locus,index)=>{const value=node.calls?.[locus.id],alleles=Array.isArray(value)?value:value?.alleles;return `<text x="${x+10}" y="${y+35+index*lineHeight}" class="planner-lineage-call"><title>${esc(designLocusName(locus))}: ${esc(alleles?.join(' / ')||'Unknown')}</title>${esc(short(designLocusName(locus),18))}: ${esc(short(alleles?.join(' / ')||'Unknown',16))}</text>`;}).join('')}</g>`).join('');
+    return `<details class="planner-virtual-pedigree" open><summary>Virtual pedigree</summary><p class="small muted">Each box is a hypothetical genotype cohort. Sire and dam selections are distinct animals.</p><div class="planner-lineage-legend"><span class="is-sire">Sire</span><span class="is-dam">Dam</span></div><div class="planner-lineage-scroll"><svg class="planner-lineage-svg" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Virtual breeding lineage, hypothetical genotype cohorts"><defs>${['sire','dam'].map(role=>`<marker id="planner-lineage-${role}-${suffix}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="planner-lineage-arrow is-${role}"/></marker>`).join('')}</defs>${generations.map((generation,column)=>`<text x="${margin+column*(boxWidth+gap)}" y="18" class="planner-lineage-generation">${generation===0?'Starting stocks':`G${generation}`}</text>`).join('')}${edges}${nodes}</svg></div></details>`;
+  }
+  function strategyHTML(){
+    const strategy=state.strategy;if(!strategy)return '';if(strategy.errors?.length)return `<div class="planner-strategy-results">${list(strategy.criticalWarnings)}${list(strategy.errors,'error')}${strategySources(strategy.sources)}</div>`;
+    const routes=strategy.routes||[],route=routes.find(item=>item.id===state.strategyRoute)||routes.find(item=>item.id===strategy.fastestRouteId)||routes[0],ideal=strategy.idealCrosses||[],chosen=ideal[Math.max(0,Math.min(ideal.length-1,state.idealIndex||0))],reciprocal=ideal.find(cross=>cross.id===chosen?.reciprocalId),visibleIdeal=[chosen,...(reciprocal&&reciprocal!==chosen?[reciprocal]:[])].filter(Boolean);
+    return `<section class="planner-strategy-results" aria-live="polite">${list(strategy.criticalWarnings)}${strategy.warnings?.length?`<p class="small muted">${esc(strategy.warnings[0])}</p>`:''}<section class="panel"><div class="panel-head"><h3>Virtual parent pairs</h3>${ideal.length>1?`<select data-planner-field="strategy-ideal" aria-label="Virtual parent pair">${ideal.map((cross,index)=>option(String(index),`Pair ${index+1}${cross.reciprocalId?' · reciprocal available':''}`,String(state.idealIndex||0))).join('')}</select>`:'<span class="small muted">Suggested genotypes</span>'}</div><div class="panel-body planner-ideal-grid">${visibleIdeal.map(cross=>{const prediction=cross.prediction||{};return `<article class="planner-ideal-pair"><div><strong>Virtual sire</strong><div class="planner-virtual-genotype">${virtualGenotype(cross.sire)}</div></div><div><strong>Virtual dam</strong><div class="planner-virtual-genotype">${virtualGenotype(cross.dam)}</div></div><div class="planner-ideal-summary"><b>${pct(prediction.targetProbability)}</b> target · ${number(prediction.expectedConceptions??prediction.expectedPups)} conceptions, mean</div>${button('use-ideal','Load in Manual cross',`data-index="${ideal.indexOf(cross)}"`)}</article>`;}).join('')}</div></section>${route?`<section class="panel"><div class="panel-head"><h3>Breeding route</h3>${routes.length>1?`<select data-planner-field="strategy-route" aria-label="Breeding route">${routes.map(item=>option(item.id,item.label||item.id,route.id)).join('')}</select>`:''}</div><div class="panel-body"><div class="planner-strategy-stats"><div><span>Generations</span><strong>${esc(route.generations)}</strong></div><div><span>Modeled birth</span><strong>${route.targetBirthDay==null?'Not estimated':`Day ${number(route.targetBirthDay)}`}</strong></div><div><span>Modeled weaning</span><strong>${strategy.targetAdultViable===false?'No viable adult route':route.targetWeanDay==null?'Not estimated':`Day ${number(route.targetWeanDay)}`}</strong></div><div><span>Final cross target</span><strong>${pct(route.prediction?.targetProbability)}</strong></div></div><div class="table-scroll"><table class="planner-route-table"><thead><tr><th>Generation</th><th>Virtual sire</th><th>Virtual dam</th><th>Select offspring</th><th>Probability</th><th>Born / weaned</th></tr></thead><tbody>${(route.steps||[]).map(step=>`<tr><td>${esc(step.label||`G${step.generation}`)}${step.crossType?`<div class="small muted">${esc({founder_cross:'Founder cross',backcross:'Backcross',intercross:'Intercross',intermediate_cross:'Intermediate cross'}[step.crossType]||'')}</div>`:''}</td><td><span class="small muted">${esc(step.sireId)}</span><div class="planner-virtual-genotype">${virtualGenotype(step.sire)}</div></td><td><span class="small muted">${esc(step.damId)}</span><div class="planner-virtual-genotype">${virtualGenotype(step.dam)}</div></td><td><span class="small muted">${esc(step.id)}</span><div class="planner-virtual-genotype">${virtualGenotype(step.offspring)}</div></td><td>${pct(step.genotypeProbability??step.probability)}</td><td>Day ${number(step.birthDay)} / ${step.weanDay==null?'Not estimated':number(step.weanDay)}</td></tr>`).join('')}</tbody></table></div>${route.generations>1&&route.pedigree?lineageChart(route):''}<p class="small muted">Conditional timing if viable. Genotyping, fertility and breeder availability can add time. Conception genotypes do not predict liveborn yield.</p></div></section>`:''}<details class="compact-details"><summary>Assumptions &amp; sources</summary>${list(strategy.assumptions,'')} ${strategy.warnings?.length>1?list(strategy.warnings.slice(1)):''}${strategySources(strategy.sources)}</details></section>`;
+  }
+  function designHTML(){return `${targetBoard()}${catalogue()}${planningInputs()}${designAssumptions()}<div class="settings-actions">${button('design','Design breeding route','', 'primary')}${button('manual','Manual cross')}</div>${strategyHTML()}`;}
+
   function resultHTML() {
     const result=state.result;if(!result)return '';
     if(result.errors.length)return list(result.errors,'error');
@@ -187,8 +223,8 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     return `<details class="panel planner-help"><summary>Planner help and scientific limits</summary><div class="panel-body"><p>This tool models diploid autosomal Mendelian segregation. Multiple loci require an explicit independent-assortment assumption; linked loci, sex-linked inheritance, copy number and recombination phase are not modeled. Keep alternative alleles at the same insertion locus together.</p><p>Source suggestions and hypothetical offspring remain inferred until reviewed. Genotype does not establish Cre recombination, reporter expression, viability, fertility or experimental suitability. Expected pups are a mean; confidence counts use a binomial model. Litter estimates use a nominal size and do not predict pregnancies or timing.</p><p>Calculating and loading plans changes no animals. Saving reviewed genotypes updates only the structured profile; saving a plan creates a planning record.</p><p><a href="https://resources.jax.org/husbandry/strategies-for-creating-complex-breeding-schemes" target="_blank" rel="noopener noreferrer">JAX: complex breeding schemes</a> · <a href="https://www.jax.org/news-and-insights/jax-blog/2012/november/breeding-strategies-for-tissue-specific-knockout-mice" target="_blank" rel="noopener noreferrer">JAX: Cre-lox breeding considerations</a></p></div></details>`;
   }
   function paint() {
-    const tabs=[['cross','Cross planner'],['candidates','Colony candidates'],['plans','Saved plans'],['genotypes','Genotypes']];
-    container.innerHTML=`<div class="breeding-planner"${state.busy?' aria-busy="true"':''}><div class="planner-tabs archive-tabs" role="tablist" aria-label="Planning">${tabs.map(([value,label])=>`<button type="button" role="tab" aria-selected="${state.tab===value}" class="${state.tab===value?'active':''}" data-planner-action="tab" data-tab="${value}">${label}</button>`).join('')}</div>${list(state.error?[state.error]:[],'error')}${state.notice?`<p class="banner" role="status">${esc(state.notice)}</p>`:''}${list(state.sourceWarnings)}${state.illustrative?'<p class="banner">Illustrative example · no colony parents assumed. Choose colony loci before recording real genotype calls.</p>':''}<div role="tabpanel">${({cross:crossHTML,candidates:candidatesHTML,plans:plansHTML,genotypes:genotypesHTML}[state.tab]||crossHTML)()}</div>${helpHTML()}</div>`;
+    const tabs=[['design','Target designer'],['cross','Manual cross'],['candidates','Colony candidates'],['plans','Saved plans'],['genotypes','Genotypes']];
+    container.innerHTML=`<div class="breeding-planner"${state.busy?' aria-busy="true"':''}><div class="planner-tabs archive-tabs" role="tablist" aria-label="Planning">${tabs.map(([value,label])=>`<button type="button" role="tab" aria-selected="${state.tab===value}" class="${state.tab===value?'active':''}" data-planner-action="tab" data-tab="${value}">${label}</button>`).join('')}</div>${list(state.error?[state.error]:[],'error')}${state.notice?`<p class="banner" role="status">${esc(state.notice)}</p>`:''}${list(state.sourceWarnings)}${state.illustrative?'<p class="banner">Illustrative example · no colony parents assumed. Choose colony loci before recording real genotype calls.</p>':''}<div role="tabpanel">${({design:designHTML,cross:crossHTML,candidates:candidatesHTML,plans:plansHTML,genotypes:genotypesHTML}[state.tab]||designHTML)()}</div>${helpHTML()}</div>`;
     const catalogueElement=container.querySelector?.('[data-planner-catalogue]');if(catalogueElement)catalogueElement.ontoggle=event=>{state.catalogueOpen=event.target.open};
     if(state.busy)container.querySelectorAll?.('button,input,select,textarea').forEach(node=>node.disabled=true);
   }
@@ -201,14 +237,14 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   function addLocus(locus) {
     if(state.scenario.loci.length>=6)throw new Error('A cross supports at most six loci. Remove a locus first.');
     if(state.scenario.loci.some(row=>row.id===locus.id))throw new Error('That locus is already in this cross.');
-    state.scenario.loci.push(locusFields(locus));state.scenario.targets[locus.id]={mode:'any'};
+    state.scenario.loci.push(locusFields(locus));const variant=locus.alleles.find(allele=>allele!=='+');state.scenario.targets[locus.id]=state.tab==='design'&&locus.alleles.includes('+')&&variant?{mode:'exact',alleles:['+',variant]}:{mode:'any'};
     for(const role of ['sire','dam'])state.scenario[role].calls[locus.id]=unknown();
     state.illustrative=false;invalidate();
   }
   function removeLocus(id) {
     state.scenario.loci=state.scenario.loci.filter(row=>row.id!==id);
     for(const role of ['sire','dam'])delete state.scenario[role].calls[id];
-    delete state.scenario.targets[id];state.sourceWarnings=[];invalidate();
+    delete state.scenario.targets[id];delete state.founderCopies[id];state.sourceWarnings=[];invalidate();
   }
   function applySuggestions(id,targetCalls) {
     const record=mouse(id);if(!record)throw new Error('Choose a mouse first.');
@@ -246,9 +282,16 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     const field=target.dataset?.plannerField;if(!field)return;
     const meta=target.dataset,value=target.value;
     if(field==='plan-name'){state.planName=value;return}
+    if(field==='strategy-route'){state.strategyRoute=value;if(repaint)paint();return}
+    if(field==='strategy-ideal'){state.idealIndex=Number(value);if(repaint)paint();return}
     if(field==='profile-notes'){if(canEdit())state.profileNotes=value;return}
     if(field==='candidate-search'){state.candidateSearch=value;state.ranking=null;container.querySelector?.('[data-planner-ranking]')?.remove();if(repaint)paint();return}
-    if(field==='parent'){selectParent(meta.role,value);state.sourceWarnings=[]}
+    if(field==='design-copies'){const locus=state.scenario.loci.find(row=>row.id===meta.locus);if(locus&&['heterozygous','homozygous'].includes(value))setDesignTarget(locus,targetVariant(locus),value)}
+    else if(field==='design-allele'){const locus=state.scenario.loci.find(row=>row.id===meta.locus);if(locus)setDesignTarget(locus,value,targetCopies(locus)==='homozygous'?'homozygous':'heterozygous')}
+    else if(field==='founder-wildtype'){state.wildTypeAvailable=Boolean(target.checked);invalidate()}
+    else if(field==='founder-copies'){state.founderCopies[meta.locus]=Number(value);invalidate()}
+    else if(field==='design-timing'){state.timing[meta.key]=Number(value);invalidate()}
+    else if(field==='parent'){selectParent(meta.role,value);state.sourceWarnings=[]}
     else if(field==='profile-mouse'){loadProfile(value);state.error='';state.notice=''}
     else if(field==='independent'){state.scenario.independentAssortment=Boolean(target.checked);invalidate()}
     else if(field==='config'){state.scenario[meta.key]=meta.key==='sex'?value:Number(value);invalidate()}
@@ -272,8 +315,8 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     }
     if(repaint)paint();
   }
-  container.oninput=event=>{const field=event.target.dataset?.plannerField,key=event.target.dataset?.key;if(['parent','profile-mouse','independent','call','target'].includes(field)||(field==='config'&&['sex','confidence'].includes(key))||(field==='locus'&&['kind','chromosome'].includes(key)))return;update(event.target,false)};
-  container.onchange=event=>update(event.target,true);
+  container.oninput=event=>{const field=event.target.dataset?.plannerField,key=event.target.dataset?.key;if(['parent','profile-mouse','independent','call','target','design-copies','design-allele','founder-copies','founder-wildtype','strategy-route','strategy-ideal'].includes(field)||(field==='config'&&['sex','confidence'].includes(key))||(field==='locus'&&['kind','chromosome'].includes(key)))return;update(event.target,false)};
+  container.onchange=event=>{try{update(event.target,true)}catch(error){state.error=error?.message||'Review the selected target.';paint()}};
   container.onclick=async event=>{
     const target=event.target.closest('[data-planner-action]');if(!target||target.disabled||state.busy||state.historyLoading)return;
     const meta=target.dataset,action=meta.plannerAction,actionHooks=api();state.error='';state.notice='';
@@ -283,6 +326,9 @@ export function renderBreedingPlanner(container,dataset,hooks) {
       else if(action==='tab'){state.tab=meta.tab;state.sourceWarnings=[]}
       else if(action==='open-mouse'){api().openMouse?.(meta.id);return}
       else if(action==='calculate')state.result=checkedPrediction(state.scenario);
+      else if(action==='manual')state.tab='cross';
+      else if(action==='design'){if(namingErrors(state.scenario).length)throw new Error(namingErrors(state.scenario).join(' '));state.strategy=designBreedingStrategy(strategyInput());state.idealIndex=0;state.strategyRoute=state.strategy.fastestRouteId||'';}
+      else if(action==='use-ideal'){const cross=state.strategy?.idealCrosses?.[Number(meta.index)];if(!cross)throw new Error('Design the breeding route again.');const parents=Object.fromEntries(['sire','dam'].map(role=>[role,{sex:role==='sire'?'Male':'Female',calls:clone(cross[role].calls)}]));invalidate();Object.assign(state.scenario,parents);state.tab='cross';state.illustrative=false;state.result=checkedPrediction(state.scenario);state.notice='Virtual parent genotypes loaded. No colony animal was selected or changed.';}
       else if(action==='add-locus')addLocus({id:'locus-'+crypto.randomUUID(),name:'New locus',kind:'other',chromosome:'unknown',alleles:['+','variant']});
       else if(action==='catalogue-locus'){
         const locus=state.catalogue.find(row=>row.id===meta.locus);
@@ -293,13 +339,13 @@ export function renderBreedingPlanner(container,dataset,hooks) {
           else{
             if(locus.reviewRequired)throw new Error(locus.reviewWarning);
             if(!state.scenario.loci.some(row=>row.id===locus.id))addLocus(locus);
-            if(meta.allele){const selected=state.scenario.loci.find(row=>row.id===locus.id);if(!selected?.alleles.includes(meta.allele))throw new Error('Review the saved Rosa26 allele definition before selecting this strain.');state.scenario.targets[locus.id]={mode:'carrier',allele:meta.allele};invalidate();state.notice=`${meta.allele} selected. Ai32 and Ai96 are separate strains at one Rosa26 locus. To target both, choose Exact genotype: Ai32 / Ai96.`;}
+            if(meta.allele){const selected=state.scenario.loci.find(row=>row.id===locus.id);if(!selected?.alleles.includes(meta.allele))throw new Error('Review the saved Rosa26 allele definition before selecting this strain.');state.scenario.targets[locus.id]=state.tab==='design'?{mode:'exact',alleles:['+',meta.allele]}:{mode:'carrier',allele:meta.allele};invalidate();state.notice=state.tab==='design'?`${meta.allele} selected.`:`${meta.allele} selected. Ai32 and Ai96 are separate strains at one Rosa26 locus. To target both, choose Exact genotype: Ai32 / Ai96.`;}
           }
         }
       }
       else if(action==='remove-locus')removeLocus(meta.locus);
       else if(action==='clear-loci'){state.scenario.loci=[];state.scenario.targets={};for(const role of ['sire','dam'])state.scenario[role].calls={};state.illustrative=false;invalidate()}
-      else if(action==='example'){state.scenario=exampleScenario();state.illustrative=true;state.sourceWarnings=[];invalidate()}
+      else if(action==='example'){state.scenario=exampleScenario();if(state.tab==='design')state.scenario.targets=Object.fromEntries(state.scenario.loci.map(locus=>[locus.id,{mode:'exact',alleles:['+',locus.alleles[1]]}]));state.illustrative=true;state.sourceWarnings=[];invalidate()}
       else if(action==='negative-control'){const locus=state.scenario.loci.find(row=>row.id===meta.locus);if(locus?.kind==='cre'&&locus.alleles.includes('+')){state.scenario.targets[locus.id]={mode:'exact',alleles:['+','+']};invalidate()}}
       else if(action==='source-parent'){invalidate();applySuggestions(state.scenario[meta.role].id,state.scenario[meta.role].calls)}
       else if(action==='source-profile'){if(!canEdit())throw new Error('Edit access is required to review genotypes.');applySuggestions(state.profileId,state.profileCalls)}

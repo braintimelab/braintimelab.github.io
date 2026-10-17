@@ -53,7 +53,7 @@ test('Planning reuses confirmed historical F profiles without rewriting source, 
  const hooks={canEdit:()=>true,isCloud:()=>false,validate:validateRecord,save:async next=>{writes++;data=next;renderBreedingPlanner(container,data,hooks)}};
  const click=async(action,meta={})=>container.onclick({target:{closest:()=>({disabled:false,dataset:{plannerAction:action,...meta}})}});
  const change=(field,value,meta={})=>container.onchange({target:{value,dataset:{plannerField:field,...meta}}});
- renderBreedingPlanner(container,data,hooks);await click('catalogue-locus',{locus:id});change('parent','10000',{role:'sire'});change('parent','20000',{role:'dam'});await click('calculate');
+ renderBreedingPlanner(container,data,hooks);await click('tab',{tab:'cross'});await click('catalogue-locus',{locus:id});change('parent','10000',{role:'sire'});change('parent','20000',{role:'dam'});await click('calculate');
  assert.match(container.innerHTML,/Target probability/);assert.doesNotMatch(container.innerHTML,/saved locus definition differs|genotype evidence is unknown/);assert.equal((container.innerHTML.match(/<h3>Locus \d+<\/h3>/g)||[]).length,1);
  container.oninput({target:{value:'Inducible F cross',dataset:{plannerField:'plan-name'}}});await click('save-plan');assert.equal(writes,1);
  const saved=data.tables.husbandry_events.at(-1).breeding_plan.scenario;assert.equal(saved.loci[0].id,id);assert.equal(saved.loci[0].name,FOXJ1_STRAIN_NAME);assert.deepEqual(saved.loci[0].alleles,['+',oldName]);

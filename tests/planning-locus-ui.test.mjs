@@ -18,6 +18,7 @@ async function harness(tables={},overrides={}){
   const saves=[];
   const hooks={canEdit:()=>true,isCloud:()=>false,validate:validateRecord,save:async next=>{dataset=structuredClone(next);saves.push(dataset);renderBreedingPlanner(container,dataset,hooks)},...overrides};
   renderBreedingPlanner(container,dataset,hooks);
+  await container.onclick({target:{closest:()=>({disabled:false,dataset:{plannerAction:'tab',tab:'cross'}})}});
   return {container,saves,hooks,get dataset(){return dataset},
     async click(action,meta={}){await container.onclick({target:{closest:()=>({disabled:false,dataset:{plannerAction:action,...meta}})}})},
     change(field,value,meta={}){container.onchange({target:{value,checked:Boolean(value),dataset:{plannerField:field,...meta}}})},

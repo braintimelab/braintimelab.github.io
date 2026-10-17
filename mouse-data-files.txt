@@ -12,6 +12,8 @@ brainbot-review.js
 brainbot.js
 breeding-options.js
 breeding-planner.js
+breeding-guidance.js
+breeding-strategy.js
 breeding-summary.js
 cage-badges.js
 cage-entrainment.js
