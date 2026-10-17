@@ -12,6 +12,7 @@ brainbot-review.js
 brainbot.js
 breeding-options.js
 breeding-planner.js
+breeding-presets.js
 breeding-guidance.js
 breeding-strategy.js
 breeding-summary.js

@@ -43,3 +43,11 @@
 .breeding-planner .planner-lineage-legend span::before{content:"";display:inline-block;width:24px;margin:0 5px 3px 0;border-top:2px solid var(--blue)}
 .breeding-planner .planner-lineage-legend .is-dam::before{border-color:var(--muted);border-top-style:dashed}
 @media(max-width:650px){.breeding-planner .planner-target-row{grid-template-columns:minmax(110px,1fr) minmax(125px,1fr) 30px;gap:7px}.breeding-planner .planner-target-row>strong{grid-column:1}.breeding-planner .planner-target-row select[data-planner-field="design-copies"]{grid-column:2;grid-row:auto}.breeding-planner .planner-target-row>.button{grid-column:3;grid-row:1/3}.breeding-planner .planner-target-row>.small,.breeding-planner .planner-target-row select[data-planner-field="design-allele"]{grid-column:1}.breeding-planner .planner-target-pair{grid-column:2}.breeding-planner .planner-ideal-pair{gap:9px;padding:10px}.breeding-planner .planner-target-board .panel-body{padding:11px}}
+.breeding-planner .planner-quick-plans .panel-head{padding:11px 14px}
+.breeding-planner .planner-quick-plans h2{font-size:15px}
+.breeding-planner .planner-quick-plans table{font-size:11px;white-space:nowrap;margin:0}
+.breeding-planner .planner-quick-plans th,.breeding-planner .planner-quick-plans td{padding:7px 10px;vertical-align:middle}
+.breeding-planner .planner-quick-plans .button{font-size:12px;min-height:28px;padding:4px 9px}
+.breeding-planner .planner-quick-plans .button[aria-pressed="true"]{background:var(--blue-bg);border-color:var(--blue-line)}
+.breeding-planner .planner-quick-note{font-size:10px;line-height:1.4;margin:0;padding:8px 12px}
+@media(max-width:650px){.breeding-planner .planner-quick-plans th,.breeding-planner .planner-quick-plans td{padding:6px 8px}.breeding-planner .planner-quick-plans .button{min-height:30px}}
