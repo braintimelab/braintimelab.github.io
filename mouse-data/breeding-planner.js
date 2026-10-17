@@ -157,11 +157,16 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     const target=state.scenario.targets[entry.id];
     return target?.mode==='carrier'&&target.allele===entry.allele||target?.mode==='exact'&&target.alleles?.includes(entry.allele);
   }
+  function targetPair(locus){const target=state.scenario.targets[locus.id];return target?.mode==='exact'&&target.alleles?.length===2&&target.alleles.every(allele=>locus.alleles.includes(allele))?[...target.alleles]:['+','+'];}
+  function targetCopyButtons(entry){
+    const locus=state.scenario.loci.find(row=>row.id===entry.id)||entry,variant=entry.allele||targetVariant(locus),pair=targetPair(locus),present=state.scenario.loci.some(row=>row.id===entry.id),name=canonicalLocusName(entry);
+    return `<div class="planner-copy-toggles" role="group" aria-label="${esc(name)} target alleles">${[0,1].map(copy=>{const active=pair[copy]===variant,disabled=!active&&(entry.reviewRequired||!locus.alleles.includes('+')||!variant||!locus.alleles.includes(variant)||(!present&&state.scenario.loci.length>=6));return button('target-copy',String(copy+1),`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''} data-copy="${copy}" aria-label="${esc(name)} target allele ${copy+1}" aria-pressed="${active}"${disabled?' disabled':''}`);}).join('')}</div>`;
+  }
   function catalogue() {
-    const entries=catalogueStrains(state.catalogue);
-    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">Choose a strain, then review its allele calls.</p><div class="settings-actions">${historyDeferred()?button('load-source-history',state.historyLoading?'Loading history…':state.historyReloadRequired?'Reload page':'Load source history',state.historyLoading?'disabled':''):''}${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}<a class="button secondary" href="#strains">Strain details</a></div>${entries.length?`<div class="planner-strain-grid">${entries.map(entry=>{
+    const entries=catalogueStrains(state.catalogue),targetSelection=state.tab==='design'||state.tab==='cross';
+    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">${targetSelection?'Target copies: one selected = heterozygous · both = homozygous.':'Choose a strain, then review its allele calls.'}</p><div class="settings-actions">${historyDeferred()?button('load-source-history',state.historyLoading?'Loading history…':state.historyReloadRequired?'Reload page':'Load source history',state.historyLoading?'disabled':''):''}${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}<a class="button secondary" href="#strains">Strain details</a></div>${entries.length?`<div class="planner-strain-grid">${entries.map(entry=>{
       const added=catalogueAdded(entry),locusPresent=state.scenario.loci.some(row=>row.id===entry.id),disabled=!added&&(entry.reviewRequired||(!locusPresent&&state.scenario.loci.length>=6));
-      return `<article class="planner-strain-card${added?' is-added':''}"><div class="planner-strain-summary"><strong>${esc(canonicalLocusName(entry))}</strong>${entry.locusName?'<span class="small muted">Shared Rosa26 locus</span>':''}${entry.reviewWarning?`<p class="small amber">${esc(entry.reviewWarning)}</p>`:''}</div>${button('catalogue-locus',added?'Already added':entry.reviewRequired?'Review needed':'Add locus',`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''} aria-label="${esc((added?'Remove ':'Add ')+canonicalLocusName(entry)+(added?' from cross':' to cross'))}" aria-pressed="${added}"${disabled?' disabled':''}`)}</article>`;
+      return `<article class="planner-strain-card${added?' is-added':''}"><div class="planner-strain-summary"><strong>${esc(canonicalLocusName(entry))}</strong>${entry.locusName?'<span class="small muted">Shared Rosa26 locus</span>':''}${entry.reviewWarning?`<p class="small amber">${esc(entry.reviewWarning)}</p>`:''}</div>${targetSelection?targetCopyButtons(entry):button('catalogue-locus',added?'Already added':entry.reviewRequired?'Review needed':'Add locus',`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''} aria-label="${esc((added?'Remove ':'Add ')+canonicalLocusName(entry)+(added?' from cross':' to cross'))}" aria-pressed="${added}"${disabled?' disabled':''}`)}</article>`;
     }).join('')}</div>`:historyDeferred()?'<p class="muted">Historical catalogue is not loaded.</p>':'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
   }
 
@@ -372,6 +377,18 @@ export function renderBreedingPlanner(container,dataset,hooks) {
       else if(action==='design'){if(namingErrors(state.scenario).length)throw new Error(namingErrors(state.scenario).join(' '));const result=await designRoute(strategyInput(),{full:false});if(!result)return;state.strategy=result;state.idealIndex=0;state.strategyRoute=state.strategy.fastestRouteId||'';}
       else if(action==='use-ideal'){const cross=state.strategy?.idealCrosses?.[Number(meta.index)];if(!cross)throw new Error('Design the breeding route again.');const parents=Object.fromEntries(['sire','dam'].map(role=>[role,{sex:role==='sire'?'Male':'Female',calls:clone(cross[role].calls)}]));invalidate();Object.assign(state.scenario,parents);if(state.scenario.loci.length>1)state.scenario.independentAssortment=true;state.tab='cross';state.illustrative=false;state.commonFamilyCross=false;state.result=checkedPrediction(state.scenario);state.notice='Virtual parent genotypes loaded. No colony animal was selected or changed.';}
       else if(action==='add-locus')addLocus({id:'locus-'+crypto.randomUUID(),name:'New locus',kind:'other',chromosome:'unknown',alleles:['+','variant']});
+      else if(action==='target-copy'){
+        if(!['design','cross'].includes(state.tab)||!['0','1'].includes(meta.copy))throw new Error('Choose a target allele.');
+        const source=state.catalogue.find(row=>row.id===meta.locus),entry=source&&(meta.allele?catalogueStrains([source]).find(row=>row.allele===meta.allele):source);
+        if(!entry)throw new Error('Choose a strain present in the source catalogue.');
+        const current=state.scenario.loci.find(row=>row.id===source.id),locus=current||source,variant=entry.allele||targetVariant(locus),pair=targetPair(locus),copy=Number(meta.copy),active=pair[copy]===variant;
+        if(!active&&entry.reviewRequired)throw new Error(entry.reviewWarning||'Review the strain definition first.');
+        if(!locus.alleles.includes('+')||!variant||variant==='+'||!locus.alleles.includes(variant))throw new Error('Review the declared target alleles in Manual cross.');
+        pair[copy]=active?'+':variant;
+        if(pair.every(allele=>allele==='+'))removeLocus(locus.id);
+        else{if(!current)addLocus(source);state.scenario.targets[locus.id]={mode:'exact',alleles:pair};state.illustrative=false;invalidate();}
+        state.commonFamilyCross=false;
+      }
       else if(action==='catalogue-locus'){
         const locus=state.catalogue.find(row=>row.id===meta.locus);
         if(locus){

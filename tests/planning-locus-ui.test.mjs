@@ -28,15 +28,26 @@ async function harness(tables={},overrides={}){
 }
 const cards=html=>[...html.matchAll(/<article class="planner-strain-card[\s\S]*?<\/article>/g)].map(match=>match[0]);
 
-test('Planning uses compact strain cards with their action below and removes visible Evidence/source excerpts',async()=>{
+test('Target designer and Manual cross show two target allele toggles below each compact strain card',async()=>{
   const h=await harness(),before=structuredClone(h.dataset);
-  assert.match(h.container.innerHTML,/planner-strain-grid/);
-  assert.ok(cards(h.container.innerHTML).length>=2);
-  for(const card of cards(h.container.innerHTML))assert.match(card,/<div class="planner-strain-summary">[\s\S]*?<\/div><button[^>]+data-planner-action="catalogue-locus"/);
+  for(const tab of ['design','cross']){
+    await h.click('tab',{tab});
+    assert.match(h.container.innerHTML,/planner-strain-grid/);
+    assert.ok(cards(h.container.innerHTML).length>=2);
+    for(const card of cards(h.container.innerHTML)){
+      const buttons=[...card.matchAll(/<button[^>]+data-planner-action="target-copy"[^>]*>[12]<\/button>/g)];
+      assert.equal(buttons.length,2);
+      assert.ok(card.indexOf('planner-strain-summary')<card.indexOf('data-planner-action="target-copy"'));
+    }
+    assert.doesNotMatch(h.container.innerHTML,/>Add locus<|>Already added<|data-planner-action="catalogue-locus"/);
+  }
   assert.doesNotMatch(h.container.innerHTML,/>Evidence<|source mentions|Strain \/ source labels|planner-source-evidence/);
-  await h.click('catalogue-locus',{locus:'bmal1'});
+  await h.click('target-copy',{locus:'bmal1',copy:'0'});
   assert.match(h.container.innerHTML,/>Call status<select/);
-  assert.match(h.container.innerHTML,/aria-label="Remove Bmal1-flox from cross" aria-pressed="true">Already added<\/button>/);
+  const bmalCard=cards(h.container.innerHTML).find(card=>card.includes('<strong>Bmal1-flox</strong>'));
+  assert.match(bmalCard,/aria-label="Bmal1-flox target allele 1"/);
+  assert.match(bmalCard,/aria-label="Bmal1-flox target allele 2"/);
+  assert.equal((bmalCard.match(/aria-pressed="true"/g)||[]).length,1);
   assert.deepEqual(h.dataset,before);assert.equal(h.saves.length,0);
 });
 
@@ -46,7 +57,8 @@ test('Already added removes the locus, both parent calls, target, loaded plan an
   await h.click('catalogue-locus',{locus:'bmal1'});
   assert.doesNotMatch(h.container.innerHTML,/planner-results|Recalculated from saved/);
   assert.equal((h.container.innerHTML.match(/<h3>Locus \d+<\/h3>/g)||[]).length,1);
-  assert.match(cards(h.container.innerHTML).find(card=>card.includes('<strong>Bmal1-flox</strong>')),/aria-pressed="false">Add locus/);
+  const bmalCard=cards(h.container.innerHTML).find(card=>card.includes('<strong>Bmal1-flox</strong>'));
+  assert.equal((bmalCard.match(/aria-pressed="false"/g)||[]).length,2);
   h.input('plan-name','Remaining Vgat cross');await h.click('save-plan');
   assert.equal(h.saves.length,1);
   const saved=h.dataset.tables.husbandry_events.at(-1).breeding_plan.scenario;
@@ -65,31 +77,43 @@ test('toggle removal and explicit Remove both invalidate calculations, and re-ad
   }
 });
 
-test('six-locus limit still permits cancellation through Already added',async()=>{
+test('six-locus limit disables new target alleles while existing target toggles remain usable',async()=>{
   const names=['AssayA','AssayB','AssayC','AssayD','AssayE','AssayF','AssayG'];
   const h=await harness({mice:[mouse('100','Male',{genotype:names.map(name=>`${name}(+/-)`).join(';'),genetic_profile:null})]});
-  for(const name of names.slice(0,6))await h.click('catalogue-locus',{locus:`locus:${name}`});
+  for(const name of names.slice(0,6))await h.click('target-copy',{locus:`locus:${name}`,copy:'0'});
   const beforeCards=cards(h.container.innerHTML);
-  assert.match(beforeCards.find(card=>card.includes('<strong>AssayG</strong>')),/ disabled>Add locus/);
+  assert.equal((beforeCards.find(card=>card.includes('<strong>AssayG</strong>')).match(/ disabled>[12]<\/button>/g)||[]).length,2);
   assert.doesNotMatch(beforeCards.find(card=>card.includes('<strong>AssayA</strong>')),/ disabled/);
-  await h.click('catalogue-locus',{locus:'locus:AssayA'});
+  await h.click('target-copy',{locus:'locus:AssayG',copy:'0'});
+  assert.match(h.container.innerHTML,/at most six loci/);
+  await h.click('target-copy',{locus:'locus:AssayA',copy:'0'});
   assert.equal((h.container.innerHTML.match(/<h3>Locus \d+<\/h3>/g)||[]).length,5);
   assert.doesNotMatch(cards(h.container.innerHTML).find(card=>card.includes('<strong>AssayG</strong>')),/ disabled/);
 });
 
 test('Ai32 and Ai96 remain separate choices at one physical Rosa26 locus and can be cancelled',async()=>{
-  const rosa=locus('rosa26','Gt(ROSA)26Sor',['+','Ai32','Ai96'],'reporter','6');
   const h=await harness({mice:[mouse('100','Male',{genotype:'Ai32(+/-)',genetic_profile:null}),mouse('200','Female',{genotype:'Ai96(+/-)',genetic_profile:null})],husbandry_events:[]});
   for(const name of ['Ai32','Ai96'])assert.match(h.container.innerHTML,new RegExp(`<strong>${name}<\\/strong>`));
-  await h.click('catalogue-locus',{locus:'rosa26',allele:'Ai32'});
-  assert.match(cards(h.container.innerHTML).find(card=>card.includes('<strong>Ai32</strong>')),/>Already added/);
-  await h.click('catalogue-locus',{locus:'rosa26',allele:'Ai96'});
+  await h.click('target-copy',{locus:'rosa26',allele:'Ai32',copy:'0'});
+  await h.click('target-copy',{locus:'rosa26',allele:'Ai96',copy:'1'});
   assert.equal((h.container.innerHTML.match(/<h3>Locus \d+<\/h3>/g)||[]).length,1);
-  assert.match(cards(h.container.innerHTML).find(card=>card.includes('<strong>Ai96</strong>')),/>Already added/);
-  h.change('target','exact',{locus:rosa.id,key:'mode'});h.change('target','Ai32',{locus:rosa.id,key:'alleles',index:'0'});h.change('target','Ai96',{locus:rosa.id,key:'alleles',index:'1'});
-  assert.equal(cards(h.container.innerHTML).filter(card=>card.includes('>Already added')).length,2);
-  await h.click('catalogue-locus',{locus:'rosa26',allele:'Ai96'});
+  for(const name of ['Ai32','Ai96'])assert.equal((cards(h.container.innerHTML).find(card=>card.includes(`<strong>${name}</strong>`)).match(/aria-pressed="true"/g)||[]).length,1);
+  await h.click('target-copy',{locus:'rosa26',allele:'Ai96',copy:'1'});
+  assert.equal((h.container.innerHTML.match(/<h3>Locus \d+<\/h3>/g)||[]).length,1);
+  assert.equal((cards(h.container.innerHTML).find(card=>card.includes('<strong>Ai32</strong>')).match(/aria-pressed="true"/g)||[]).length,1);
+  await h.click('target-copy',{locus:'rosa26',allele:'Ai32',copy:'0'});
   assert.doesNotMatch(h.container.innerHTML,/<h3>Locus \d+<\/h3>/);assert.equal(h.saves.length,0);
+});
+
+test('Genotypes retains locus configuration controls without target allele toggles',async()=>{
+  const h=await harness();await h.click('tab',{tab:'genotypes'});
+  for(const card of cards(h.container.innerHTML))assert.match(card,/<div class="planner-strain-summary">[\s\S]*?<\/div><button[^>]+data-planner-action="catalogue-locus"/);
+  assert.doesNotMatch(h.container.innerHTML,/data-planner-action="target-copy"/);
+  await h.click('catalogue-locus',{locus:'bmal1'});
+  assert.match(cards(h.container.innerHTML).find(card=>card.includes('<strong>Bmal1-flox</strong>')),/aria-pressed="true">Already added<\/button>/);
+  await h.click('catalogue-locus',{locus:'bmal1'});
+  assert.match(cards(h.container.innerHTML).find(card=>card.includes('<strong>Bmal1-flox</strong>')),/aria-pressed="false">Add locus<\/button>/);
+  assert.equal(h.saves.length,0);
 });
 
 test('source suggestions stay inferred and genotype saving preserves source provenance',async()=>{

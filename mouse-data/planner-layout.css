@@ -6,6 +6,9 @@
 .breeding-planner .planner-strain-summary>strong{font-size:13px;font-weight:600;line-height:1.35}
 .breeding-planner .planner-strain-summary p{margin:4px 0 0}
 .breeding-planner .planner-strain-card>.button{margin-top:auto;padding:6px 10px;font-size:11px;min-height:32px}
+.breeding-planner .planner-copy-toggles{display:flex;gap:6px;margin-top:auto}
+.breeding-planner .planner-copy-toggles>.button{min-width:36px;min-height:32px;padding:5px 10px;font-size:12px}
+.breeding-planner .planner-copy-toggles>.button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:white}
 @media(max-width:520px){.breeding-planner .planner-strain-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.breeding-planner .planner-strain-card{padding:10px;gap:10px}.breeding-planner .planner-strain-summary>strong{font-size:12px}}
 .breeding-planner .planner-target-board .panel-body{display:grid;gap:7px;padding:14px 16px}
 .breeding-planner .planner-target-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(90px,.7fr) minmax(140px,1fr) minmax(90px,.6fr) 32px;gap:9px;align-items:center}
