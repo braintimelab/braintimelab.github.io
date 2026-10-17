@@ -1,9 +1,9 @@
-import {clearHistoryIndex} from './history-index.js?v=98';
-import { projectLocoboxExport } from './locobox-export.js?v=98';
-import { PUBLIC_CONFIG } from './config.js?v=98';
-import { validateManagerPermissions } from './permissions.js?v=98';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=98';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=98';
+import {clearHistoryIndex} from './history-index.js?v=99';
+import { projectLocoboxExport } from './locobox-export.js?v=99';
+import { PUBLIC_CONFIG } from './config.js?v=99';
+import { validateManagerPermissions } from './permissions.js?v=99';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=99';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=99';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -956,7 +956,8 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
     if(!row||!Number.isInteger(version)||version<1)throw new Error('A move dependency is missing from the verified data. Pull again before saving.');
     if(!pendingKeys.has(key))pending.push([row,version]);
   }
-  if(!policy.source_archive_allowed&&pending.some(([r])=>r.entity_type==='archive'||feeRecord(r)))throw new Error('Both estimate and actual visibility are required to edit fees or source archives.');
+  if(!policy.source_archive_allowed&&pending.some(([r])=>r.entity_type==='archive'))throw new Error('Owner access is required to edit source archives.');
+  if(!(policy.estimate&&policy.actual&&(policy.source_archive_allowed||policy.history_allowed===true))&&pending.some(([r])=>feeRecord(r)))throw new Error('Both estimate and actual visibility are required to edit fees.');
   const chunks=pending.filter(([r])=>isArchiveChunk(r)),atomic=pending.filter(([r])=>!isArchiveChunk(r));
   if(atomic.length>500||utf8Size({p_colony_id:configuration().colonyId,p_changes:atomic.map(([r,expected_version])=>({...r,expected_version}))})>MAX_RPC_BYTES)throw new Error('This atomic edit is too large. Split it into smaller operations.');
   // Immutable chunks can be staged before committing the manifest. A failed
@@ -1344,7 +1345,7 @@ export async function uploadHistoryIndex(index){
   return {bucket:HISTORY_BUCKET,path,sha256:digest,bytes:new TextEncoder().encode(text).length,cellCount:index.cells.length};
 }
 export async function downloadHistoryIndex(){
-  await membership();const c=configuration(),prefix=`${c.colonyId}/history`;
+  if(await membership()!=='owner')throw new Error('Only the owner can view source archives.');const c=configuration(),prefix=`${c.colonyId}/history`;
   // Immutable versions can be discovered on a new device without local config.
   let offset=0;
   while(true){

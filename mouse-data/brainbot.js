@@ -1,4 +1,4 @@
-import {MANAGER_PERMISSION_LABELS} from './permissions.js?v=98';
+import {MANAGER_PERMISSION_LABELS} from './permissions.js?v=99';
 /* Monitoring is read only unless owner management is explicitly permitted. */
 const mounts=new WeakMap(),permissionKeys=Object.keys(MANAGER_PERMISSION_LABELS);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

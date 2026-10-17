@@ -1,6 +1,6 @@
-import {evaluateBrainbotMouseReview,prepareBrainbotMouseReviewAction,buildBrainbotMouseReviewAudit,hasBrainbotReviewRelationships} from './brainbot-review.js?v=98';
-import {buildMouseReviewIssues} from './mouse-review.js?v=98';
-import {validateRecord} from './model.js?v=98';
+import {evaluateBrainbotMouseReview,prepareBrainbotMouseReviewAction,buildBrainbotMouseReviewAudit,hasBrainbotReviewRelationships} from './brainbot-review.js?v=99';
+import {buildMouseReviewIssues} from './mouse-review.js?v=99';
+import {validateRecord} from './model.js?v=99';
 
 const keys={mice:'mouse_sid',locations:'location_id',husbandry_events:'event_id'};
 const list=value=>Array.isArray(value)?value:[];

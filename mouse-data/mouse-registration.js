@@ -1,7 +1,7 @@
-import { parseCompactStrainNotation } from './mouse-summary.js?v=98';
-import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=98';
-import { getBreedingOptions } from './breeding-options.js?v=98';
-import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=98';
+import { parseCompactStrainNotation } from './mouse-summary.js?v=99';
+import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=99';
+import { getBreedingOptions } from './breeding-options.js?v=99';
+import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=99';
 
 const active=r=>r&&!r.archived&&!r.app_archived_at&&!r.history_read_only&&!r.source_historical;
 const mice=data=>data?.tables?.mice||[];
