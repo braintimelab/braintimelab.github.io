@@ -356,7 +356,7 @@ async function renderPlanner(){
  const hooks={reloadPage:()=>location.reload(),initialMouseId:plannerMouseId,initialTargetDraft:plannerTargetDraft,openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,historyDeferred:deferredHistoryTables().includes('historical_observations'),genotypeHistoryDeferred:deferredHistoryTables().includes('mouse_genes'),loadGenotypeHistory:async()=>loadHistoryTables(['mouse_genes']),isCurrent:()=>route==='planner'&&token===plannerRenderToken,
  loadSourceHistory:async()=>loadHistoryTables(['historical_observations']),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
  try{
-  if(!plannerModule){$('main').innerHTML=panel('Planning','<p role="status">Loading Planning…</p>');plannerModulePending??=import('./breeding-planner.js?v=129').then(module=>{plannerModule=module;return module;}).catch(error=>{plannerModulePending=null;throw error;});await plannerModulePending;}
+  if(!plannerModule){$('main').innerHTML=panel('Planning','<p role="status">Loading Planning…</p>');plannerModulePending??=import('./breeding-planner.js?v=130').then(module=>{plannerModule=module;return module;}).catch(error=>{plannerModulePending=null;throw error;});await plannerModulePending;}
   if(!hooks.isCurrent())return;
   plannerModule.renderBreedingPlanner($('main'),snapshot,hooks);plannerMouseId=null;plannerTargetDraft=null;
  }catch(error){if(hooks.isCurrent())$('main').innerHTML=panel('Planning','<p role="alert">Planning could not load.</p>'+button('Reload page','reload-workspace'));}
