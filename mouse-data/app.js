@@ -6,7 +6,7 @@ import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-
 import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=100';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
-import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=100';
+import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
 import * as store from './data-store.js?v=105';
 import * as model from './model.js?v=100';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=100';
