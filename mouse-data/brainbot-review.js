@@ -1,6 +1,6 @@
-import { buildMouseReviewIssues, attachMouseReviewResolution } from './mouse-review.js?v=96';
-import { cageObservations } from './cage-observations.js?v=96';
-import { validateRecord } from './model.js?v=96';
+import { buildMouseReviewIssues, attachMouseReviewResolution } from './mouse-review.js?v=97';
+import { cageObservations } from './cage-observations.js?v=97';
+import { validateRecord } from './model.js?v=97';
 
 export const BRAINBOT_REVIEW_POLICY='animal-consistency-v1';
 const list=value=>Array.isArray(value)?value:[];

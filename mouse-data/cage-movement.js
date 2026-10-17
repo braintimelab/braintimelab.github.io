@@ -1,7 +1,7 @@
 /* Pure physical cage movements. SIDs and source observations never change. */
-import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=96';
-import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=96';
-import {cageEntrainmentForCard,cageEntrainmentLinkChanges} from './cage-entrainment.js?v=96';
+import {cageSheetAnimals, cageObservations, cageCardObservation, cageSheetSourceRows, createCageObservationContext} from './cage-observations.js?v=97';
+import {resolveCageStart,cageStartLinkChanges} from './cage-start.js?v=97';
+import {cageEntrainmentForCard,cageEntrainmentLinkChanges} from './cage-entrainment.js?v=97';
 const startFields=start=>start.basis==='unknown'?{}:{start_date:start.date,cage_start:{schemaVersion:1,basis:start.basis,date:start.date,...(start.evidence.length?{evidence:structuredClone(start.evidence)}:{})}};
 const present=v=>v!==null&&v!==undefined&&v!=='';
 const active=r=>r&&!r.app_archived_at&&!r.archived;

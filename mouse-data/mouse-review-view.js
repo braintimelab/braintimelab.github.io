@@ -1,4 +1,4 @@
-import { buildMouseReviewIssues } from './mouse-review.js?v=96';
+import { buildMouseReviewIssues } from './mouse-review.js?v=97';
 
 const mounts=new WeakMap();
 let mountNumber=0;

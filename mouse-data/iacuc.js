@@ -1,5 +1,5 @@
-import {IACUC_SECTIONS,blankIacucProtocol,listIacucProtocols,protocolDateStatus,protocolAssignments,summarizeIacuc,validateIacucRecord} from './iacuc-model.js?v=96';
-import {planContinuousSampleSize,planBreedingYield,IACUC_PLANNING_REFERENCES} from './iacuc-planning.js?v=96';
+import {IACUC_SECTIONS,blankIacucProtocol,listIacucProtocols,protocolDateStatus,protocolAssignments,summarizeIacuc,validateIacucRecord} from './iacuc-model.js?v=97';
+import {planContinuousSampleSize,planBreedingYield,IACUC_PLANNING_REFERENCES} from './iacuc-planning.js?v=97';
 
 const mounts=new WeakMap();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
