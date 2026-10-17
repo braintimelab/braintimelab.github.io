@@ -78,6 +78,7 @@ strain-management.js
 strain-registry.js
 styles.css
 sw.js
+table-history.js
 user-acronyms.js
 user-management.js
 workbook-export.js
