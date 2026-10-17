@@ -11,6 +11,8 @@ import {SECTIONS,canReviewHistory,canViewHistory,visibleSections,STATUSES,labels
 
 const $=id=>document.getElementById(id), main=$('main'),PAGE=50;
 const CLASSIFICATIONS=['Antibody','Chemicals','Equipment','Optics / chamber','Plastic / Mol. bio','Surgical / animal','Consumable','Unclassified'];
+const SAFETY_ABSENT=new Set(['','unknown','unverified','none','n','no','na','n/a','無','未確認','未分類','not recorded']);
+const TOXICITY_LABELS=new Map(['Irritant','Toxic','Corrosive','Flammable','CMR','Danger','Warning','Hazard','Poison','Inflammable'].map(label=>[label.toLowerCase(),label]));
 let generation=0,viewGeneration=0,member=false,permissions={},items=[],records=new Map(),sourceRows=[],selected=null,editAction=null,importing=false,searchTimer=null,listKind=null,accessCheck=null;
 const importControls=new Map();
 const tableSorts=new Map(),recordSortCache=new Map();
@@ -18,11 +20,29 @@ let memberRows=[];
 let connectionState='checking';
 const inventoryScope=()=>section()==='safety'?'dangerous':'inventory';
 const inventorySort=()=>tableSorts.get(inventoryScope());
-function safetyLabel(payload){
+function recordedSafetyClassifications(payload){
  const classification=payload.safety?.classification,values=Array.isArray(classification)?classification:[classification];
- const absent=new Set(['','unknown','unverified','none','n','no','na','n/a','無','未確認','未分類','not recorded']);
- const known=values.filter(value=>typeof value==='string').map(value=>value.trim()).filter(value=>!absent.has(value.toLocaleLowerCase()));
- return [...new Set(known)].join(' · ')||(hazardous(payload)?'Review SDS':'');
+ return values.filter(value=>typeof value==='string').map(value=>value.trim()).filter(value=>!SAFETY_ABSENT.has(value.toLocaleLowerCase()));
+}
+function safetyLabel(payload){return [...new Set(recordedSafetyClassifications(payload))].join(' · ')||(hazardous(payload)?'Review SDS':'');}
+function toxicityClassifications(payload){
+ const labels=new Map();
+ const add=token=>{const value=token.trim(),key=value.toLocaleLowerCase();if(value&&!SAFETY_ABSENT.has(key))labels.set(key,TOXICITY_LABELS.get(key)||value);};
+ for(const classification of recordedSafetyClassifications(payload)){
+  const value=classification.replace(/(?:列管編號|管制編號|許可證字號)[^\r\n]*/g,'');let token='',depth=0;
+  for(const char of value){
+   if('（('.includes(char))depth++;else if('）)'.includes(char))depth=Math.max(0,depth-1);
+   if(!depth&&',;·|\r\n'.includes(char)){add(token);token='';}else token+=char;
+  }
+  add(token);
+ }
+ return [...labels.values()];
+}
+function filterInventory(rows,chosenFilters={},dangerous=false){return filterItems(rows,{...chosenFilters,dangerous}).filter(row=>!dangerous||!chosenFilters.toxicity||(chosenFilters.toxicity==='__unclassified'?toxicityClassifications(row.payload).length===0:toxicityClassifications(row.payload).some(label=>label.toLocaleLowerCase()===chosenFilters.toxicity)));}
+function toxicityOptions(rows){
+ const labels=new Map();let unclassified=false;
+ for(const row of filterItems(rows,{dangerous:true})){const values=toxicityClassifications(row.payload);if(!values.length)unclassified=true;for(const label of values)labels.set(label.toLocaleLowerCase(),label);}
+ return [...labels].map(([value,label])=>({value,label})).sort((a,b)=>a.label.localeCompare(b.label)).concat(unclassified?[{value:'__unclassified',label:'Unclassified'}]:[]);
 }
 function safetyCell(payload){const classification=safetyLabel(payload);return classification?`<span class="badge danger safety-label">${esc(classification)}</span>`:'<span class="muted">—</span>';}
 function inventoryValue(row,key){const p=row.payload;return ({classification:itemClassification(row),name:[itemName(row),p.cas_number||p.cas_raw,p.catalog_number],location:[p.location,p.storage],quantity:typeof p.remaining_amount==='number'?p.remaining_amount:(p.quantity_text||p.amount),status:label(p.status||'unverified'),safety:safetyLabel(p)||null})[key];}
@@ -41,7 +61,7 @@ async function sortTable(scope,key){
  else {inventoryView(section()==='safety');if(section()==='safety')await safetyRecords(viewGeneration);}
  document.querySelector(`[data-sort-scope="${scope}"][data-sort-key="${key}"]`)?.focus();
 }
-let filters={query:'',category:'',status:'',location:''},offset=0,historySource='',historyQuery='',historyOffset=0;
+let filters={query:'',category:'',status:'',location:'',toxicity:''},offset=0,historySource='',historyQuery='',historyOffset=0;
 let disposeAccessLogs=null,disposeOrders=null,refreshOrders=null,exportSession=null;
 let usagePeople=null;
 async function loadUsagePeople(){
@@ -101,7 +121,7 @@ function resetPrivate(){
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();
  tableSorts.clear();recordSortCache.clear();memberRows=[];
  setImporting(false);member=false;permissions={};items=[];records.clear();sourceRows=[];selected=null;editAction=null;importing=false;listKind=null;viewGeneration++;clearTimeout(searchTimer);
- filters={query:'',category:'',status:'',location:''};offset=0;historySource='';historyQuery='';historyOffset=0;
+ filters={query:'',category:'',status:'',location:'',toxicity:''};offset=0;historySource='';historyQuery='';historyOffset=0;
  $('editor').close();$('edit-fields').innerHTML='';$('edit-title').textContent='';$('edit-error').textContent='';$('import-file').value='';$('order-catalog-file').value='';
  $('navigation').innerHTML='';$('identity').textContent='';$('identity').hidden=true;$('sidebar-account').hidden=!store.getCloudStatus().signedIn;$('sign-out').hidden=!store.getCloudStatus().signedIn;status();main.innerHTML='<div class="empty">Checking lab access…</div>';
 }
@@ -161,12 +181,12 @@ async function render(){if(!member)return;closeExportPreview();closeOrders();clo
 async function loadInventory(){const rows=await Promise.all(['item','equipment'].map(p_kind=>collect('list',{p_kind})));return [...new Map(rows.flat().map(row=>[row.id,row])).values()];}
 async function ordersView(v){const controller=createOrdersUI({main,rpc,getPermissions:()=>permissions,isCurrent:()=>member&&v===viewGeneration&&section()==='orders',notify:status,refreshInventory:async()=>{const loaded=await loadInventory();if(v!==viewGeneration)return;items=loaded;items.forEach(r=>records.set(r.id,r));},openHistory:async()=>{closeOrders();await recordList(++viewGeneration,'orders','order');}});disposeOrders=controller.dispose;refreshOrders=controller.refresh;await controller.mount();}
 function inventoryView(dangerous=false){
- const visible=sortRows(filterItems(items,{...filters,dangerous}),inventorySort(),inventoryValue);if(offset>=visible.length)offset=0;
+ const visible=sortRows(filterInventory(items,filters,dangerous),inventorySort(),inventoryValue);if(offset>=visible.length)offset=0;
  const cats=[...new Set(items.map(itemClassification).filter(Boolean))].sort(),locations=[...new Set(items.map(r=>r.payload.location).filter(Boolean))].sort();
- main.innerHTML=stats()+`<div class="toolbar"><input id="search" type="search" aria-label="Search name, CAS, barcode or note" placeholder="Search name, CAS, barcode…" value="${esc(filters.query)}" maxlength="200"><select id="category" aria-label="Classification">${options(cats,filters.category,'All classifications')}</select><select id="location" aria-label="Location">${options(locations,filters.location,'All locations')}</select><select id="stock-status" aria-label="Stock status">${options(STATUSES,filters.status,'All stock states')}</select><button data-action="export-pdf">Export to PDF</button><button data-action="export-items">Export to XLSX</button>${permissions.can_write?'<button data-action="new-item" class="primary">＋ Item</button>':''}</div>${dangerous?'<div class="notice">Source flags and review records. Check the supplier SDS for handling requirements. An unflagged entry is not confirmation of safety.</div>':''}
+ main.innerHTML=stats()+`<div class="toolbar"><input id="search" type="search" aria-label="Search name, CAS, barcode or note" placeholder="Search name, CAS, barcode…" value="${esc(filters.query)}" maxlength="200"><select id="category" aria-label="Classification">${options(cats,filters.category,'All classifications')}</select>${dangerous?`<select id="toxicity" aria-label="Toxicity classification"><option value="">All toxicity classifications</option>${toxicityOptions(items).map(({value,label})=>`<option value="${esc(value)}" ${value===filters.toxicity?'selected':''}>${esc(label)}</option>`).join('')}</select>`:''}<select id="location" aria-label="Location">${options(locations,filters.location,'All locations')}</select><select id="stock-status" aria-label="Stock status">${options(STATUSES,filters.status,'All stock states')}</select><button data-action="export-pdf">Export to PDF</button><button data-action="export-items">Export to XLSX</button>${permissions.can_write?'<button data-action="new-item" class="primary">＋ Item</button>':''}</div>${dangerous?'<div class="notice">Source flags and review records. Check the supplier SDS for handling requirements. An unflagged entry is not confirmation of safety.</div>':''}
  <div class="table-wrap"><table><thead><tr>${headers(inventoryScope(),[['name','Reagent / identifier'],['classification','Classification'],['location','Location'],['quantity','Quantity'],['status','Status'],['safety','Safety']])}<th></th></tr></thead><tbody>${visible.slice(offset,offset+PAGE).map(r=>{const p=r.payload;return `<tr><td><button class="name-button" data-action="open" data-id="${esc(r.id)}">${esc(itemName(r))}</button><span class="secondary-line">${esc([p.category&&p.category!==itemClassification(r)?p.category:'',p.cas_number||p.cas_raw,p.catalog_number].filter(Boolean).join(' · '))}</span></td><td>${esc(itemClassification(r))}</td><td>${esc(p.location||'Not recorded')}<span class="secondary-line">${esc(p.storage||'')}</span></td><td>${esc(quantity(p))}</td><td>${badge(p.status)}</td><td>${safetyCell(p)}</td><td>${permissions.can_write&&['item','equipment'].includes(r.kind)?`<button data-action="use" data-id="${esc(r.id)}">Use</button>`:''}</td></tr>`;}).join('')||'<tr><td colspan="7">No matching items.</td></tr>'}</tbody></table></div>${pager(offset,visible.length)}${dangerous?'<section id="safety-records" class="panel"><h2>Safety records</h2><p>Loading…</p></section>':''}`;
  const search=$('search'),g=generation,v=viewGeneration;search.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{if(g!==generation||v!==viewGeneration||!member)return;filters.query=search.value;offset=0;inventoryView(dangerous);if(dangerous)void safetyRecords(viewGeneration);$('search').focus();},220);});
- for(const [id,key] of [['category','category'],['location','location'],['stock-status','status']])$(id).addEventListener('change',e=>{filters[key]=e.target.value;offset=0;inventoryView(dangerous);if(dangerous)void safetyRecords(viewGeneration);});
+ for(const [id,key] of [['category','category'],['location','location'],['stock-status','status'],...(dangerous?[['toxicity','toxicity']]:[])])$(id).addEventListener('change',e=>{filters[key]=e.target.value;offset=0;inventoryView(dangerous);if(dangerous)void safetyRecords(viewGeneration);});
 }
 async function safetyRecords(v){try{const r=await rpc('list',{p_kind:'safety',p_limit:50});if(v!==viewGeneration||!$('safety-records'))return;r.rows.forEach(x=>records.set(x.id,x));$('safety-records').innerHTML=`<div class="section-head"><h2>Safety records</h2>${permissions.can_manage_safety?'<button data-action="new-safety">＋ Review / inspection</button>':''}</div><p class="small muted">Internal preparation and evidence tracking. Official TMU submissions remain in ${link('https://labsafe.tmu.edu.tw/','LabSafe')}.</p>${r.rows.map(x=>`<div class="source-card"><button class="name-button" data-action="open" data-id="${esc(x.id)}">${esc(itemName(x))}</button><p>${esc(x.payload.summary||x.payload.notes||'')}${x.owner_only?' · Owner only':''}</p></div>`).join('')||'<p class="muted">No safety records yet.</p>'}${r.total>50?'<button data-action="all-safety">View all safety records</button>':''}`;}catch(e){if(v===viewGeneration)status(e.message,true);}}
 async function usageList(v){
@@ -256,9 +276,9 @@ async function exportRows(kind='item',format='xlsx'){
  const sortScope=kind==='item'?inventoryScope():`records:${kind}`,chosenSort=tableSorts.get(sortScope)||(kind==='usage'?{key:'date',direction:'desc'}:null);
  status('Preparing export…');
  const fresh=kind==='item'?await loadInventory():await collect('list',{p_kind:kind,p_query:chosenFilters.query});check();
- const dangerous=route==='safety',rows=sortRows(kind==='item'?filterItems(fresh,{...chosenFilters,dangerous}):kind==='usage'?usageInPeriod(fresh,{fromDate:chosenFilters.fromDate||'',toDate:chosenFilters.toDate||''}):fresh,chosenSort,kind==='item'?inventoryValue:recordValue);
+ const dangerous=route==='safety',rows=sortRows(kind==='item'?filterInventory(fresh,chosenFilters,dangerous):kind==='usage'?usageInPeriod(fresh,{fromDate:chosenFilters.fromDate||'',toDate:chosenFilters.toDate||''}):fresh,chosenSort,kind==='item'?inventoryValue:recordValue);
  if(!rows.length)throw Error('There are no matching records to export.');
- const options={dangerous,capturedAt:new Date().toISOString(),filterSummary:Object.entries(chosenFilters).filter(([,value])=>value).map(([key,value])=>`${label(key)}: ${value}`).join(' · ')};
+ const options={dangerous,capturedAt:new Date().toISOString(),filterSummary:Object.entries(chosenFilters).filter(([,value])=>value).map(([key,value])=>`${key==='toxicity'?'Toxicity':label(key)}: ${key==='toxicity'?(toxicityOptions(fresh).find(option=>option.value===value)?.label||value):value}`).join(' · ')};
  if(format==='pdf'){
   closeExportPreview();$('pdf-export-content').innerHTML=inventoryPrintBodyHTML(rows,options);exportSession={check,permissions:JSON.stringify(permissions)};$('pdf-export').showModal();status(`PDF preview · ${rows.length.toLocaleString()} matching items`);return;
  }
@@ -322,7 +342,7 @@ $('sheet-import-dialog').addEventListener('close',()=>{$('import-preview').inner
 $('help').addEventListener('click',()=>$('help-dialog').showModal());$('refresh').addEventListener('click',()=>void start());$('sign-out').addEventListener('click',async()=>{accessActivity.signOut(section());const g=++generation;resetPrivate();try{await store.signOut();}finally{if(g===generation){signInView();$('sign-out').hidden=true;$('sidebar-account').hidden=true;}}});
 $('import-file').addEventListener('change',e=>{const g=generation;void chooseImport(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
 $('order-catalog-file').addEventListener('change',e=>{const g=generation;void chooseOrderCatalog(e.target.files[0]).catch(err=>{if(g===generation)status(err.message,true);});e.target.value='';});
-window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:''};void render();});
+window.addEventListener('hashchange',()=>{if(importing)return;offset=0;filters={query:'',category:'',status:'',location:'',toxicity:''};void render();});
 window.addEventListener('storage',e=>{if(e.key===null||['mouse-colony.cloud.v1','mouse-colony.config.v1','mouse-colony.session.v1'].includes(e.key))void start({force:true});});
 window.addEventListener('offline',()=>updateConnectionIndicator('unavailable'));
 // Revalidate on return from another tab. Never keep private content after an access failure.
