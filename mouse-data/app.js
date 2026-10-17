@@ -1,52 +1,52 @@
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=100';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=115';
 import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=100';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=100';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=115';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { renderMouseReview } from './mouse-review-view.js?v=100';
-import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=100';
+import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=115';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=105';
-import * as model from './model.js?v=100';
-import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=100';
-import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=100';
-import { renderStrainManagement } from './strain-management.js?v=100';
+import * as store from './data-store.js?v=115';
+import * as model from './model.js?v=115';
+import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=115';
+import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=115';
+import { renderStrainManagement, hasStrainDrafts, clearStrainManagement } from './strain-management.js?v=115';
 import { summarizeLitters } from './litter-summary.js?v=100';
-import { summarizeOverview } from './overview-summary.js?v=100';
-import { summarizeCages } from './cage-summary.js?v=100';
+import { summarizeOverview } from './overview-summary.js?v=115';
+import { summarizeCages } from './cage-summary.js?v=115';
 import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=100';
-import { summarizeBreeding } from './breeding-summary.js?v=100';
+import { summarizeBreeding } from './breeding-summary.js?v=115';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=100';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=115';
 import * as history from './history-index.js?v=100';
 import { renderUserManagement } from './user-management.js?v=100';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=100';
 import { renderAccessLogs } from './access-logs.js?v=113';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=100';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=115';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=109';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=115';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
-import { renderCageLabelEditor } from './cage-label.js?v=100';
+import { renderCageLabelEditor } from './cage-label.js?v=115';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
 import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
-import { renderBreedingPlanner } from './breeding-planner.js?v=100';
-import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=100';
-import { buildFamilyGenotypes } from './family-genotypes.js?v=100';
-import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=105';
+import { renderBreedingPlanner } from './breeding-planner.js?v=115';
+import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=115';
+import { buildFamilyGenotypes } from './family-genotypes.js?v=115';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=115';
 import { renderExperiments, experimentHelpHTML } from './experiments.js?v=100';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=100';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=115';
 import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=100';
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=100';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=100';
 import { protocolsForEntity } from './iacuc-model.js?v=100';
-import { renderExportCenter } from './export-center.js?v=100';
+import { renderExportCenter } from './export-center.js?v=115';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -99,6 +99,7 @@ async function loadEditorCageManagers(){const context=editor,select=$('field-man
 
 const icons = {
  overview:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+ strains:'<path d="M7 3c10 5 0 13 10 18M17 3C7 8 17 16 7 21M8 5h8M8 19h8M8 9h8M8 15h8"/>',
  mice:'<circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M6 10c-3 11 15 11 12 0M9 14h.01M15 14h.01M11 18h2"/>',
  matings:'<circle cx="7" cy="8" r="4"/><circle cx="17" cy="16" r="4"/><path d="m10 11 4 2M16 3h5v5M21 3l-5 5"/>',
  litters:'<path d="M12 3v5M4 12V8h16v4M4 16v5M12 16v5M20 16v5"/><circle cx="4" cy="14" r="2"/><circle cx="12" cy="14" r="2"/><circle cx="20" cy="14" r="2"/>',
@@ -116,11 +117,11 @@ const icons = {
  review:'<path d="M7 3h14v18H7M3 7l1 1 2-2M3 13l1 1 2-2M10 7h7M10 13h7M10 18h7"/>',
  settings:'<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="4"/>'
 };
-const titles = {overview:'Animal Overview',mice:'Mice',matings:'Breeding',litters:'Litters',cages:'Cages',family:'Family tree',planner:'Planning',experiments:'Experiments',iacuc:'IACUC',housing:'Housing & light',locobox:'Locobox',cryo:'Cryopreservation',fees:'LAC fees',review:'Review',brainbot:'Braintime Bot (BB)',archive:'Source archive',settings:'Settings'};
+const titles = {overview:'Animal Overview',mice:'Mice',strains:'Strains',matings:'Breeding',litters:'Litters',cages:'Cages',family:'Family tree',planner:'Planning',experiments:'Experiments',iacuc:'IACUC',housing:'Housing & light',locobox:'Locobox',cryo:'Cryopreservation',fees:'LAC fees',review:'Review',brainbot:'Braintime Bot (BB)',archive:'Source archive',settings:'Settings'};
 let accessLogsCleanup=null,labUserDirectoryRequest=0,historyLoadState=null,historyLoadFailure=null;
 const deferredHistoryTables=()=>store.getDeferredHistoryTables?.(dataset)||[];
 const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id,archiveTable]);
-function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts()||route==='cryo'&&hasCryopreservationDraft($('main')));}
+function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts()||route==='strains'&&hasStrainDrafts($('main'))||route==='cryo'&&hasCryopreservationDraft($('main')));}
 async function loadHistoryTables(tables){
  if(cachedPreview||startupLoading||cloud.mode==='cloud'&&!cloudReady)throw new Error('Synchronizing. Try again shortly.');
  if(historyDraftOpen())throw new Error('Save or discard changes before loading history.');
@@ -207,7 +208,8 @@ function queueLabUserDirectory(){
 }
 const accessLogContext=()=>{const state=store.getCloudStatus();return [state.url,state.colonyId,state.email,state.mode,state.role,state.signedIn,state.passwordRecovery].join('|');};
 const accessActivity=createAccessActivity({app:'mouse',sections:Object.keys(titles),record:store.recordAppAccess,getContext:store.getCloudStatus,isVisible:()=>!document.hidden&&!startupLoading});
-const accessPage=()=>route==='review'?'mice':route;
+// Strains shares the existing genetics/Planning activity section.
+const accessPage=()=>route==='review'?'mice':route==='strains'?'planner':route;
 const resumeAccess=()=>{if(!document.hidden&&!startupLoading)accessActivity.resume(accessPage());};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)accessActivity.suspend();else resumeAccess();});
 window.addEventListener('pagehide',()=>accessActivity.suspend());
@@ -234,7 +236,7 @@ function canEditRecords(section=route){
  if(brainbotReviewPending||startupLoading||historyLoadState||cloud.passwordRecovery||cloud.role==='pending')return false;if(cloud.mode!=='cloud')return true;if(!cloudReady)return false;
  if(['owner','editor'].includes(cloud.role))return true;
  if(cloud.role!=='manager')return false;
- const key=({mice:'mice',matings:'breeding',litters:'breeding',cages:'housing',locations:'housing',rooms:'housing',racks:'housing',housing:'housing',locobox:'housing',planner:'genetics',family:'genetics',experiments:'experiments',iacuc:'iacuc',cryo:'cryo',fees:'fees',archive:'archive'})[section]||section;
+ const key=({mice:'mice',matings:'breeding',litters:'breeding',cages:'housing',locations:'housing',rooms:'housing',racks:'housing',housing:'housing',locobox:'housing',planner:'genetics',strains:'genetics',family:'genetics',experiments:'experiments',iacuc:'iacuc',cryo:'cryo',fees:'fees',archive:'archive'})[section]||section;
  return normalizeManagerPermissions(cloud.permissions)[key]===true;
 }
 function canEditCryopreservation(){return ['owner','manager'].includes(cloud.role)&&canEditRecords('cryo');}
@@ -259,7 +261,7 @@ function panel(title,body,action='') { return `<section class="panel"><div class
 function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`; }
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
-async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
+async function refreshCloud() { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 function renderConnection() {
  renderSidebarAccount();
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
@@ -276,7 +278,7 @@ function render() {
  const generation=++pageRenderGeneration;
  if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();
  if(startupLoading){renderStartupLoading();return;}
- clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));if(cloud.role==='pending'){route='settings';detail=null;dataset=null;}accessActivity.observe(route==='review'?'mice':route);
+ clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));if(cloud.role==='pending'){route='settings';detail=null;dataset=null;}accessActivity.observe(route==='review'?'mice':route==='strains'?'planner':route);
  renderMigrationNotice();
  $('main').onclick=null;$('main').oninput=null;$('main').onchange=null;$('main').onsubmit=null;
  if(cloud.passwordRecovery){navigation();$('page-title').textContent='Reset password';$('add-button').hidden=true;$('export-button').disabled=true;renderConnection();renderPasswordRecovery();return;}
@@ -291,6 +293,7 @@ function render() {
  if(route==='cages'){renderCages();return}
  if(route==='family'){renderFamily();return}
  if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:()=>navigate('cryo'),openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
+ if(route==='strains'){renderStrains();return}
  if(route==='planner'){renderPlanner();return}
  if(route==='cryo'){renderCryo();return}
  if(route==='experiments'){renderExperimentSection();return}
@@ -426,8 +429,20 @@ function mouseStrains(mouse){
 }
 function strainCodeFilter(){return `<label class="sr-only" for="filter-_strain_code">Strain code</label><select id="filter-_strain_code" data-filter="_strain_code"><option value="">All strain codes</option>${['recorded','uncertain'].map(status=>`<optgroup label="${status==='recorded'?'Recorded strains':'Undetermined until genotyping'}">${getStrainRegistry(dataset).map(({key,name})=>{const value=status+':'+key;return `<option value="${esc(value)}"${filters._strain_code===value?' selected':''}>${esc(status==='recorded'?key:`(${key})`)} · ${esc(name)}</option>`}).join('')}</optgroup>`).join('')}</select>`}
 function strainTypeLabel(value){return {transgenic:'Transgenic (random insertion)',knock_in:'Knock-in',unknown:'Unknown'}[value]||'Unknown'}
-function strainLegendHTML(){return `${strainNamingHelpHTML()}<div class="table-scroll"><table class="strain-legend"><thead><tr><th>Code</th><th>Strain / construct</th><th>Insertion type</th></tr></thead><tbody>${getStrainRegistry(dataset).map(row=>`<tr><td><strong>${esc(row.key)}</strong></td><td>${esc(row.name)}</td><td>${esc(strainTypeLabel(row.insertionType))}</td></tr>`).join('')}</tbody></table></div><p class="subtle">An apostrophe (′ or ') means homozygous. Parentheses mean undetermined until genotyping: P′ is homozygous PER2::LUC; (P) has undetermined P status; P(′) has undetermined homozygosity. Combined codes describe several lines in one mouse, such as PB′. Vg and Gt are case-sensitive; Vg is distinct from V. WT means wild type. An unprimed code alone does not establish a two-allele call.</p><p class="subtle">P/E/B/F/V/AD are in the current Animal Sheet legend; A/32/96/Vg/Gt also appear in archived legends. Use Mice → Strains to edit insertion type, stock reference and notes. Insertion type is separate from zygosity.</p><p class="subtle">AD: the Animal Sheet references JAX 005864, Tg(APPswe,PSEN1dE9)85Dbo. <a href="https://www.informatics.jax.org/allele/MGI%3A3524957" target="_blank" rel="noopener noreferrer">MGI transgene reference</a>.</p>`}
-async function openStrains(){let dialog=$('strain-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='strain-dialog';document.body.appendChild(dialog)}dialog.innerHTML='<div class="dialog-heading"><h2>Strains &amp; acronyms</h2><button class="icon-button" id="strain-close" aria-label="Close strains">×</button></div><div class="dialog-content" id="strain-management"></div>';$('strain-close').onclick=()=>dialog.close();dialog.showModal();await renderStrainManagement($('strain-management'),dataset,{canEdit:()=>canEditRecords('genetics'),saveDataset:async next=>{if(!canEditRecords('genetics'))throw new Error('Read-only access.');await store.saveDataset(next);dataset=await store.loadDataset();render()},reloadDataset:async()=>{dataset=await store.loadDataset();render();return dataset},toast:showToast})}
+function strainLegendHTML(){return `${strainNamingHelpHTML()}<div class="table-scroll"><table class="strain-legend"><thead><tr><th>Code</th><th>Strain / construct</th><th>Insertion type</th></tr></thead><tbody>${getStrainRegistry(dataset).map(row=>`<tr><td><strong>${esc(row.key)}</strong></td><td>${esc(row.name)}</td><td>${esc(strainTypeLabel(row.insertionType))}</td></tr>`).join('')}</tbody></table></div><p class="subtle">An apostrophe (′ or ') means homozygous. Parentheses mean undetermined until genotyping: P′ is homozygous PER2::LUC; (P) has undetermined P status; P(′) has undetermined homozygosity. Combined codes describe several lines in one mouse, such as PB′. Vg and Gt are case-sensitive; Vg is distinct from V. WT means wild type. An unprimed code alone does not establish a two-allele call.</p><p class="subtle">P/E/B/F/V/AD are in the current Animal Sheet legend; A/32/96/Vg/Gt also appear in archived legends. Use Strains to edit genetic details, stock references and notes. Insertion type is separate from zygosity.</p><p class="subtle">AD: the Animal Sheet references JAX 005864, Tg(APPswe,PSEN1dE9)85Dbo. <a href="https://www.informatics.jax.org/allele/MGI%3A3524957" target="_blank" rel="noopener noreferrer">MGI transgene reference</a>.</p>`}
+function openStrains(){navigate('strains');}
+function renderStrains(){
+ const generation=pageRenderGeneration,context=labUserDirectoryContext(store.getCloudStatus());
+ const current=()=>route==='strains'&&generation===pageRenderGeneration&&context===labUserDirectoryContext(store.getCloudStatus());
+ const check=()=>{if(!current())throw new Error('Account or view changed. Reopen Strains.');};
+ renderStrainManagement($('main'),dataset,{
+  initialCode:decodeURIComponent(location.hash.slice(1).split('/')[1]||''),isCurrent:current,canEdit:()=>current()&&canEditRecords('genetics'),toast:showToast,openCryo:()=>navigate('cryo'),
+  historyIndex:cryoHistoryContext===context?cryoHistoryIndex:null,historyDeferred:deferredHistoryTables().includes('historical_observations'),
+  loadCryoHistory:async()=>{check();const index=await loadCryoHistory();check();if(!index&&deferredHistoryTables().includes('historical_observations'))await loadHistoryTables(['historical_observations']);check();return {historyIndex:index,dataset};},
+  reloadDataset:async()=>{check();const fresh=await store.loadDataset();check();dataset=fresh;return fresh;},
+  saveDataset:async next=>{check();if(!canEditRecords('genetics'))throw new Error('Edit access is required.');await store.saveDataset(next);check();dataset=await store.loadDataset();check();await refreshCloud();check();}
+ });
+}
 function mouseSummaryHTML(){
  const summary=summarizeMice(dataset);
  const items=[['alive','Alive','Current colony',summary.alive,summary.unknownSex?`${count(summary.unknownSex)} with unknown sex`:'All current Stock mice'],['sex','Male | Female','',`${count(summary.male)} | ${count(summary.female)}`,'Current male and female mice'],...MOUSE_LINE_GROUPS.map(({key,name})=>[key,key,name,summary.totalLines[key],`${name}: ${count(summary.lines[key])} recorded + ${count(summary.uncertainLines[key])} undetermined`,summary.uncertainLines[key]])];
@@ -819,7 +834,7 @@ async function action(name,target=null){
  if(name==='reload-shared'){await loadSharedColony({preserveView:true,confirm:false});return}
  if(name==='cloud-push'){if(!dataset)throw new Error('Import or create a dataset first.');if(!await confirmAction('Upload records to shared colony?',`<p class="subtle">This sends the current browser’s records to the configured cloud colony. Authorized members will be able to access them.</p>${kv([['Mouse records',records('mice').length],['Colony UUID',cloud.colonyId]])}<p class="subtle" style="margin-top:15px">Existing-record conflicts are rejected. Only proceed when this is the intended colony.</p>`,'Upload to shared colony'))return;await store.pushToCloud(dataset);dataset=await store.loadDataset();cloudReady=true;await refreshCloud();render();showToast('Upload completed. Shared cloud mode is active.');return}
  if(isLegacySite(location)&&['change-email','resend-link'].includes(name)){navigate('settings');showToast('Request sign-in links at the new lab address.');return}if(name==='change-email'){authPendingEmail='';renderSettings();return}if(name==='resend-link'){if(!authPendingEmail)throw new Error('Enter your email first.');await store.requestEmailLink(authPendingEmail,appRedirectURL());showToast('A new sign-in link was requested.');return}
- if(name==='sign-out'){setSidebarMenuOpen(false);clearSidebarProfile();cloud={...cloud,signedIn:false};renderSidebarAccount();startupRequest++;cachedPreview=false;startupLoading=false;dataset=null;cloudLoadError='';accessActivity.signOut(route);clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearCageSheetDrafts();await store.signOut();await refreshCloud();cloudReady=true;render();showToast('Signed out.');return}
+ if(name==='sign-out'){setSidebarMenuOpen(false);clearSidebarProfile();cloud={...cloud,signedIn:false};renderSidebarAccount();startupRequest++;cachedPreview=false;startupLoading=false;dataset=null;cloudLoadError='';accessActivity.signOut(accessPage());clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));clearCageSheetDrafts();await store.signOut();await refreshCloud();cloudReady=true;render();showToast('Signed out.');return}
  if(name==='clear-workspace'){clearCageSheetDrafts();if(!await confirmAction('Clear this browser’s workspace?','<p class="subtle">The browser’s local copy will be removed. Shared cloud records remain. Download a backup first if local work has not been shared.</p>','Clear local copy'))return;await store.clearDataset();await history.clearHistoryIndex();dataset=null;cloudReady=true;await refreshCloud();navigate('overview');return}
  if(name==='install'&&deferredInstall){await deferredInstall.prompt();deferredInstall=null;renderSettings()}
 }
@@ -850,7 +865,7 @@ window.addEventListener('lac-fee-visibility-changed',async()=>{
 });
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(route==='settings')renderSettings()});
 window.addEventListener('hashchange',()=>{const [view,id]=location.hash.slice(1).split('/');if(titles[view]&&(view!==route||String(detail?.id||'')!==decodeURIComponent(id||''))){route=view;detail=id&&entity[view]?{type:view,id:decodeURIComponent(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;resetTableWindow();selectedMice.clear();render()}});
-window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()||hasStrainDrafts($('main'))){event.preventDefault();event.returnValue='';}});
 window.addEventListener('offline',()=>{if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
 window.addEventListener('online',()=>{if(cloud.mode==='cloud')showToast('Connection restored. Load the shared colony before editing.')});
 async function start(){

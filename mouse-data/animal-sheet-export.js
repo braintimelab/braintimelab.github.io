@@ -1,6 +1,6 @@
 import {compareRooms} from './room-order.js?v=100';
-import { lightClock } from './husbandry.js?v=100';
-import {mouseManager,cageManager} from './model.js?v=100';
+import { lightClock } from './husbandry.js?v=115';
+import {mouseManager,cageManager} from './model.js?v=115';
 import {createWorkbookXlsx,columnName} from './workbook-export.js?v=100';
 export {createWorkbookXlsx} from './workbook-export.js?v=100';
 

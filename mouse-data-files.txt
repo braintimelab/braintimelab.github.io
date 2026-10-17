@@ -72,9 +72,13 @@ mouse-review.js
 mouse-summary.js
 overview-summary.js
 permissions.js
+planner-layout.css
 room-order.js
 site-migration.js
+strain-cryo-links.js
+strain-management.css
 strain-management.js
+strain-reference-data.js
 strain-registry.js
 styles.css
 sw.js

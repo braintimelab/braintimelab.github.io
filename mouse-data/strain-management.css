@@ -1,0 +1,49 @@
+.strain-management .strain-library{display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:18px;padding:16px}
+.strain-management .strain-directory{min-width:0}
+.strain-management #strain-search{min-width:0;font-size:13px;margin-bottom:10px;padding:8px 10px}
+.strain-management .strain-card-list{display:grid;gap:6px;align-content:start}
+.strain-management .strain-card{display:grid;grid-template-columns:35px minmax(0,1fr);gap:2px 8px;min-width:0;padding:9px 10px;text-align:left;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}
+.strain-management .strain-card:hover{border-color:var(--accent)}
+.strain-management .strain-card.selected{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.strain-management .strain-card-code{grid-row:span 2;font-weight:700;align-self:center}
+.strain-management .strain-card-name{font-size:13px;line-height:1.35;overflow-wrap:anywhere}
+.strain-management .strain-card small{font-size:10px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere}
+.strain-management .strain-detail{min-width:0;border-left:1px solid var(--line);padding-left:18px}
+.strain-management .strain-detail-heading{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.strain-management .strain-detail-heading h3{font-size:17px;margin:0}
+.strain-management .strain-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;margin:0}
+.strain-management .strain-detail-field{display:block;min-width:0;margin:0}
+.strain-management .strain-detail-field>span,.strain-management .strain-detail-field dt{display:block;font-size:11px;font-weight:600;color:var(--muted);margin:0 0 4px}
+.strain-management .strain-detail-field dd{font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;min-height:20px}
+.strain-management .strain-detail-field input,.strain-management .strain-detail-field select,.strain-management .strain-detail-field textarea{min-width:0;font-size:13px;padding:7px 8px;line-height:1.35;box-sizing:border-box}
+.strain-management .strain-detail-field textarea{resize:vertical}
+.strain-management .strain-detail-wide{grid-column:1/-1}
+.strain-management .strain-detail-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px}
+.strain-management .strain-detail-actions .button{font-size:12px;padding:7px 12px}
+.strain-management .strain-detail-note{font-size:11px;margin:12px 0 0}
+.strain-management .strain-no-match{font-size:12px;padding:8px}
+.strain-management .strain-naming-guide{border-top:1px solid var(--line);font-size:12px}
+.strain-management .strain-naming-guide p{font-size:12px}
+@media(max-width:760px){
+ .strain-management .strain-library{grid-template-columns:1fr;padding:12px;gap:14px}
+ .strain-management .strain-card-list{grid-template-columns:repeat(auto-fill,minmax(145px,1fr))}
+ .strain-management .strain-detail{border-left:0;border-top:1px solid var(--line);padding:14px 0 0}
+}
+@media(max-width:440px){
+ .strain-management .strain-detail-grid{grid-template-columns:1fr}
+ .strain-management .strain-card{padding:8px;grid-template-columns:28px minmax(0,1fr)}
+}
+.strain-management .strain-cryo{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+.strain-management .strain-cryo-heading{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:7px}
+.strain-management .strain-cryo-heading h4{font-size:13px;margin:0}
+.strain-management .strain-cryo .button{font-size:11px;padding:5px 9px}
+.strain-management .strain-cryo-heading .button{margin-left:auto}
+.strain-management .strain-cryo-case{border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin-top:5px;font-size:12px}
+.strain-management .strain-cryo-case summary{cursor:pointer;font-weight:600;overflow-wrap:anywhere}
+.strain-management .strain-cryo-case summary small{font-size:10px;font-weight:400;color:var(--muted)}
+.strain-management .strain-cryo-case dl{display:grid;grid-template-columns:minmax(100px,1fr) minmax(0,3fr);gap:4px 10px;margin:9px 0}
+.strain-management .strain-cryo-case dt{font-size:10px;color:var(--muted)}
+.strain-management .strain-cryo-case dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.strain-management .strain-cryo-empty{font-size:11px;margin:6px 0}
+
+.strain-management .strain-jax-link{font-size:11px;margin-left:auto;white-space:nowrap}

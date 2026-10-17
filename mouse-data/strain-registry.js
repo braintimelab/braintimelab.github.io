@@ -1,3 +1,4 @@
+import { JAX_STRAIN_REFERENCES } from './strain-reference-data.js?v=115';
 /* Animal Sheet strain codes. These labels describe lines, not individual genotype calls. */
 export const INSERTION_TYPES=Object.freeze([
   Object.freeze({value:'unknown',label:'Unknown'}),
@@ -5,6 +6,22 @@ export const INSERTION_TYPES=Object.freeze([
   Object.freeze({value:'knock_in',label:'Knock-in'})
 ]);
 const insertionTypes=new Set(INSERTION_TYPES.map(row=>row.value));
+// Optional stock-level metadata. Empty values mean the local stock has not been
+// verified; gene aliases must never be used to infer a promoter or allele.
+export const STRAIN_DETAIL_FIELDS=Object.freeze([
+  {key:'formal_name',label:'Formal strain name',limit:500},
+  {key:'gene_symbol',label:'Gene / locus symbol',limit:200},
+  {key:'allele_symbol',label:'Allele symbol',limit:500},
+  {key:'promoter',label:'Promoter / regulatory sequence',limit:500},
+  {key:'construct',label:'Construct / targeted change',limit:1000,multiline:true},
+  {key:'reporter',label:'Reporter',limit:500},
+  {key:'recombinase',label:'Recombinase',limit:500},
+  {key:'genetic_background',label:'Local genetic background',limit:500},
+  {key:'catalog_background',label:'JAX reference background',limit:500},
+  {key:'strain_source',label:'Source / supplier',limit:500},
+  {key:'references',label:'References / links',limit:1500,multiline:true},
+  {key:'genotyping_notes',label:'Genotyping notes',limit:2000,multiline:true}
+].map(Object.freeze));
 // Laboratory naming clarification. These aliases never rewrite imported text,
 // stable locus IDs or saved Cre models, and do not define a new acronym.
 export const FLOX_STRAIN_NAMES=Object.freeze(['Bmal1-flox','Meis1-flox','Vgat-flox']);
@@ -67,6 +84,7 @@ export function validateStrainDefinition(record,old=null) {
   if(!insertionTypes.has(value.insertion_type))errors.push('Choose Unknown, Transgenic or Knock-in.');
   if(typeof value.stock_reference!=='string'||value.stock_reference.length>500)errors.push('Stock reference must be text of at most 500 characters.');
   if(typeof value.notes!=='string'||value.notes.length>2000)errors.push('Strain notes must be text of at most 2000 characters.');
+  for(const field of STRAIN_DETAIL_FIELDS)if(value[field.key]!==undefined&&(typeof value[field.key]!=='string'||value[field.key].length>field.limit))errors.push(`${field.label} must be text of at most ${field.limit} characters.`);
   if(!dateValid(record.event_date))errors.push('A valid strain-definition date is required.');
   return errors;
 }
@@ -80,7 +98,8 @@ export function getStrainRegistry(dataset) {
   }
   return STRAIN_ACRONYMS.map(reference=>{
     const record=saved.get(reference.key),value=record?.strain_definition;
-    return value?{...reference,insertionType:value.insertion_type,stockReference:value.stock_reference,notes:value.notes,origin:'Colony strain registry',eventId:record.event_id}:{...reference};
+    const catalog=JAX_STRAIN_REFERENCES[reference.key],details=Object.fromEntries(STRAIN_DETAIL_FIELDS.map(field=>[field.key,value?.[field.key]??catalog?.fields[field.key]??'']));
+    return value?{...reference,...details,jaxReference:catalog,insertionType:value.insertion_type,stockReference:value.stock_reference,notes:value.notes,origin:'Colony strain registry',eventId:record.event_id,modifiedAt:record.app_modified_at||record.event_date}:{...reference,...details,jaxReference:catalog,insertionType:catalog?.fields.insertion_type||reference.insertionType,stockReference:catalog?.fields.stock_reference||reference.stockReference};
   });
 }
 
@@ -96,7 +115,11 @@ export function buildStrainDefinition(dataset,input,options={}) {
   if(original&&archived(original))throw new Error('This strain definition is archived. Restore it before editing.');
   const clock=options.now===undefined?new Date():new Date(options.now);
   if(Number.isNaN(clock.getTime()))throw new Error('A valid modification time is required.');
-  const record={...original,event_id:eventId(code),event_type:'strain_definition',event_date:options.eventDate??eventDate(clock),record_origin:original?.record_origin||'app_created',app_created_at:original?.app_created_at||clock.toISOString(),app_modified_at:clock.toISOString(),strain_definition:{schema_version:1,code,name:reference.name,insertion_type:input.insertion_type,stock_reference:typeof input.stock_reference==='string'?input.stock_reference.trim():input.stock_reference,notes:typeof input.notes==='string'?input.notes.trim():input.notes}};
+  const details=Object.fromEntries(STRAIN_DETAIL_FIELDS.map(field=>{
+    const value=Object.hasOwn(input,field.key)?input[field.key]:original?.strain_definition?.[field.key]??'';
+    return [field.key,typeof value==='string'?value.trim():value];
+  }));
+  const record={...original,event_id:eventId(code),event_type:'strain_definition',event_date:options.eventDate??eventDate(clock),record_origin:original?.record_origin||'app_created',app_created_at:original?.app_created_at||clock.toISOString(),app_modified_at:clock.toISOString(),strain_definition:{...original?.strain_definition,...details,schema_version:1,code,name:reference.name,insertion_type:input.insertion_type,stock_reference:typeof input.stock_reference==='string'?input.stock_reference.trim():input.stock_reference,notes:typeof input.notes==='string'?input.notes.trim():input.notes}};
   const errors=validateStrainDefinition(record,original);
   if(errors.length)throw new Error(errors.join(' '));
   const index=next.tables.husbandry_events.findIndex(row=>row.event_id===record.event_id);

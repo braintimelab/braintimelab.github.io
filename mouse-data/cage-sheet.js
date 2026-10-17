@@ -1,13 +1,13 @@
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=103';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=115';
 import { sortRooms } from './room-order.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=100';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=100';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=115';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=115';
 import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=100';
 import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=100';
 import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
-import { cageBreedingLayout } from './mouse-registration.js?v=100';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=100';
+import { cageBreedingLayout } from './mouse-registration.js?v=115';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=115';
 import { BADGE_TYPES, WORK_BADGE_STATUSES, badgeLabel, validateWorkBadges, planWorkBadgeEdit, createCageBadgeIndex, cageBadgesForItem, cageNoteBadgesForItem, applyEquipmentBadgeDrafts } from './cage-badges.js?v=103';
 import {sourceBadgeRows,applySourceBadgeDrafts,sourceBadgeReadDependencies} from './cage-note-badges.js?v=103';
 

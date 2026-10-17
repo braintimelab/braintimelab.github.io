@@ -1,0 +1,9 @@
+/* Compact Planning strain library, scoped to the planner. */
+.breeding-planner .planner-strain-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:14px;align-items:stretch}
+.breeding-planner .planner-strain-card{display:flex;flex-direction:column;align-items:flex-start;gap:12px;min-width:0;padding:13px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.breeding-planner .planner-strain-card.is-added{border-color:var(--blue-line);background:var(--blue-bg)}
+.breeding-planner .planner-strain-summary{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}
+.breeding-planner .planner-strain-summary>strong{font-size:13px;font-weight:600;line-height:1.35}
+.breeding-planner .planner-strain-summary p{margin:4px 0 0}
+.breeding-planner .planner-strain-card>.button{margin-top:auto;padding:6px 10px;font-size:11px;min-height:32px}
+@media(max-width:520px){.breeding-planner .planner-strain-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.breeding-planner .planner-strain-card{padding:10px;gap:10px}.breeding-planner .planner-strain-summary>strong{font-size:12px}}

@@ -1,7 +1,7 @@
 /* Cage start dates are cage/card metadata. DOB and capture dates never become
  * exact insertion dates, and this module never creates animal identities. */
 import {cageObservations,cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=100';
-import {mouseLineAssignments} from './mouse-summary.js?v=100';
+import {mouseLineAssignments} from './mouse-summary.js?v=115';
 import {roomOrderRank} from './room-order.js?v=100';
 const active=row=>row&&!row.app_archived_at&&row.archived!==true;
 const historical=row=>row?.history_read_only===true||row?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(row?.record_origin||'');

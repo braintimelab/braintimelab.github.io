@@ -1,7 +1,7 @@
 /* Current recorded line counts, not assay confirmation or allele dosage.
  * Animal Sheet abbreviations are interpreted only in the animal's own fields.
  */
-import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=100';
+import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=115';
 export const MOUSE_LINE_GROUPS = Object.freeze([
   {key:'P',name:'PER2::LUC'},
   {key:'E',name:'Bmal1-ELuc'},

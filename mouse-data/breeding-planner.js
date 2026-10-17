@@ -1,7 +1,7 @@
 import { predictCross, validateScenario, rankPairs } from './genetics.js?v=100';
-import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=100';
-import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=100';
-import { validateFamilyTargetDraft } from './family-targets.js?v=100';
+import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=115';
+import {canonicalLocusName,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=115';
+import { validateFamilyTargetDraft } from './family-targets.js?v=115';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -15,7 +15,6 @@ const pct=value=>value==null?'Unavailable':`${Number((value*100).toPrecision(4))
 const number=value=>value==null?'Unavailable':new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(value);
 const list=(items,kind='amber')=>items?.length?`<div class="alert ${kind}"${kind==='error'?' role="alert"':''}><ul>${[...new Set(items)].map(item=>`<li>${esc(item)}</li>`).join('')}</ul></div>`:'';
 const option=(value,label,selected)=>`<option value="${esc(value)}"${String(value)===String(selected)?' selected':''}>${esc(label)}</option>`;
-const url=value=>{try{const parsed=new URL(value);return ['https:','http:'].includes(parsed.protocol)?parsed.href:null}catch{return null}};
 const button=(action,label,data='',style='secondary')=>`<button type="button" class="button ${style}" data-planner-action="${action}" ${data}>${label}</button>`;
 const ids=record=>[...(Array.isArray(record?.sire_sids)?record.sire_sids:[]),...(Array.isArray(record?.dam_sids)?record.dam_sids:[])];
 
@@ -105,17 +104,11 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     if(!state.sourceCache.has(key))state.sourceCache.set(key,sourceProfile(record,state.scenario.loci,data()));
     return state.sourceCache.get(key);
   }
-  function sourceDetails(record) {
-    const evidence=sourceFor(record).sheetEvidence||[];
-    if(!evidence.length)return '';
-    return `<details class="compact-details planner-source-evidence"><summary>Linked Animal Sheet excerpts (${evidence.length})</summary><p class="small muted">Historical excerpts may include cage mates or comments. They do not confirm this animal’s genotype.</p>${evidence.slice(0,8).map(item=>{const href=url(item.url),label=[item.title,item.sheet,item.cell].filter(Boolean).join(' · ');return `<div class="planner-source-excerpt"><p class="small">${href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label||'Source')}</a>`:esc(label)}</p><pre>${esc(item.text)}</pre></div>`}).join('')}${evidence.length>8?'<p class="small muted">First eight excerpts shown. See Source archive for the complete history.</p>':''}</details>`;
-  }
-
   function parentSelect(role) {
     const selected=state.scenario[role].id||'',sex=role==='sire'?'Male':'Female',record=mouse(selected);
     const choices=mice().filter(row=>row.sex===sex&&!archived(row));
     const missing=selected&&!choices.some(row=>row.mouse_sid===selected)?option(selected,`${selected} · saved parent`,selected):'';
-    return `<div class="planner-parent panel"><div class="panel-body"><div class="field"><label for="planner-${role}">${role==='sire'?'Sire':'Dam'} · ${sex}</label><select id="planner-${role}" data-planner-field="parent" data-role="${role}">${option('','Hypothetical parent',selected)}${missing}${choices.map(row=>option(row.mouse_sid,`${row.mouse_sid}${(row.physical_tag||row.mouse_tag)?' · '+(row.physical_tag||row.mouse_tag):''} · ${row.state||'State unknown'}`,selected)).join('')}</select></div>${record?`<p class="small"><strong>Source genotype:</strong> ${esc(record.genotype||'Unknown')}</p>${sourceDetails(record)}<div class="settings-actions">${button('source-parent','Use source suggestions',`data-role="${role}"`)}${button('open-mouse','View mouse',`data-id="${esc(selected)}"`)}</div>`:'<p class="small muted">Hypothetical calls remain part of this scenario.</p>'}</div></div>`;
+    return `<div class="planner-parent panel"><div class="panel-body"><div class="field"><label for="planner-${role}">${role==='sire'?'Sire':'Dam'} · ${sex}</label><select id="planner-${role}" data-planner-field="parent" data-role="${role}">${option('','Hypothetical parent',selected)}${missing}${choices.map(row=>option(row.mouse_sid,`${row.mouse_sid}${(row.physical_tag||row.mouse_tag)?' · '+(row.physical_tag||row.mouse_tag):''} · ${row.state||'State unknown'}`,selected)).join('')}</select></div>${record?`<p class="small"><strong>Source genotype:</strong> ${esc(record.genotype||'Unknown')}</p><div class="settings-actions">${button('source-parent','Use source suggestions',`data-role="${role}"`)}${button('open-mouse','View mouse',`data-id="${esc(selected)}"`)}</div>`:'<p class="small muted">Hypothetical calls remain part of this scenario.</p>'}</div></div>`;
   }
 
   function alleleSelect(locus,value,attributes,label) {
@@ -125,7 +118,7 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   function callEditor(locus,owner,mode='cross',locked=false) {
     const value=mode==='profile'?(state.profileCalls[locus.id]||unknown()):call(state.scenario[owner],locus.id),label=mode==='profile'?'Genotype':owner==='sire'?'Sire':'Dam';
     const attributes=`data-planner-field="call" data-mode="${mode}" data-role="${owner}" data-locus="${esc(locus.id)}"${locked?' disabled':''}`;
-    return `<fieldset class="planner-call"><legend>${esc(label)}</legend><div class="planner-call-alleles">${[0,1].map(index=>alleleSelect(locus,value.alleles?.[index]||'',`${attributes} data-index="${index}"`,`${locus.name}, ${label}, allele ${index+1}`)).join('')}</div><label>Evidence<select ${attributes} data-index="evidence" aria-label="${esc(locus.name+', '+label+', evidence')}">${['unknown','inferred','confirmed'].map(evidence=>option(evidence,{unknown:'Unknown',inferred:'Inferred / hypothetical',confirmed:'Confirmed'}[evidence],value.evidence)).join('')}</select></label></fieldset>`;
+    return `<fieldset class="planner-call"><legend>${esc(label)}</legend><div class="planner-call-alleles">${[0,1].map(index=>alleleSelect(locus,value.alleles?.[index]||'',`${attributes} data-index="${index}"`,`${locus.name}, ${label}, allele ${index+1}`)).join('')}</div><label>Call status<select ${attributes} data-index="evidence" aria-label="${esc(locus.name+', '+label+', call status')}">${['unknown','inferred','confirmed'].map(evidence=>option(evidence,{unknown:'Unknown',inferred:'Inferred / hypothetical',confirmed:'Confirmed'}[evidence],value.evidence)).join('')}</select></label></fieldset>`;
   }
   function targetEditor(locus) {
     const target=state.scenario.targets[locus.id]||{mode:'any'},attributes=`data-planner-field="target" data-locus="${esc(locus.id)}"`;
@@ -137,12 +130,18 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   function planningInputs() {
     return `<section class="panel"><div class="panel-body"><div class="form-grid"><div class="field"><label>Target sex<select data-planner-field="config" data-key="sex">${['Any','Male','Female'].map(value=>option(value,value,state.scenario.sex)).join('')}</select></label></div><div class="field"><label>Desired offspring count<input type="number" min="1" max="100" step="1" value="${esc(state.scenario.desiredCount)}" data-planner-field="config" data-key="desiredCount"></label></div><div class="field"><label>Planning confidence<select data-planner-field="config" data-key="confidence">${[0.8,0.9,0.95,0.99].map(value=>option(value,pct(value),state.scenario.confidence)).join('')}</select></label></div><div class="field"><label>Nominal litter size<input type="number" min="1" max="20" step="0.5" value="${esc(state.scenario.litterSize)}" data-planner-field="config" data-key="litterSize"></label></div></div><label class="check"><input type="checkbox" data-planner-field="independent"${state.scenario.independentAssortment?' checked':''}> I explicitly assume these loci assort independently.</label></div></section>`;
   }
+  function catalogueAdded(entry) {
+    if(!state.scenario.loci.some(row=>row.id===entry.id))return false;
+    if(!entry.allele)return true;
+    const target=state.scenario.targets[entry.id];
+    return target?.mode==='carrier'&&target.allele===entry.allele||target?.mode==='exact'&&target.alleles?.includes(entry.allele);
+  }
   function catalogue() {
     const entries=catalogueStrains(state.catalogue);
-    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains from colony sources <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">Choose a strain, then review its allele calls. Source labels are not confirmed genotypes.</p><div class="settings-actions">${historyDeferred()?button('load-source-history',state.historyLoading?'Loading history…':state.historyReloadRequired?'Reload page':'Load source history',state.historyLoading?'disabled':''):''}${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}</div>${entries.length?`<div class="table-scroll"><table><thead><tr><th>Strain / source labels</th><th>Evidence</th><th></th></tr></thead><tbody>${entries.map(entry=>{
-      const added=state.scenario.loci.some(row=>row.id===entry.id),disabled=entry.reviewRequired||(!added&&state.scenario.loci.length>=6)||(added&&!entry.allele);
-      return `<tr><td><strong>${esc(canonicalLocusName(entry))}</strong><div class="small muted">${esc((entry.sourceLabels||[]).join(', '))}</div>${entry.locusName?'<div class="small muted">Shared Rosa26 locus</div>':''}${entry.reviewWarning?`<p class="small amber">${esc(entry.reviewWarning)}</p>`:''}</td><td>${esc(entry.occurrences||0)} source mentions${(entry.sources||[]).slice(0,3).map(source=>{const href=url(source.url),label=[source.title,source.sheet,source.cell].filter(Boolean).join(' · ');return `<div class="small">${href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label||'Source')}</a>`:esc(label)}</div>`}).join('')}</td><td>${button('catalogue-locus',entry.reviewRequired?'Review needed':entry.allele?`Use ${esc(entry.name)}`:added?'Already added':'Add locus',`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''}${disabled?' disabled':''}`)}</td></tr>`;
-    }).join('')}</tbody></table></div>`:historyDeferred()?'<p class="muted">Historical catalogue is not loaded.</p>':'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
+    return `<details class="panel planner-catalog" data-planner-catalogue${state.catalogueOpen?' open':''}><summary>Strains <span class="badge">${entries.length}</span></summary><div class="panel-body"><p class="small muted">Choose a strain, then review its allele calls.</p><div class="settings-actions">${historyDeferred()?button('load-source-history',state.historyLoading?'Loading history…':state.historyReloadRequired?'Reload page':'Load source history',state.historyLoading?'disabled':''):''}${button('clear-loci','Start with an empty cross')}${button('example','Load illustrative example')}<a class="button secondary" href="#strains">Strain details</a></div>${entries.length?`<div class="planner-strain-grid">${entries.map(entry=>{
+      const added=catalogueAdded(entry),locusPresent=state.scenario.loci.some(row=>row.id===entry.id),disabled=!added&&(entry.reviewRequired||(!locusPresent&&state.scenario.loci.length>=6));
+      return `<article class="planner-strain-card${added?' is-added':''}"><div class="planner-strain-summary"><strong>${esc(canonicalLocusName(entry))}</strong>${entry.locusName?'<span class="small muted">Shared Rosa26 locus</span>':''}${entry.reviewWarning?`<p class="small amber">${esc(entry.reviewWarning)}</p>`:''}</div>${button('catalogue-locus',added?'Already added':entry.reviewRequired?'Review needed':'Add locus',`data-locus="${esc(entry.id)}"${entry.allele?` data-allele="${esc(entry.allele)}"`:''} aria-label="${esc((added?'Remove ':'Add ')+canonicalLocusName(entry)+(added?' from cross':' to cross'))}" aria-pressed="${added}"${disabled?' disabled':''}`)}</article>`;
+    }).join('')}</div>`:historyDeferred()?'<p class="muted">Historical catalogue is not loaded.</p>':'<p class="muted">No recognizable strain labels in this dataset. Add a custom locus.</p>'}</div></details>`;
   }
 
   function resultHTML() {
@@ -182,7 +181,7 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   }
   function genotypesHTML() {
     const record=mouse(state.profileId),locked=!canEdit()||archived(record);
-    return `${catalogue()}<section class="panel"><div class="panel-body"><div class="field"><label for="planner-profile-mouse">Mouse</label><select id="planner-profile-mouse" data-planner-field="profile-mouse">${option('','Choose a mouse',state.profileId)}${mice().map(row=>option(row.mouse_sid,`${row.mouse_sid}${(row.physical_tag||row.mouse_tag)?' · '+(row.physical_tag||row.mouse_tag):''} · ${row.sex||'Unknown'}`,state.profileId)).join('')}</select></div>${record?`<p><strong>Source genotype:</strong> ${esc(record.genotype||'Unknown')}</p>${sourceDetails(record)}<p class="small muted">Review the loci configured in Cross planner. Missing calls stay unknown. The source genotype text is preserved.</p><div class="settings-actions">${!locked?button('source-profile','Use source suggestions'):''}${button('open-mouse','View mouse',`data-id="${esc(record.mouse_sid)}"`)}</div>${state.scenario.loci.length?`<div class="planner-loci">${state.scenario.loci.map(locus=>`<section class="planner-locus"><h3>${esc(canonicalLocusName(locus))}</h3>${callEditor(locus,'profile','profile',locked)}</section>`).join('')}</div>`:'<p class="muted">Add loci in Cross planner before reviewing calls.</p>'}<div class="field"><label for="planner-profile-notes">Genotype evidence / notes</label><textarea id="planner-profile-notes" data-planner-field="profile-notes"${locked?' readonly':''}>${esc(state.profileNotes)}</textarea></div>${!locked?`<div class="settings-actions">${button('save-profile',api().isCloud?.()?'Save reviewed genotypes to colony':'Save reviewed genotypes locally','', 'primary')}</div>`:'<p class="small muted">Read only</p>'}`:'<p class="muted">Choose an existing animal to review its structured allele calls.</p>'}</div></section>`;
+    return `${catalogue()}<section class="panel"><div class="panel-body"><div class="field"><label for="planner-profile-mouse">Mouse</label><select id="planner-profile-mouse" data-planner-field="profile-mouse">${option('','Choose a mouse',state.profileId)}${mice().map(row=>option(row.mouse_sid,`${row.mouse_sid}${(row.physical_tag||row.mouse_tag)?' · '+(row.physical_tag||row.mouse_tag):''} · ${row.sex||'Unknown'}`,state.profileId)).join('')}</select></div>${record?`<p><strong>Source genotype:</strong> ${esc(record.genotype||'Unknown')}</p><p class="small muted">Review the loci configured in Cross planner. Missing calls stay unknown. The source genotype text is preserved.</p><div class="settings-actions">${!locked?button('source-profile','Use source suggestions'):''}${button('open-mouse','View mouse',`data-id="${esc(record.mouse_sid)}"`)}</div>${state.scenario.loci.length?`<div class="planner-loci">${state.scenario.loci.map(locus=>`<section class="planner-locus"><h3>${esc(canonicalLocusName(locus))}</h3>${callEditor(locus,'profile','profile',locked)}</section>`).join('')}</div>`:'<p class="muted">Add loci in Cross planner before reviewing calls.</p>'}<div class="field"><label for="planner-profile-notes">Genotype notes</label><textarea id="planner-profile-notes" data-planner-field="profile-notes"${locked?' readonly':''}>${esc(state.profileNotes)}</textarea></div>${!locked?`<div class="settings-actions">${button('save-profile',api().isCloud?.()?'Save reviewed genotypes to colony':'Save reviewed genotypes locally','', 'primary')}</div>`:'<p class="small muted">Read only</p>'}`:'<p class="muted">Choose an existing animal to review its structured allele calls.</p>'}</div></section>`;
   }
   function helpHTML() {
     return `<details class="panel planner-help"><summary>Planner help and scientific limits</summary><div class="panel-body"><p>This tool models diploid autosomal Mendelian segregation. Multiple loci require an explicit independent-assortment assumption; linked loci, sex-linked inheritance, copy number and recombination phase are not modeled. Keep alternative alleles at the same insertion locus together.</p><p>Source suggestions and hypothetical offspring remain inferred until reviewed. Genotype does not establish Cre recombination, reporter expression, viability, fertility or experimental suitability. Expected pups are a mean; confidence counts use a binomial model. Litter estimates use a nominal size and do not predict pregnancies or timing.</p><p>Calculating and loading plans changes no animals. Saving reviewed genotypes updates only the structured profile; saving a plan creates a planning record.</p><p><a href="https://resources.jax.org/husbandry/strategies-for-creating-complex-breeding-schemes" target="_blank" rel="noopener noreferrer">JAX: complex breeding schemes</a> · <a href="https://www.jax.org/news-and-insights/jax-blog/2012/november/breeding-strategies-for-tissue-specific-knockout-mice" target="_blank" rel="noopener noreferrer">JAX: Cre-lox breeding considerations</a></p></div></details>`;
@@ -205,6 +204,11 @@ export function renderBreedingPlanner(container,dataset,hooks) {
     state.scenario.loci.push(locusFields(locus));state.scenario.targets[locus.id]={mode:'any'};
     for(const role of ['sire','dam'])state.scenario[role].calls[locus.id]=unknown();
     state.illustrative=false;invalidate();
+  }
+  function removeLocus(id) {
+    state.scenario.loci=state.scenario.loci.filter(row=>row.id!==id);
+    for(const role of ['sire','dam'])delete state.scenario[role].calls[id];
+    delete state.scenario.targets[id];state.sourceWarnings=[];invalidate();
   }
   function applySuggestions(id,targetCalls) {
     const record=mouse(id);if(!record)throw new Error('Choose a mouse first.');
@@ -281,14 +285,19 @@ export function renderBreedingPlanner(container,dataset,hooks) {
       else if(action==='calculate')state.result=checkedPrediction(state.scenario);
       else if(action==='add-locus')addLocus({id:'locus-'+crypto.randomUUID(),name:'New locus',kind:'other',chromosome:'unknown',alleles:['+','variant']});
       else if(action==='catalogue-locus'){
-        const locus=state.catalogue.find(row=>row.id===meta.locus);if(locus?.reviewRequired)throw new Error(locus.reviewWarning);
+        const locus=state.catalogue.find(row=>row.id===meta.locus);
         if(locus){
-          if(meta.allele&&!(locus.strains||[]).some(row=>row.allele===meta.allele))throw new Error('Choose a strain present in the source catalogue.');
-          if(!state.scenario.loci.some(row=>row.id===locus.id))addLocus(locus);
-          if(meta.allele){const selected=state.scenario.loci.find(row=>row.id===locus.id);if(!selected?.alleles.includes(meta.allele))throw new Error('Review the saved Rosa26 allele definition before selecting this strain.');state.scenario.targets[locus.id]={mode:'carrier',allele:meta.allele};invalidate();state.notice=`${meta.allele} selected. Ai32 and Ai96 are separate strains at one Rosa26 locus. To target both, choose Exact genotype: Ai32 / Ai96.`;}
+          const entry=meta.allele?catalogueStrains([locus]).find(row=>row.allele===meta.allele):locus;
+          if(!entry)throw new Error('Choose a strain present in the source catalogue.');
+          if(catalogueAdded(entry))removeLocus(locus.id);
+          else{
+            if(locus.reviewRequired)throw new Error(locus.reviewWarning);
+            if(!state.scenario.loci.some(row=>row.id===locus.id))addLocus(locus);
+            if(meta.allele){const selected=state.scenario.loci.find(row=>row.id===locus.id);if(!selected?.alleles.includes(meta.allele))throw new Error('Review the saved Rosa26 allele definition before selecting this strain.');state.scenario.targets[locus.id]={mode:'carrier',allele:meta.allele};invalidate();state.notice=`${meta.allele} selected. Ai32 and Ai96 are separate strains at one Rosa26 locus. To target both, choose Exact genotype: Ai32 / Ai96.`;}
+          }
         }
       }
-      else if(action==='remove-locus'){state.scenario.loci=state.scenario.loci.filter(row=>row.id!==meta.locus);for(const role of ['sire','dam'])delete state.scenario[role].calls[meta.locus];delete state.scenario.targets[meta.locus];invalidate()}
+      else if(action==='remove-locus')removeLocus(meta.locus);
       else if(action==='clear-loci'){state.scenario.loci=[];state.scenario.targets={};for(const role of ['sire','dam'])state.scenario[role].calls={};state.illustrative=false;invalidate()}
       else if(action==='example'){state.scenario=exampleScenario();state.illustrative=true;state.sourceWarnings=[];invalidate()}
       else if(action==='negative-control'){const locus=state.scenario.loci.find(row=>row.id===meta.locus);if(locus?.kind==='cre'&&locus.alleles.includes('+')){state.scenario.targets[locus.id]={mode:'exact',alleles:['+','+']};invalidate()}}
