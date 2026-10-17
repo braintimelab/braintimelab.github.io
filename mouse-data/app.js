@@ -22,8 +22,8 @@ import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=100
 import * as history from './history-index.js?v=100';
 import { renderUserManagement } from './user-management.js?v=100';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=100';
-import { renderAccessLogs } from './access-logs.js?v=100';
-import { createAccessActivity } from './access-activity.js?v=100';
+import { renderAccessLogs } from './access-logs.js?v=113';
+import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=100';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
@@ -206,7 +206,15 @@ function queueLabUserDirectory(){
  },0);
 }
 const accessLogContext=()=>{const state=store.getCloudStatus();return [state.url,state.colonyId,state.email,state.mode,state.role,state.signedIn,state.passwordRecovery].join('|');};
-const accessActivity=createAccessActivity({app:'mouse',sections:Object.keys(titles),record:store.recordAppAccess,getContext:store.getCloudStatus});
+const accessActivity=createAccessActivity({app:'mouse',sections:Object.keys(titles),record:store.recordAppAccess,getContext:store.getCloudStatus,isVisible:()=>!document.hidden&&!startupLoading});
+const accessPage=()=>route==='review'?'mice':route;
+const resumeAccess=()=>{if(!document.hidden&&!startupLoading)accessActivity.resume(accessPage());};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)accessActivity.suspend();else resumeAccess();});
+window.addEventListener('pagehide',()=>accessActivity.suspend());
+window.addEventListener('pageshow',event=>{if(event.persisted)resumeAccess();});
+window.addEventListener('focus',resumeAccess);
+window.addEventListener('online',resumeAccess);
+for(const type of ['pointerdown','keydown'])document.addEventListener(type,event=>{if(event.isTrusted!==false&&!document.hidden&&!startupLoading)accessActivity.touch(accessPage());});
 function clearAccessLogView(){accessLogsCleanup?.();accessLogsCleanup=null;}
 function clearLabMembersView(){const container=$('lab-members');if(container)clearLabMembers(container);}
 const entity = {

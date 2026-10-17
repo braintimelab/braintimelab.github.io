@@ -3,8 +3,8 @@ import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=95';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=95';
-import {createAccessActivity} from '../mouse-data/access-activity.js?v=95';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=113';
+import {createAccessActivity} from '../mouse-data/access-activity.js?v=113';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=3';
 import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=2';
 import {SECTIONS,canReviewHistory,canViewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=5';
@@ -73,7 +73,7 @@ async function loadUsagePeople(){
 const usageLogger=row=>usageLoggedBy(row,{directory:usagePeople?.key===context()?usagePeople.directory:[]});
 const accessActivity=createAccessActivity({app:'reagents',sections:SECTIONS.map(([route])=>route),record:args=>store.recordAppAccess?.(args),getContext:()=>{const current=store.getCloudStatus();return member&&permissions.role&&!current.setupRequired?{...current,mode:'cloud'}:null;}});
 const section=()=>{const key=location.hash.slice(1).split('/')[0];return SECTIONS.some(s=>s[0]===key)?key:'orders';};
-function observeAccess(){const current=section();if(current==='history'&&!ownerHistoryAccess()||current==='review'&&!canReviewHistory(permissions))return;accessActivity.observe(current);}
+function observeAccess(resume=false,touch=false){if(!member||document.hidden)return;const current=section();if(current==='history'&&!ownerHistoryAccess()||current==='review'&&!canReviewHistory(permissions))return;accessActivity[resume?'resume':touch?'touch':'observe'](current);}
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
 const date=v=>v?text(v).slice(0,10):'Date unknown';
 function status(message='',error=false){$('status').textContent=message;$('status').dataset.error=String(error);if($('sheet-import-dialog').open){$('sheet-import-status').textContent=message;$('sheet-import-status').dataset.error=String(error);}}
@@ -147,14 +147,14 @@ function signInView(message=''){
  $('login-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget),pw=f.get('password');e.currentTarget.elements.password.value='';const attempt=++generation;status('Signing in…');try{await store.signIn(text(f.get('identifier')).trim(),pw);if(attempt===generation)await start();}catch(err){if(attempt===generation)status(err.message,true);}});
  status(message,!!message);
 }
-async function start({force=false}={}){
+async function start({force=false,resumeActivity=false}={}){
  if(importing&&!force)return;
  const attempt=++generation;resetPrivate();
  try{const c=store.getCloudStatus();if(!c.configured||c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)store.configureCloud(PUBLIC_CONFIG);
   const current=store.getCloudStatus();if(!current.signedIn){signInView();return;}
   if(current.setupRequired||current.passwordRecovery){main.innerHTML='<div class="empty"><h2>Complete your account</h2><p>Finish account setup or password recovery before opening Reagents.</p><a href="../mouse-data/#settings">Continue in Mouse Data →</a></div>';return;}
   const checked=await store.verifyCloudMembership();if(attempt!==generation)return;if(!checked.signedIn||checked.passwordRecovery||checked.setupRequired||!['owner','manager','editor','viewer'].includes(checked.role)||checked.url!==PUBLIC_CONFIG.url||checked.colonyId!==PUBLIC_CONFIG.colonyId)throw Error('Your lab access could not be verified. Sign in again.');member=true;
-  const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;observeAccess();
+  const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;observeAccess(resumeActivity);
   showIdentity(checked);
   const loaded=await loadInventory();if(attempt!==generation)return;items=loaded;items.forEach(r=>records.set(r.id,r));status();await render();
  }catch(err){if(attempt!==generation)return;accessActivity.reset();resetPrivate();signInView(err.message);}
@@ -162,18 +162,18 @@ async function start({force=false}={}){
 // Returning to the tab must not advance the shared Auth generation while an
 // import RPC is in flight. The access RPC checks live membership and permissions.
 async function revalidateImportAccess(){
- if(!importing)return start();
+ if(!importing)return start({resumeActivity:true});
  if(accessCheck?.generation===generation)return accessCheck.promise;
  const g=generation,check=fence();
  const pending=(async()=>{
-  try{const access=await rpc('access');check();if(!access?.permissions||JSON.stringify(access.permissions)!==JSON.stringify(permissions))throw Error('Your access changed. Reopen Reagents.');}
+  try{const access=await rpc('access');check();if(!access?.permissions||JSON.stringify(access.permissions)!==JSON.stringify(permissions))throw Error('Your access changed. Reopen Reagents.');observeAccess(true);}
   catch(error){if(g===generation)accessFailure(error);}
  })();
  accessCheck={generation:g,promise:pending};
  try{await pending;}finally{if(accessCheck?.promise===pending)accessCheck=null;}
 }
-async function revalidateOrdersAccess(){const g=generation,refresh=refreshOrders;try{await rpc('access');if(g===generation&&refresh===refreshOrders)await refresh?.();}catch(error){if(g===generation&&member)accessFailure(error);}}
-function returnToApp(){if(!document.hidden)return importing?revalidateImportAccess():disposeOrders?revalidateOrdersAccess():start();}
+async function revalidateOrdersAccess(){const g=generation,refresh=refreshOrders;try{await rpc('access');if(g===generation&&refresh===refreshOrders){observeAccess(true);await refresh?.();}}catch(error){if(g===generation&&member)accessFailure(error);}}
+function returnToApp(){if(document.hidden){accessActivity.suspend();return;}return importing?revalidateImportAccess():disposeOrders?revalidateOrdersAccess():start({resumeActivity:true});}
 async function render(){if(!member)return;closeExportPreview();closeOrders();closeAccessLogs();clearTimeout(searchTimer);listKind=null;nav();observeAccess();const v=++viewGeneration;selected=null;main.innerHTML='<div class="empty">Loading…</div>';try{
  const s=section();if(s==='history'&&!ownerHistoryAccess()){main.innerHTML='<div class="empty">History is available only to the owner.</div>';return;}if(s==='review'&&!canReviewHistory(permissions)){main.innerHTML='<div class="empty">Review is available to the owner and managers.</div>';return;}if(s==='orders'){await ordersView(v);return;}if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
  if(s==='history'){await historyView(v);return;}if(s==='settings'){await settingsView(v);return;}await recordList(v,s);
@@ -347,6 +347,8 @@ window.addEventListener('storage',e=>{if(e.key===null||['mouse-colony.cloud.v1',
 window.addEventListener('offline',()=>updateConnectionIndicator('unavailable'));
 // Revalidate on return from another tab. Never keep private content after an access failure.
 document.addEventListener('visibilitychange',returnToApp);
-window.addEventListener('focus',()=>{if(importing||disposeOrders)return returnToApp();});
+// Interaction refreshes activity without recording keys, field values or item IDs.
+for(const eventName of ['pointerdown','keydown'])document.addEventListener(eventName,event=>{if(event.isTrusted!==false)observeAccess(false,true);});
+window.addEventListener('focus',()=>{if(document.hidden)return;if(importing||disposeOrders)return returnToApp();if(member)return revalidateOrdersAccess();});
 window.addEventListener('pageshow',e=>{if(e.persisted)return returnToApp();});
 await start();
