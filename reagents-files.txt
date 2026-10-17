@@ -6,3 +6,4 @@ model.js
 orders.js
 styles.css
 table-sort.js
+usage.js
