@@ -179,7 +179,7 @@ test('completed animal work stays stored and can be reopened through the badge e
   assert.equal(ui.saved.length, 1);
   assert.equal(ui.saved[0].next.tables.mice[0].work_badges.length, 1);
   assert.equal(ui.saved[0].next.tables.mice[0].work_badges[0].status, 'open');
-  assert.match(article(ui.host, 'C1'), />Genotyping<\/button>/);
+  assert.match(article(ui.host, 'C1'), />Geno<\/span>/);
 });
 
 test('a combined mouse move and badge edit keeps animal work with its SID and faults at the original position', () => {
@@ -192,9 +192,9 @@ test('a combined mouse move and badge edit keeps animal work with its SID and fa
   assert.equal(equipment(next, 'P1').equipment_status.location_id, 'P1');
   assert.equal(equipment(next, 'P2'), undefined);
   const ui = renderHarness(next);
-  assert.match(article(ui.host, 'C2'), />Genotyping<\/button>/);
-  assert.doesNotMatch(article(ui.host, 'C2'), />PIR fault<\/button>/);
-  assert.match(article(ui.host, 'C1'), />PIR fault<\/button>/);
+  assert.match(article(ui.host, 'C2'), />Geno<\/span>/);
+  assert.doesNotMatch(article(ui.host, 'C2'), />PIR!<\/span>/);
+  assert.match(article(ui.host, 'C1'), />PIR!<\/span>/);
 });
 
 test('empty physical positions show active equipment faults, and completed faults stop displaying', () => {
@@ -203,10 +203,10 @@ test('empty physical positions show active equipment faults, and completed fault
   const empty = [...ui.host.innerHTML.matchAll(/<article\b[^>]*data-sheet-slot="P3"[^>]*>[\s\S]*?<\/article>/g)][0]?.[0];
   assert.ok(empty, 'Empty current position is present');
   assert.match(empty, /sheet-empty-slot/);
-  assert.match(empty, />PIR fault<\/button>/);
+  assert.match(empty, />PIR!<\/span>/);
   const done = applyPlans(active, badgePlan(active, 'locations', 'P3', 'pir', { status: 'done' }));
   ui = renderHarness(done);
-  assert.doesNotMatch(ui.host.innerHTML, />PIR fault<\/button>/);
+  assert.doesNotMatch(ui.host.innerHTML, />PIR!<\/span>/);
   assert.equal(equipment(done, 'P3').equipment_status.work_badges[0].status, 'done');
 });
 
@@ -226,7 +226,7 @@ test('the empty-position equipment editor uses the same shared Save transaction'
 test('current viewers can inspect badges but cannot stage edits, and historical views suppress current work', async () => {
   const data = applyPlans(sample(), badgePlan(sample(), 'mice', 'M1', 'genotyping'), badgePlan(sample(), 'locations', 'P1', 'pir'));
   let ui = renderHarness(data, { canEdit: () => false });
-  assert.match(ui.host.innerHTML, />Genotyping<\/button>/);
+  assert.match(ui.host.innerHTML, />Geno<\/span>/);
   await ui.click('data-sheet-badges', undefined, 'C1');
   assert.doesNotMatch(ui.host.innerHTML, /<button[^>]*data-sheet-badge-apply/);
   ui.input({ sheetBadgeField: 'note' }, 'Cannot apply');
@@ -249,7 +249,49 @@ test('unknown genotypes do not create work, while existing breeding and lighting
   assert.deepEqual(data, before);
   const saved = applyPlans(data, badgePlan(data, 'mice', 'M1', 'genotyping'));
   const next = renderHarness(saved);
-  assert.match(article(next.host, 'C1'), />Genotyping<\/button>/);
+  assert.match(article(next.host, 'C1'), />Geno<\/span>/);
   assert.match(article(next.host, 'C1'), />Breeding<\/span>/);
   assert.match(article(next.host, 'C1'), />DD<\/span>/);
+});
+
+test('compact task and fault labels share the lighting header and remain display-only until Badges opens', async () => {
+  let data = sample();
+  data.tables.cages[0].cage_entrainment = { schemaVersion: 1, entries: [{ date: '2026-01-01', scheme: 'DD' }] };
+  data = applyPlans(data,
+    badgePlan(data, 'mice', 'M1', 'genotyping', { note: 'Check genotype' }),
+    badgePlan(data, 'cages', 'C1', 'experiment', { note: 'Prepare sampling' }),
+    badgePlan(data, 'locations', 'P1', 'pir', { note: 'No signal' }));
+  data = applyPlans(data, badgePlan(data, 'locations', 'P1', 'led', { note: 'Light interrupted' }));
+  const ui = renderHarness(data), card = article(ui.host, 'C1'), header = card.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1];
+  assert.ok(header);
+  for (const label of ['DD', 'Geno', 'Exp', 'PIR!', 'LED!']) assert.ok(header.includes(`>${label}</span>`), `${label} is in the header`);
+  assert.doesNotMatch(header, /data-sheet-badge-edit|data-sheet-badges=/);
+  assert.doesNotMatch(card, /<button[^>]*class="sheet-work-badge/);
+  const displays = [...header.matchAll(/<span\b([^>]*)>([^<]*)<\/span>/g)].filter(([, values]) => /sheet-work-display/.test(attributes(values).class || ''));
+  assert.equal(displays.length, 4);
+  for (const [, values] of displays) {
+    const attrs = attributes(values);
+    assert.ok(attrs.title); assert.ok(attrs['aria-label']);
+  }
+  assert.ok(displays.some(([, values]) => attributes(values).title.includes('Experiment')));
+  assert.ok(displays.some(([, values]) => attributes(values).title.includes('PIR fault')));
+  const headerAttrs = attributes(card.match(/<header\b([^>]*)>/)[1]), cardAttrs = attributes(card.match(/<article\b([^>]*)>/)[1]);
+  let captures = 0, prevented = false;
+  const headerNode = { dataset: dataAttributes(headerAttrs), setPointerCapture() { captures++; } }, cardNode = { dataset: dataAttributes(cardAttrs) };
+  const displayTarget = { dataset: {}, closest(selector) {
+    if (selector === '.sheet-work-display') return this;
+    if (selector === '.sheet-cage') return cardNode;
+    if (selector === '.sheet-cage-drag-region' || selector.split(',').some(part => /^\[[\w-]+\]$/.test(part) && Object.hasOwn(headerAttrs, part.slice(1, -1)))) return headerNode;
+    return null;
+  } };
+  const beforeTap = ui.host.innerHTML;
+  await ui.host.onclick({ target: displayTarget, preventDefault() { prevented = true; } });
+  for (const [name, x] of [['onpointerdown', 10], ['onpointermove', 40], ['onpointerup', 40]]) ui.host[name]({ target: displayTarget, pointerType: 'mouse', pointerId: 1, button: 0, clientX: x, clientY: 10, preventDefault() { prevented = true; } });
+  assert.equal(ui.host.innerHTML, beforeTap, 'Tapping a display badge does not select its cage or open an editor');
+  assert.equal(captures, 0, 'A display badge does not transfer pointer capture to its cage header');
+  assert.equal(prevented, false); assert.equal(hasCageSheetDrafts(), false);
+  await ui.click('data-sheet-badges', undefined, 'C1');
+  assert.match(article(ui.host, 'C1'), /<button[^>]*data-sheet-badge-edit=/);
+  assert.match(article(ui.host, 'C1'), /Prepare sampling/);
+  assert.equal(ui.saved.length, 0); assert.equal(hasCageSheetDrafts(), false);
 });

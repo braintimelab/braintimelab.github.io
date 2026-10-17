@@ -87,6 +87,7 @@ function renderHarness(data, overrides = {}) {
     sync: () => host.querySelector('#cage-sheet-sync').onclick() };
 }
 async function stageInferredDone(ui, label = 'Genotyping', positionId = 'P1') {
+  await ui.click('data-sheet-badges', { positionId });
   await ui.click('data-sheet-badge-edit', { positionId, text: label });
   ui.input({ sheetBadgeField: 'status' }, 'done');
   await ui.click('data-sheet-badge-apply');
@@ -99,7 +100,7 @@ test('raw Animal Sheet header, footer and row phrases yield source badges withou
   assert.equal(badges.filter(badge => badge.kind === 'genotyping').length, 2, 'Header card task and distinct row task retain their scopes');
   assert.deepEqual(data, before);
   const ui = renderHarness(data);
-  assert.match(articleAt(ui.host, 'P1'), />Genotyping ×2<\/button>/);
+  assert.match(articleAt(ui.host, 'P1'), />Geno ×2<\/span>/);
   assert.equal(hasCageSheetDrafts(), false);
 });
 
@@ -119,7 +120,7 @@ test('Done on an unlinked inferred row saves a generic source event through the 
   assert.equal(saved.tables.mice.length, 0);
   assert.equal(saved.tables.cages.length, 0);
   assert.equal(saved.tables.locations[0].source_block_text, before.tables.locations[0].source_block_text);
-  assert.doesNotMatch(articleAt(ui.host, 'P1'), />Genotyping<\/button>/);
+  assert.doesNotMatch(articleAt(ui.host, 'P1'), />Geno<\/span>/);
   assert.ok(ui.saved[0].options.readDependencies.some(row => row.type === 'locations' && row.id === 'P1'));
 });
 
@@ -261,9 +262,9 @@ test('member hints load asynchronously, and a late result cannot repaint a diffe
   position.source_cage_observation=cageObservations(position);delete position.source_block_text;
   let resolve,context='source-note-fixture';
   const ui=renderHarness(data,{loadNoteHints:()=>new Promise(done=>{resolve=done;}),currentContext:()=>context});
-  assert.doesNotMatch(articleAt(ui.host,'P1'),/>Genotyping<\/button>/);
+  assert.doesNotMatch(articleAt(ui.host,'P1'),/>Geno<\/span>/);
   resolve([{location_id:'P1',notes:['Genotyping']}]);await new Promise(setImmediate);
-  assert.match(articleAt(ui.host,'P1'),/>Genotyping<\/button>/);
+  assert.match(articleAt(ui.host,'P1'),/>Geno<\/span>/);
   const other=renderHarness(data,{loadNoteHints:()=>new Promise(done=>{resolve=done;}),currentContext:()=>context});
   context='different-account';const before=other.host.innerHTML;
   resolve([{location_id:'P1',notes:['Genotyping']}]);await new Promise(setImmediate);
