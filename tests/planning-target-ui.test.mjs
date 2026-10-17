@@ -58,3 +58,7 @@ test('exact FoxJ1 stock homozygous target retains conception probability but cle
 test('editing a recognized locus definition removes old exact-stock guidance instead of imposing it on a custom allele',async()=>{
  const h=await harness({mice:[foxMouse()]});await h.click('catalogue-locus',{locus:'foxj1-cre'});await h.click('manual');h.change('locus','Custom driver',{locus:'foxj1-cre',key:'name'});h.change('locus','other',{locus:'foxj1-cre',key:'kind'});await h.click('tab',{tab:'design'});h.change('design-copies','homozygous',{locus:'foxj1-cre'});await h.click('design');assert.match(h.container.innerHTML,/Virtual parent pairs/);assert.doesNotMatch(h.container.innerHTML,/No viable adult route|027012|Foxj1.*postnatal/i);assert.equal(h.saves,0);
 });
+
+test('exact distinct-autosome references design a cross without an unknown-linkage assumption',async()=>{
+ const h=await harness({mice:[mouse('100','Male'),foxMouse()]}),before=structuredClone(h.dataset);await h.click('catalogue-locus',{locus:'bmal1'});await h.click('catalogue-locus',{locus:'foxj1-cre'});h.change('design-copies','homozygous',{locus:'bmal1'});await h.click('design');assert.match(h.container.innerHTML,/Virtual parent pairs/);assert.match(h.container.innerHTML,/Virtual pedigree/);assert.match(h.container.innerHTML,/Day 98/);assert.equal(h.saves,0);assert.deepEqual(h.dataset,before);
+});
