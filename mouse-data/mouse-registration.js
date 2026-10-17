@@ -1,12 +1,13 @@
-import { parseCompactStrainNotation } from './mouse-summary.js?v=115';
+import { parseCompactStrainNotation } from './mouse-summary.js?v=118';
 import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=115';
+import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=118';
+import {FOXJ1_STRAIN_NAME} from './strain-registry.js?v=118';
 
 const active=r=>r&&!r.archived&&!r.app_archived_at&&!r.history_read_only&&!r.source_historical;
 const mice=data=>data?.tables?.mice||[];
 const find=(data,type,key,id)=>(data?.tables?.[type]||[]).find(r=>String(r[key])===String(id));
-const names={P:'PER2::LUC',E:'Bmal1-ELuc',B:'Bmal1-flox',F:'FoxJ1-Cre',V:'Vip-Cre',AD:'APP/PS1',A:'Avp-Cre',Vg:'Vgat-flox',32:'Ai32',96:'Ai96',Gt:'GAD67-tTA2',WT:'WT'};
+const names={P:'PER2::LUC',E:'Bmal1-ELuc',B:'Bmal1-flox',F:FOXJ1_STRAIN_NAME,V:'Vip-Cre',AD:'APP/PS1',A:'Avp-Cre',Vg:'Vgat-flox',32:'Ai32',96:'Ai96',Gt:'GAD67-tTA2',WT:'WT'};
 
 /** Numeric candidates are provisional. The shared save's expected_version=0
  * is the final uniqueness check; never regenerate after an unknown save result. */

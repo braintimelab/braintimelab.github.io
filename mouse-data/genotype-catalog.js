@@ -1,26 +1,30 @@
 /* Runtime discovery only. Source labels are evidence, not a strain registry.
  * No private colony records are included in this module.
  * Ai32 and Ai96 are alternative Gt(ROSA)26Sor alleles:
- * https://www.jax.org/strain/012569  https://www.jax.org/strain/024106
+ * https://www.jax.org/strain/012569  https://www.jax.org/strain/028866
  */
-import {canonicalStrainName,strainNameAliases,FLOX_STRAIN_NAMES,strainNamingWarning,explicitCreName,legacyVgatCreName} from './strain-registry.js?v=115';
+import {canonicalStrainName,strainNameAliases,FLOX_STRAIN_NAMES,FOXJ1_STRAIN_NAME,strainNamingWarning,explicitCreName,legacyVgatCreName} from './strain-registry.js?v=118';
 const string=value=>typeof value==='string'?value:'';
 const unique=values=>[...new Set(values)];
 const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-const NAME_PATTERN=/(?:PER\d\s*:{1,2}\s*LUC|Bmal1-ELuc|[A-Za-z][A-Za-z0-9]*-(?:Cre(?:ERT?2?)?|tTA\d*)|Ai\d+|APP\s*\/\s*PS1|(?:Bmal1|Meis1|Vgat)(?:[- ]+flox(?:ed)?)?)/gi;
+const NAME_PATTERN=/(?:PER\d\s*:{1,2}\s*LUC|Bmal1-ELuc|FoxJ(?:1)?-(?:CreERT2|ERT2?-Cre|Cre)|[A-Za-z][A-Za-z0-9]*-(?:Cre(?:ERT?2?)?|tTA\d*)|Ai\d+|APP\s*\/\s*PS1|(?:Bmal1|Meis1|Vgat)(?:[- ]+flox(?:ed)?)?)/gi;
 const GENERIC_CALL=/(?:^|[,;\n])\s*([A-Za-z][A-Za-z0-9_:./-]{1,60})\s*\([^()]*\)/g;
 const IGNORED_NAMES=new Set(['wt','wildtype','wild-type','unknown','none','na','n/a','null']);
 const evidenceText=value=>value.split('\n').map(line=>/^\s*PER\d\s*:{1,2}\s*LUC/i.test(line)?line:line.replace(/^\s*\$?[A-Z]{1,3}\$?\d+(?:\s+comment)?\s*:\s+/,'' )).filter(line=>!/^\s*=/.test(line)).join('\n');
 const PUBLIC_IDS=new Map(['PER2::LUC','Bmal1-ELuc','Avp-Cre','Vip-Cre','FoxJ1-Cre','GAD67-tTA','Bmal1','Meis1','Vgat','APP/PS1'].map(name=>[name,name.toLowerCase().replace(/[^a-z0-9]+/g,'-')]));
+PUBLIC_IDS.set(FOXJ1_STRAIN_NAME,'foxj1-cre');
 for(const name of FLOX_STRAIN_NAMES)PUBLIC_IDS.set(name,name.slice(0,-5).toLowerCase());
 const catalogId=name=>['Ai32','Ai96'].includes(name)?'rosa26':PUBLIC_IDS.get(name)||`locus:${name}`;
+// Keep the historical allele token so existing confirmed profiles still match.
+// The strain's display name and stock details identify its inducible construct.
+const geneticAllele=name=>canonicalStrainName(name)===FOXJ1_STRAIN_NAME?'FoxJ1-Cre':name;
 const sheetIndexes=new WeakMap();
 
 function canonicalName(value) {
   const name=string(value).trim().replace(/\s*:\s*:\s*|\s*:\s*/g,'::').replace(/\s*\/\s*/g,'/');
   if(/^per\d::luc$/i.test(name))return name.toUpperCase();
   const common={'bmal1-eluc':'Bmal1-ELuc','avp-cre':'Avp-Cre','vip-cre':'Vip-Cre','foxj1-cre':'FoxJ1-Cre','gad67-tta':'GAD67-tTA','bmal1':'Bmal1','meis1':'Meis1','vgat':'Vgat','app/ps1':'APP/PS1'};
-  if(FLOX_STRAIN_NAMES.includes(canonicalStrainName(name))||canonicalStrainName(name)==='FoxJ1-Cre')return canonicalStrainName(name);
+  if(FLOX_STRAIN_NAMES.includes(canonicalStrainName(name))||canonicalStrainName(name)===FOXJ1_STRAIN_NAME)return canonicalStrainName(name);
   if(common[name.toLowerCase()])return common[name.toLowerCase()];
   if(/^ai\d+$/i.test(name))return 'Ai'+name.slice(2);
   return name;
@@ -90,7 +94,7 @@ export function discoverGenotypes(dataset,historyIndex=null) {
     if(!id)continue;
     let item=found.get(id);
     if(!item){item={id,name:id==='rosa26'?'Gt(ROSA)26Sor':name,kind:id==='rosa26'||/::LUC$|-ELuc$/i.test(name)?'reporter':/-Cre(?:ERT?2?)?$/i.test(name)?'cre':'other',chromosome:id==='rosa26'?'6':'unknown',alleles:['+'],sourceLabels:[],occurrences:0,sources:[],_names:new Set(),_entries:new Set(),_sources:new Set(),_strains:new Map(),_flox:false};found.set(id,item);}
-    item._names.add(name);item.sourceLabels=unique([...item.sourceLabels,label,name]);
+    item._names.add(geneticAllele(name));item.sourceLabels=unique([...item.sourceLabels,label,name]);
     if(!item._entries.has(row.key)){item._entries.add(row.key);item.occurrences++;}
     const sk=sourceKey(row.source);if(!item._sources.has(sk)){item._sources.add(sk);item.sources.push(row.source);}
     if(id==='rosa26'){
@@ -134,7 +138,7 @@ function parsePair(label,body,locus,warnings) {
     return normalized.map(value=>value==='WT'?'+':value);
   }
   if(!/-(?:Cre(?:ERT?2?)?|tTA\d*|ELuc)$|^Ai\d+$|^PER\d::LUC$/i.test(name)){warnings.push(`${name}: gene-variant semantics are ambiguous; identify the allele rather than interpreting + as a named construct.`);return null;}
-  if(normalized.every(value=>['+','-','WT'].includes(value)))return normalized.map(value=>value==='+'?name:'+');
+  if(normalized.every(value=>['+','-','WT'].includes(value)))return normalized.map(value=>value==='+'?geneticAllele(name):'+');
   warnings.push(`${name}: source allele notation is incompatible with this named construct; review the source.`);return null;
 }
 

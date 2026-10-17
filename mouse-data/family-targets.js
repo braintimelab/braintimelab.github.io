@@ -1,7 +1,7 @@
 /* Desired offspring targets only. This bridge never supplies parental calls. */
 import { rankPairs } from './genetics.js?v=100';
-import { discoverGenotypes } from './genotype-catalog.js?v=115';
-import {canonicalLocusName,explicitCreName} from './strain-registry.js?v=115';
+import { discoverGenotypes } from './genotype-catalog.js?v=118';
+import {canonicalLocusName,explicitCreName,FOXJ1_STRAIN_NAME,FOXJ1_STRAIN_ALIASES} from './strain-registry.js?v=118';
 
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const clone=value=>structuredClone(value);
@@ -15,7 +15,7 @@ const definitions={
   P:definition('per2-luc','PER2::LUC','reporter','PER2::LUC'),
   E:definition('bmal1-eluc','Bmal1-ELuc','reporter','Bmal1-ELuc'),
   B:definition('bmal1','Bmal1-flox','flox','fl',['Bmal1']),
-  F:definition('foxj1-cre','FoxJ1-Cre','cre','FoxJ1-Cre',['FoxJ-Cre']),
+  F:definition('foxj1-cre',FOXJ1_STRAIN_NAME,'cre','FoxJ1-Cre',FOXJ1_STRAIN_ALIASES),
   V:definition('vip-cre','Vip-Cre','cre','Vip-Cre'),
   AD:definition('app-ps1','APP/PS1','other','APP/PS1',['Tg(APPswe,PSEN1dE9)85Dbo']),
   A:definition('avp-cre','Avp-Cre','cre','Avp-Cre'),

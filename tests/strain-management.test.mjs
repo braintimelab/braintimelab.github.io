@@ -61,7 +61,7 @@ test('genetic detail editor saves entered fields and escapes all displayed value
 test('strain selection and search keep drafts, and discard clears them without saving',async()=>{
   const h=harness();h.field('P','promoter','Local draft');assert.equal(hasStrainDrafts(h.container),true);
   const click=async(action,code)=>h.container.onclick({target:{closest:()=>({disabled:false,dataset:{strainAction:action,strainCode:code}})}});
-  await click('select','F');assert.match(h.container.innerHTML,/FoxJ1-Cre details/);assert.match(h.container.innerHTML,/Save F/);
+  await click('select','F');assert.match(h.container.innerHTML,/FoxJ1-CreERT2 details/);assert.match(h.container.innerHTML,/Save F/);
   await click('select','P');assert.match(h.container.innerHTML,/Local draft/);
   h.container.oninput({target:{value:'APP',dataset:{strainSearch:''}}});assert.match(h.container.innerHTML,/APP\/PS1/);assert.doesNotMatch(h.container.innerHTML,/class="strain-card-name">Vip-Cre/);
   await click('discard','P');assert.equal(hasStrainDrafts(h.container),false);assert.doesNotMatch(h.container.innerHTML,/Local draft/);assert.equal(h.saves.length,0);

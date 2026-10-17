@@ -1,12 +1,12 @@
 /* Current recorded line counts, not assay confirmation or allele dosage.
  * Animal Sheet abbreviations are interpreted only in the animal's own fields.
  */
-import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=115';
+import {explicitCreName,legacyVgatCreName,canonicalStrainName,FOXJ1_STRAIN_NAME} from './strain-registry.js?v=118';
 export const MOUSE_LINE_GROUPS = Object.freeze([
   {key:'P',name:'PER2::LUC'},
   {key:'E',name:'Bmal1-ELuc'},
   {key:'B',name:'Bmal1-flox'},
-  {key:'F',name:'FoxJ1-Cre'},
+  {key:'F',name:FOXJ1_STRAIN_NAME},
   {key:'V',name:'Vip-Cre'},
   {key:'AD',name:'APP/PS1'},
 ].map(Object.freeze));
@@ -15,7 +15,7 @@ const keys=MOUSE_LINE_GROUPS.map(group=>group.key);
 const assignmentKeys=[...keys,'A','32','Vg','Gt','96'];
 const zero=()=>Object.fromEntries(keys.map(key=>[key,0]));
 const text=value=>typeof value==='string'?value:'';
-const patterns={P:/PER2\s*:{1,2}\s*LUC/gi,E:/Bmal1-ELuc/gi,B:/Bmal1(?:[-\s]+flox(?:ed)?)?/gi,F:/FoxJ(?:1)?-Cre/gi,V:/Vip-Cre/gi,AD:/APP\s*\/\s*PS1/gi,A:/Avp-Cre/gi,'32':/Ai32/gi,Vg:/Vgat(?:-Cre|[-\s]+flox(?:ed)?)?/gi,Gt:/GAD67-tTA(?:2)?/gi,'96':/Ai96/gi};
+const patterns={P:/PER2\s*:{1,2}\s*LUC/gi,E:/Bmal1-ELuc/gi,B:/Bmal1(?:[-\s]+flox(?:ed)?)?/gi,F:/FoxJ(?:1)?-(?:CreERT2|ERT2?-Cre|Cre)/gi,V:/Vip-Cre/gi,AD:/APP\s*\/\s*PS1/gi,A:/Avp-Cre/gi,'32':/Ai32/gi,Vg:/Vgat(?:-Cre|[-\s]+flox(?:ed)?)?/gi,Gt:/GAD67-tTA(?:2)?/gi,'96':/Ai96/gi};
 const tokenPattern=/AD|Vg|Gt|WT|32|96|[PEBFVA]/y;
 const target=key=>assignmentKeys.includes(key);
 const floxed=key=>key==='B'||key==='Vg';
@@ -27,7 +27,7 @@ function groupForName(value) {
   if(/^per2(?:\s*:{1,2}\s*|-)luc$/i.test(name))return 'P';
   if(/^bmal1-eluc$/i.test(name))return 'E';
   if(/^bmal1(?:[- ]flox(?:ed)?)?$/i.test(name))return 'B';
-  if(/^foxj(?:1)?-cre$/i.test(name))return 'F';
+  if(canonicalStrainName(name)===FOXJ1_STRAIN_NAME)return 'F';
   if(/^vip-cre$/i.test(name))return 'V';
   if(/^APP\s*\/\s*PS1$/i.test(name))return 'AD';
   if(/^avp-cre$/i.test(name))return 'A';

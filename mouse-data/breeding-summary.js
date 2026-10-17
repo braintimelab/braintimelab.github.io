@@ -1,6 +1,6 @@
-import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=115';
+import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=118';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { mouseLineAssignments } from './mouse-summary.js?v=115';
+import { mouseLineAssignments } from './mouse-summary.js?v=118';
 import { validateGeneticProfile } from './genotype-schema.js?v=100';
 
 const text=value=>typeof value==='string'?value:'';
@@ -8,12 +8,12 @@ const rows=value=>Array.isArray(value)?value:[];
 const archived=record=>Boolean(record?.app_archived_at)||record?.archived===true;
 const aliases=[
   ['P',/^PER2\s*:{1,2}\s*LUC$/i],['E',/^Bmal1-ELuc$/i],
-  ['B',/^Bmal1(?:[- ]flox(?:ed)?)?$/i],['F',/^FoxJ(?:1)?-Cre$/i],
+  ['B',/^Bmal1(?:[- ]flox(?:ed)?)?$/i],['F',/^FoxJ(?:1)?-(?:CreERT2|ERT2?-Cre|Cre)$/i],
   ['V',/^Vip-Cre$/i],['AD',/^APP\s*\/\s*PS1$/i],['A',/^Avp-Cre$/i],
   ['32',/^Ai32$/i],['96',/^Ai96$/i],['Vg',/^Vgat(?:[- ]flox(?:ed)?)?$/i],
   ['Gt',/^GAD67-tTA(?:2)?$/i],['Meis1',/^Meis1(?:[- ]flox(?:ed)?)?$/i],
 ];
-const sourceLabel=/^(PER2\s*:{1,2}\s*LUC|Bmal1-ELuc|Bmal1(?:[- ]flox(?:ed)?)?|FoxJ(?:1)?-Cre|Vip-Cre|APP\s*\/\s*PS1|Avp-Cre|Ai32|Ai96|Vgat(?:-Cre|[- ]flox(?:ed)?)?|GAD67-tTA(?:2)?|Meis1(?:[- ]flox(?:ed)?)?|WT)(?=$|[\s(])\s*(.*)$/i;
+const sourceLabel=/^(PER2\s*:{1,2}\s*LUC|Bmal1-ELuc|Bmal1(?:[- ]flox(?:ed)?)?|FoxJ(?:1)?-(?:CreERT2|ERT2?-Cre|Cre)|Vip-Cre|APP\s*\/\s*PS1|Avp-Cre|Ai32|Ai96|Vgat(?:-Cre|[- ]flox(?:ed)?)?|GAD67-tTA(?:2)?|Meis1(?:[- ]flox(?:ed)?)?|WT)(?=$|[\s(])\s*(.*)$/i;
 const keyFor=value=>aliases.find(([,pattern])=>pattern.test(text(value).trim()))?.[0];
 const profileKey=value=>['P','E','B','F','V','AD','A','32','96','Vg','Gt'].includes(text(value).trim())?text(value).trim():keyFor(value);
 const genericKey=value=>`locus:${text(value).trim().toLowerCase()}`;

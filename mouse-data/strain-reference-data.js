@@ -25,6 +25,24 @@ export const JAX_STRAIN_REFERENCES=Object.freeze({
   genotyping_notes:'JAX PCR protocol 29387 specifies Hotstart Taq. Validate with local controls.',
   references:'https://www.jax.org/strain/010908\nhttps://www.informatics.jax.org/allele/MGI:4431361\nhttps://www.jax.org/Protocol?protocolID=29387&stockNumber=010908'
  }),
+ F:entry('027012',{
+  insertion_type:'knock_in',formal_name:'STOCK Foxj1tm1.1(cre/ERT2/GFP)Htg/J',gene_symbol:'Foxj1',allele_symbol:'Foxj1tm1.1(cre/ERT2/GFP)Htg',
+  promoter:'Endogenous Foxj1 regulatory sequences',
+  construct:'GFP-CreERT2 cassette targeted to exon 2 before the translation start site; the FRT-flanked neomycin cassette was removed with Flp.',
+  reporter:'GFP',recombinase:'Tamoxifen-inducible CreERT2',catalog_background:'Mixed STOCK reference background; targeted allele derived from 129P2/OlaHsd ES cells',
+  strain_source:'The Jackson Laboratory',stock_reference:'JAX 027012',
+  genotyping_notes:'JAX separated PCR protocol 17668: mutant 294 bp; wild type 472 bp. Validate with local controls. Genotype alone does not establish tamoxifen treatment or recombination.',
+  references:'https://www.jax.org/strain/027012\nhttps://www.informatics.jax.org/allele/MGI:5585638\nhttps://www.jax.org/Protocol?protocolID=17668&stockNumber=027012'
+ }),
+ A:entry('023530',{
+  insertion_type:'knock_in',formal_name:'B6.Cg-Avptm1.1(cre)Hze/J',gene_symbol:'Avp',allele_symbol:'Avptm1.1(cre)Hze',
+  promoter:'Endogenous Avp regulatory sequences',
+  construct:'IRES2-Cre targeted after the endogenous stop codon in exon 3; the AttB/AttP-flanked PGK-neo cassette was removed using PhiC31.',
+  recombinase:'Cre',catalog_background:'B6 congenic reference stock; targeted allele derived from (129S6/SvEvTac x C57BL/6NCrl)F1 ES cells',
+  strain_source:'The Jackson Laboratory',stock_reference:'JAX 023530 (AVP-IRES2-Cre-D)',
+  genotyping_notes:'JAX separated PCR protocol 26345: mutant 243 bp; wild type 247 bp. Use the separate reactions and validate locally; do not infer zygosity from one unresolved band.',
+  references:'https://www.jax.org/strain/023530\nhttps://www.informatics.jax.org/allele/MGI:5522761\nhttps://www.jax.org/Protocol?protocolID=26345&stockNumber=023530'
+ }),
  '96':entry('028866',{
   insertion_type:'knock_in',formal_name:'B6J.Cg-Gt(ROSA)26Sortm96(CAG-GCaMP6s)Hze/MwarJ',gene_symbol:'Gt(ROSA)26Sor',allele_symbol:'Gt(ROSA)26Sortm96(CAG-GCaMP6s)Hze',
   promoter:'CAG (CMV enhancer, chicken beta-actin and rabbit beta-globin hybrid)',

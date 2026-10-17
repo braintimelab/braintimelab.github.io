@@ -15,7 +15,8 @@ test('complete confirmed line names and allele tokens link exactly',()=>{
   ['Per2tm1Jt',['P']],['PER2::LUC',['P']],['B6.129S6-Per2tm1Jt/J',['P']],
   ['Arntltm1Weit',['B']],['Bmal1tm1Weit',['B']],['Bmal1-flox',['B']],
   ['Viptm1(cre)Zjh/J',['V']],['Vip-Cre',['V']],['Gt(ROSA)26Sortm96(CAG-GCaMP6s)Hze',['96']],
-  ['Ai96',['96']],['Ai32',['32']],['Gad67-tTA',['Gt']],['Vgat flox',['Vg']],['FoxJ1-Cre',['F']],['FoxJ-Cre',['F']],
+  ['Ai96',['96']],['Ai32',['32']],['Gad67-tTA',['Gt']],['Vgat flox',['Vg']],['FoxJ1-Cre',['F']],['FoxJ-Cre',['F']],['FoxJ1-CreERT2',['F']],['FoxJ1-ERT-CRE',['F']],['STOCK Foxj1tm1.1(cre/ERT2/GFP)Htg/J',['F']],
+  ['B6.Cg-Avptm1.1(cre)Hze/J',['A']],['AVP-IRES2-Cre-D',['A']],
   ['Bmal1-ELuc',['E']],['B6.AD;',['AD']],['APP/PS1',['AD']]
  ])assert.deepEqual(strainCodesForCryo(value),expected,value);
 });
@@ -23,7 +24,7 @@ test('complete confirmed line names and allele tokens link exactly',()=>{
 test('composites may link multiple stocks but no single-letter or shared-gene match is guessed',()=>{
  assert.deepEqual(strainCodesForCryo({strain:'Composite cross',gene:'Per2tm1Jt;Arntltm1Weit'}),['P','B']);
  assert.deepEqual(strainCodesForCryo('PER2::LUC x Bmal1-flox x FoxJ1-Cre'),['P','B','F']);
- for(const value of ['P','PB','FB','V','Bmal1','Vip','Gt(ROSA)26Sor','FoxJ1-CreERT2','Vip-CreERT2','Ai960','NotAi96','Vgat-Cre'])assert.deepEqual(strainCodesForCryo(value),[],value);
+ for(const value of ['P','PB','FB','V','Bmal1','Vip','Gt(ROSA)26Sor','FoxJ1-CreERT3','FoxJ1-CreERT2B','Vip-CreERT2','Ai960','NotAi96','Vgat-Cre'])assert.deepEqual(strainCodesForCryo(value),[],value);
  assert.deepEqual(strainCodesForCryo({strain:'Unknown',gene:'Unknown',origin:'PER2::LUC',notes:'Ai96'}),[]);
 });
 

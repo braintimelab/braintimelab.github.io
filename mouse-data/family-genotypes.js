@@ -2,9 +2,9 @@
  * confirmed; source notation and tag primes never establish assay verification.
  * Omitted loci are unrecorded, never wild type. No archive prose is attributed
  * to a mouse. Ai32/Ai96 retain their shared Rosa26 locus. */
-import {mouseLineAssignments,parseCompactStrainNotation} from './mouse-summary.js?v=115';
-import {getStrainRegistry,canonicalLocusName,canonicalStrainName,explicitCreName,strainNameAliases,strainNamingWarning,legacyVgatCreName} from './strain-registry.js?v=115';
-import {discoverGenotypes,sourceProfile} from './genotype-catalog.js?v=115';
+import {mouseLineAssignments,parseCompactStrainNotation} from './mouse-summary.js?v=118';
+import {getStrainRegistry,canonicalLocusName,canonicalStrainName,explicitCreName,strainNameAliases,strainNamingWarning,legacyVgatCreName,FOXJ1_STRAIN_ALIASES} from './strain-registry.js?v=118';
+import {discoverGenotypes,sourceProfile} from './genotype-catalog.js?v=118';
 import {validateGeneticProfile} from './genotype-schema.js?v=100';
 const str=value=>typeof value==='string'?value:'';
 const archived=row=>Boolean(row?.app_archived_at)||row?.archived===true;
@@ -15,7 +15,7 @@ const wild=value=>/^(?:\+|-|wt|wild[- ]?type|negative|neg|absent)$/i.test(str(va
 const flox=value=>/^(?:fl|f|flox|floxed|(?:Bmal1|Meis1|Vgat)[- ]flox)$/i.test(str(value).trim());
 const normalize=value=>str(value).trim().toLowerCase().replace(/[^a-z0-9]/g,'');
 const codes=['P','E','B','F','V','AD','A','32','Vg','Gt','96'];
-const aliases={P:['PER2::LUC','PER2:LUC'],E:['Bmal1-ELuc'],B:['Bmal1-flox','Bmal1'],F:['FoxJ1-Cre','FoxJ-Cre'],V:['Vip-Cre'],AD:['APP/PS1'],A:['Avp-Cre'],'32':['Ai32'],Vg:['Vgat-flox','Vgat','Vgat-Cre'],Gt:['GAD67-tTA','GAD67-tTA2'],'96':['Ai96']};
+const aliases={P:['PER2::LUC','PER2:LUC'],E:['Bmal1-ELuc'],B:['Bmal1-flox','Bmal1'],F:['FoxJ1-Cre',...FOXJ1_STRAIN_ALIASES.filter(name=>name!=='FoxJ1-Cre')],V:['Vip-Cre'],AD:['APP/PS1'],A:['Avp-Cre'],'32':['Ai32'],Vg:['Vgat-flox','Vgat','Vgat-Cre'],Gt:['GAD67-tTA','GAD67-tTA2'],'96':['Ai96']};
 const byName=new Map(Object.entries(aliases).flatMap(([code,names])=>names.map(name=>[normalize(name),code])));
 const codeFor=value=>codes.includes(str(value).trim())?str(value).trim():byName.get(normalize(value))||null;
 const rosa=locus=>['rosa26','gtrosa26sor'].includes(normalize(locus?.name))||normalize(locus?.id)==='rosa26';

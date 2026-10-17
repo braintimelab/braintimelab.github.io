@@ -1,5 +1,5 @@
 /** Standalone Locobox handwriting cards. Print drafts never change recorded exposure. */
-import {sourceListedAnimals} from './husbandry.js?v=115';
+import {sourceListedAnimals} from './husbandry.js?v=118';
 const list=x=>Array.isArray(x)?x:[],text=x=>typeof x==='string'?x.trim():'',live=x=>x&&!x.app_archived_at&&x.archived!==true;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const colors={white:'#ffffff',blue:'#c9e3ed',pink:'#f0cbdc',yellow:'#f7edb8'},fields=['start','scheme','on_off','days','treatment','user'];

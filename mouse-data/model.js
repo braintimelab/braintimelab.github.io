@@ -1,10 +1,10 @@
 import { validateLocoboxRecord } from './locobox-model.js?v=100';
 import { validateIacucRecord } from './iacuc-model.js?v=100';
-import { validateLacFeeRecord } from './lac-fee-model.js?v=115';
+import { validateLacFeeRecord } from './lac-fee-model.js?v=118';
 import { validateUserAcronym } from './user-acronyms.js?v=100';
 import { validateCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { validateBreedingOptions } from './breeding-options.js?v=100';
-import { validateStrainDefinition } from './strain-registry.js?v=115';
+import { validateStrainDefinition } from './strain-registry.js?v=118';
 import { validateGeneticProfile } from './genotype-schema.js?v=100';
 import { validateScenario } from './genetics.js?v=100';
 import { validateExperimentRecord } from './experiment-model.js?v=100';
