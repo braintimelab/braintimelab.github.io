@@ -6,7 +6,7 @@ import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
 import {renderAccessLogs} from '../mouse-data/access-logs.js?v=95';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=95';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=3';
-import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=1';
+import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=2';
 import {SECTIONS,canReviewHistory,canViewHistory,visibleSections,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=5';
 
 const $=id=>document.getElementById(id), main=$('main'),PAGE=50;

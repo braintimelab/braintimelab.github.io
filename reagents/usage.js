@@ -25,7 +25,7 @@ function isFrequent(row){
   if(frequentNames.has(identity(name)))return true;
   // The current sheet appends Chinese names and regulated concentration
   // thresholds. Keep those exact solvent labels in Frequent use too.
-  const suffix=name.match(/^(?:chloroform|trichloromethane|dichloromethane|dcm|methylene\s+chloride)\b(.*)$/i)?.[1]||'';
+  const suffix=normalize(name).match(/^(?:chloroform|trichloromethane|dichloromethane|dcm|methylene\s+chloride)\b(.*)$/i)?.[1]||'';
   if(/[\u3400-\u9fff]/.test(suffix)&&!/[A-Za-z+/:&]/.test(suffix))return true;
   return [p.cas_number,p.cas,p.cas_no].some(value=>typeof value==='string'&&frequentCAS.has(value.trim().replace(/^CAS\s*(?:No\.?\s*|#\s*)?:?\s*/i,'')));
 }

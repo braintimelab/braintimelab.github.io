@@ -76,6 +76,6 @@ test('a stamped account without an acronym never borrows the editable Used by va
 });
 
 test('current bilingual solvent labels retain their frequent-use grouping without a separate CAS field',()=>{
- for(const name of ['Chloroform 氯仿 (濃度50%以 上)、三氯甲烷','Dichloromethane 二氯甲烷 (濃度25% 以上)'])assert.equal(usageGroup({id:name,kind:'item',payload:{name}}),'frequent');
+ for(const name of ['Chloroform 氯仿 (濃度50%以 上)、三氯甲烷','Dichloromethane 二氯甲烷 (濃度25% 以上)','Dichloromethane\n二氯甲烷 (濃度25% 以上)'])assert.equal(usageGroup({id:name,kind:'item',payload:{name}}),'frequent');
  for(const name of ['Dichloromethane 二氯甲烷 / 甲醇','Chloroform 氯仿混合液'])assert.notEqual(usageGroup({id:name,kind:'item',payload:{name}}),'frequent');
 });
