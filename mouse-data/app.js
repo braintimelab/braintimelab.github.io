@@ -293,7 +293,7 @@ function render() {
  if(route==='overview'){renderOverview();return}
  if(route==='cages'){renderCages();return}
  if(route==='family'){renderFamily();return}
- if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:(id)=>{cryoLinkFocus={id,key:++cryoLinkRequest};navigate('cryo');},openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
+ if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:()=>navigate('cryo'),openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
  if(route==='strains'){renderStrains();return}
  if(route==='planner'){renderPlanner();return}
  if(route==='cryo'){renderCryo();return}
@@ -437,7 +437,7 @@ function renderStrains(){
  const current=()=>route==='strains'&&generation===pageRenderGeneration&&context===labUserDirectoryContext(store.getCloudStatus());
  const check=()=>{if(!current())throw new Error('Account or view changed. Reopen Strains.');};
  renderStrainManagement($('main'),dataset,{
-  initialCode:decodeURIComponent(location.hash.slice(1).split('/')[1]||''),isCurrent:current,canEdit:()=>current()&&canEditRecords('genetics'),toast:showToast,openCryo:()=>navigate('cryo'),
+  initialCode:decodeURIComponent(location.hash.slice(1).split('/')[1]||''),isCurrent:current,canEdit:()=>current()&&canEditRecords('genetics'),toast:showToast,openCryo:id=>{cryoLinkFocus={id,key:++cryoLinkRequest};navigate('cryo');},
   historyIndex:cryoHistoryContext===context?cryoHistoryIndex:null,historyDeferred:deferredHistoryTables().includes('historical_observations'),
   loadCryoHistory:async()=>{check();const index=await loadCryoHistory();check();if(!index&&deferredHistoryTables().includes('historical_observations'))await loadHistoryTables(['historical_observations']);check();return {historyIndex:index,dataset};},
   reloadDataset:async()=>{check();const fresh=await store.loadDataset();check();dataset=fresh;return fresh;},

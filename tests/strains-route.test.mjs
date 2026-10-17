@@ -7,8 +7,8 @@ const source=await readFile(new URL('../mouse-data/app.js',import.meta.url),'utf
 const between=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 function fixture(){
  const calls=[],state={status:{email:'owner@example.invalid',role:'owner',signedIn:true,permissions:{genetics:true},mode:'cloud'},fresh:{tables:{husbandry_events:[]}}};
- const c=vm.createContext({state,calls,Error,normalizeManagerPermissions,location:{hash:'#strains'},$:id=>({id}),labUserDirectoryContext:s=>JSON.stringify(s),renderStrainManagement:(container,data,hooks)=>{state.hooks=hooks;},showToast:()=>{},deferredHistoryTables:()=>[],store:{getCloudStatus:()=>state.status,loadDataset:async()=>{await state.onLoad?.();return state.fresh;},saveDataset:async next=>{calls.push(next);await state.onSave?.();}},refreshCloud:async()=>{state.refreshes=(state.refreshes||0)+1;}});
- vm.runInContext('let route="strains",pageRenderGeneration=1,cryoHistoryContext="",cryoHistoryIndex=null,dataset={tables:{}},cloud=state.status,brainbotReviewPending=false,startupLoading=false,historyLoadState=null,cloudReady=true;',c);
+ const c=vm.createContext({state,calls,Error,normalizeManagerPermissions,location:{hash:'#strains'},$:id=>({id}),labUserDirectoryContext:s=>JSON.stringify(s),renderStrainManagement:(container,data,hooks)=>{state.hooks=hooks;},showToast:()=>{},navigate:(...args)=>calls.push(args),deferredHistoryTables:()=>[],store:{getCloudStatus:()=>state.status,loadDataset:async()=>{await state.onLoad?.();return state.fresh;},saveDataset:async next=>{calls.push(next);await state.onSave?.();}},refreshCloud:async()=>{state.refreshes=(state.refreshes||0)+1;}});
+ vm.runInContext('let route="strains",pageRenderGeneration=1,cryoHistoryContext="",cryoHistoryIndex=null,cryoLinkFocus=null,cryoLinkRequest=0,dataset={tables:{}},cloud=state.status,brainbotReviewPending=false,startupLoading=false,historyLoadState=null,cloudReady=true;',c);
  vm.runInContext(between('function canEditRecords(','function canEditCryopreservation('),c);
  vm.runInContext(between('function renderStrains(){','function mouseSummaryHTML('),c);
  const run=x=>vm.runInContext(x,c);run('renderStrains()');return{state,calls,run};
@@ -40,4 +40,9 @@ test('stale view and changed account reject writes and reload adoption',async()=
 test('unsaved strain edits use the existing unload protection and clear on account change',()=>{
  assert.match(source,/hasCageSheetDrafts\(\)\|\|hasStrainDrafts\(\$\('main'\)\)/);
  assert.match(source,/clearLabMembersView\(\);clearAccountSetup\(\$\('account-setup'\)\);clearStrainManagement\(\$\('main'\)\)/);
+});
+
+test('linked cryopreservation case is passed by the Strains hook',()=>{
+ const f=fixture();f.state.hooks.openCryo('case-96');
+ assert.equal(f.run('cryoLinkFocus.id'),'case-96');assert.equal(f.run('cryoLinkFocus.key'),1);assert.deepEqual(f.calls,[['cryo']]);
 });
