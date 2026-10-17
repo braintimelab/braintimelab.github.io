@@ -13,6 +13,7 @@ brainbot.js
 breeding-options.js
 breeding-planner.js
 breeding-summary.js
+cage-badges.js
 cage-entrainment.js
 cage-history.js
 cage-label.js

@@ -26,7 +26,7 @@ import { createAccessActivity } from './access-activity.js?v=100';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=100';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=100';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=102';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
 import { renderCageLabelEditor } from './cage-label.js?v=100';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
@@ -482,6 +482,7 @@ function renderCages(){
   canEdit:type=>!view.readOnly&&canEditRecords(type==='mice'?'mice':'housing'),
   canImport:()=>!view.readOnly&&canImportAnimalsSheet(),importFromSheet:openCageSheetImport,
   openCage:view.readOnly?undefined:id=>navigate('cages',id),openMouse:view.readOnly?undefined:id=>navigate('mice',id),printLabel:view.readOnly?undefined:id=>openCageLabel(id),printPositionLabel:view.readOnly?undefined:id=>openCageLabel(null,'front',id),
+  openExperiment:view.readOnly?undefined:id=>{experimentRecordId=id;navigate('experiments')},
   openLocobox:view.readOnly?undefined:(cage,position)=>{locoboxContextKey++;locoboxCage=cage;locoboxPosition=position;navigate('locobox')},
   help:()=>showHelp(false,false,true),confirm:message=>confirmAction('Discard pending edits',`<p>${esc(message)}</p>`,'Discard'),
   loadFresh:async()=>{if(cloud.mode==='cloud'){const fresh=await store.pullFromCloud({deferHistory:true});await refreshCloud();return fresh;}return store.loadDataset();},
