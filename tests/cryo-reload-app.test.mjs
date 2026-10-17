@@ -29,7 +29,7 @@ function fixture(){
  vm.runInContext(between('const deferredHistoryTables=','const historyViewKey='),context);
  vm.runInContext(between('function canEditRecords(','function canArchiveRecords('),context);
  vm.runInContext(between('function renderSidebarAccount(){','function adoptSidebarProfile('),context);
- vm.runInContext(between('async function loadSharedColony(','function renderPlanner('),context);
+ vm.runInContext(between('async function loadSharedColony(','async function renderPlanner('),context);
  vm.runInContext(between('function renderCryo(){','function renderExperimentSection('),context);
  const run=code=>vm.runInContext(code,context);
  return {elements,calls,status,state,run,reload:options=>run(`loadSharedColony(${JSON.stringify(options??{})})`)};

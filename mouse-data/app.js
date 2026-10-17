@@ -35,7 +35,6 @@ import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
-import { renderBreedingPlanner } from './breeding-planner.js?v=125';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=118';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=118';
 import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=118';
@@ -77,7 +76,7 @@ let currentRows = [];
 let plannerMouseId = null, plannerTargetDraft = null;
 let experimentMouseId=null, experimentRecordId=null, iacucEntity=null,locoboxCage=null,locoboxPosition=null,locoboxContextKey=0;
 let familyClassifications = new Map();
-let plannerRenderToken = 0;
+let plannerRenderToken = 0, plannerModule = null, plannerModulePending = null;
 let pageRenderGeneration = 0;
 let cryoLinkFocus=null,cryoLinkRequest=0;
 let cryoRenderToken = 0, cryoHistoryPending = null, cryoHistoryIndex = null, cryoHistoryContext = '';
@@ -285,7 +284,7 @@ function render() {
  $('main').onclick=null;$('main').oninput=null;$('main').onchange=null;$('main').onsubmit=null;
  if(cloud.passwordRecovery){navigation();$('page-title').textContent='Reset password';$('add-button').hidden=true;$('export-button').disabled=true;renderConnection();renderPasswordRecovery();return;}
  navigation();$('page-title').textContent=titles[route];$('add-button').hidden=!entity[route]||!!detail||!dataset||!canEditRecords()||(route==='cages'&&!!cageDate);$('add-button').textContent=entity[route]?`New ${entity[route].singular}`:'New record';$('export-button').disabled=!dataset||cachedPreview;renderConnection();
- const historyRequired=({mice:detail?['mouse_genes','mating_members']:['mouse_genes'],matings:['mouse_genes','mating_members'],family:['mouse_genes'],planner:['mouse_genes']})[route];if(dataset&&historyRequired&&historyRouteGate(historyRequired))return;
+ const historyRequired=({mice:detail?['mouse_genes','mating_members']:['mouse_genes'],matings:['mouse_genes','mating_members'],family:['mouse_genes']})[route];if(dataset&&historyRequired&&historyRouteGate(historyRequired))return;
  if(detail){renderDetail();return}
  if(cloud.role==='pending'){route='settings';detail=null;$('page-title').textContent='Your account';renderSettings();return}
  if(route==='settings'){renderSettings();return}
@@ -352,11 +351,15 @@ async function loadSharedColony({preserveView=false,confirm=true,throwOnError=fa
  }
  if(failure&&throwOnError)throw failure;
 }
-function renderPlanner(){
+async function renderPlanner(){
  const snapshot=dataset,token=++plannerRenderToken;
- const hooks={reloadPage:()=>location.reload(),initialMouseId:plannerMouseId,initialTargetDraft:plannerTargetDraft,openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,historyDeferred:deferredHistoryTables().includes('historical_observations'),isCurrent:()=>route==='planner'&&token===plannerRenderToken,
+ const hooks={reloadPage:()=>location.reload(),initialMouseId:plannerMouseId,initialTargetDraft:plannerTargetDraft,openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,historyDeferred:deferredHistoryTables().includes('historical_observations'),genotypeHistoryDeferred:deferredHistoryTables().includes('mouse_genes'),loadGenotypeHistory:async()=>loadHistoryTables(['mouse_genes']),isCurrent:()=>route==='planner'&&token===plannerRenderToken,
  loadSourceHistory:async()=>loadHistoryTables(['historical_observations']),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
- renderBreedingPlanner($('main'),snapshot,hooks);plannerMouseId=null;plannerTargetDraft=null;
+ try{
+  if(!plannerModule){$('main').innerHTML=panel('Planning','<p role="status">Loading Planning…</p>');plannerModulePending??=import('./breeding-planner.js?v=127').then(module=>{plannerModule=module;return module;}).catch(error=>{plannerModulePending=null;throw error;});await plannerModulePending;}
+  if(!hooks.isCurrent())return;
+  plannerModule.renderBreedingPlanner($('main'),snapshot,hooks);plannerMouseId=null;plannerTargetDraft=null;
+ }catch(error){if(hooks.isCurrent())$('main').innerHTML=panel('Planning','<p role="alert">Planning could not load.</p>'+button('Reload page','reload-workspace'));}
 }
 async function loadCryoHistory(){
  if(dataset?.demo||dataset?.is_demo||dataset?.synthetic)return null;
