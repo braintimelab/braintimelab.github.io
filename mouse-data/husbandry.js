@@ -1,7 +1,7 @@
-import {cageObservations,ageWeeks,todayTaipei} from './cage-observations.js?v=97';
-import {compareRooms,sortRooms} from './room-order.js?v=97';
+import {cageObservations,ageWeeks,todayTaipei} from './cage-observations.js?v=98';
+import {compareRooms,sortRooms} from './room-order.js?v=98';
 /* Editable housing and recorded light history. No bundled laboratory data. */
-import { cageManager, buildCageLocationEvent } from './model.js?v=97';
+import { cageManager, buildCageLocationEvent } from './model.js?v=98';
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => JSON.parse(JSON.stringify(value));
 const labels={rooms:'Rooms',racks:'Racks',locations:'Positions',light_events:'Light history',husbandry_events:'Husbandry history'};

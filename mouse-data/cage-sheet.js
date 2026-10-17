@@ -1,13 +1,13 @@
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=97';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=97';
-import { sortRooms } from './room-order.js?v=97';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=97';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=97';
-import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=97';
-import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=97';
-import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=97';
-import { cageBreedingLayout } from './mouse-registration.js?v=97';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=97';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=98';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=98';
+import { sortRooms } from './room-order.js?v=98';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=98';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=98';
+import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=98';
+import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=98';
+import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=98';
+import { cageBreedingLayout } from './mouse-registration.js?v=98';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=98';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id',husbandry_events:'event_id'};
@@ -391,7 +391,8 @@ export function renderCageSheet(host,dataset,hooks={}){
     if(rows.length)expandedEmptySlots.delete(positionId);
     const observations=cageCardObservation(viewDataset,item,observationContext).observation;
     const pending=[...state.drafts.values()].some(change=>change.type==='cages'&&String(change.id)===String(id)||change.type==='locations'&&String(change.id)===String(positionId));
-    if(compact&&!hooks.readOnly&&positionId&&!rows.length&&!observations.animals.length&&!item.warnings.length&&!pending&&!expandedEmptySlots.has(positionId)){
+    const occupancyWarning=item.warnings.some(message=>!/(?:light records?|light-record)/i.test(message));
+    if(compact&&!hooks.readOnly&&positionId&&!rows.length&&!observations.animals.length&&!occupancyWarning&&!pending&&!expandedEmptySlots.has(positionId)){
       emptySlotTargets.set(positionId,item);
       const real=cage&&!cage._derived,editable=canEdit('cages')&&active(position)&&position.source_current!==false&&!historical(position);
       return `<div class="sheet-slot-frame sheet-vacant-frame" data-sheet-slot-frame="${esc(positionId)}" data-sheet-slot-label="${esc(item.positionName)}"><div class="sheet-slot-outline" aria-hidden="true"><span>${esc(item.positionName)}</span></div><article class="sheet-cage sheet-empty-slot" data-cage="${esc(id)}" data-sheet-slot="${esc(positionId)}"${real&&registeredCage(id)?` data-sheet-mouse-destination="${esc(id)}"`:''} aria-label="${esc(item.positionName)} empty position"><span class="sheet-empty-slot-number" aria-hidden="true">${esc(item.positionName)}</span><button type="button" class="sheet-empty-slot-add" data-sheet-activate-empty="${esc(positionId)}" aria-label="Add cage at ${esc(item.positionName)}" title="Add cage"${editable?'':' disabled'}>＋</button>${(state.selectedCage||state.selectedSlot)&&state.selectedSlot!==positionId?`<button type="button" class="text-button sheet-empty-slot-destination" data-sheet-destination="${esc(positionId)}"${canEdit('cages')?'':' disabled'}>↳ Move here</button>`:''}</article></div>`;
