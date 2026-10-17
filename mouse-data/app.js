@@ -7,7 +7,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=100';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=100';
-import * as store from './data-store.js?v=103';
+import * as store from './data-store.js?v=105';
 import * as model from './model.js?v=100';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=100';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=100';
@@ -38,7 +38,7 @@ import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
 import { renderBreedingPlanner } from './breeding-planner.js?v=100';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=100';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=100';
-import { renderCryopreservation } from './cryopreservation.js?v=100';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=105';
 import { renderExperiments, experimentHelpHTML } from './experiments.js?v=100';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
 import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=100';
@@ -78,7 +78,7 @@ let experimentMouseId=null, experimentRecordId=null, iacucEntity=null,locoboxCag
 let familyClassifications = new Map();
 let plannerRenderToken = 0;
 let pageRenderGeneration = 0;
-let cryoRenderToken = 0, cryoHistoryPending = null;
+let cryoRenderToken = 0, cryoHistoryPending = null, cryoHistoryIndex = null, cryoHistoryContext = '';
 let strainIndexDataset=null, strainAssignments=new Map();
 let breedingScope='living', cageView='rack', cageDate='', cageHistoryArchivedLayouts=false;
 const cageSheetContext=()=>JSON.stringify([cloud.mode,cloud.url,cloud.colonyId,cloud.email,cloud.role,Boolean(cloud.signedIn)]);
@@ -120,7 +120,7 @@ const titles = {overview:'Animal Overview',mice:'Mice',matings:'Breeding',litter
 let accessLogsCleanup=null,labUserDirectoryRequest=0,historyLoadState=null,historyLoadFailure=null;
 const deferredHistoryTables=()=>store.getDeferredHistoryTables?.(dataset)||[];
 const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id,archiveTable]);
-function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts());}
+function historyDraftOpen(){return Boolean(editor||busy||hasCageSheetDrafts()||route==='cryo'&&hasCryopreservationDraft($('main')));}
 async function loadHistoryTables(tables){
  if(cachedPreview||startupLoading||cloud.mode==='cloud'&&!cloudReady)throw new Error('Synchronizing. Try again shortly.');
  if(historyDraftOpen())throw new Error('Save or discard changes before loading history.');
@@ -175,7 +175,7 @@ function renderSidebarAccount(){
  const role=visibleRoleLabel(cloud.role),connected=!startupLoading&&!cachedPreview&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending';
  const connection=startupLoading?startupMessage:cachedPreview?'Read only · '+startupMessage:cloud.role==='pending'?'Account setup':connected?'Cloud connected':cloud.mode==='cloud'?'Reconnect required':'Local only';
  const indicator=`<span class="connection-dot${connected?' cloud':''}" role="img" aria-label="${esc(connection)}" title="${esc(connection)}"></span>`;
- container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="sidebar-account-status">${role?`<span class="sidebar-role">${esc(role)}</span>`:''}${indicator}</span></div><button class="sidebar-sign-out" type="button" data-action="sign-out" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H7a5 5 0 0 0 0 10h12M15 10l4 4-4 4"/></svg></button>`;container.hidden=false;
+ container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="sidebar-account-status">${role?`<span class="sidebar-role">${esc(role)}</span>`:''}${indicator}</span></div><button class="sidebar-reload" type="button" data-action="reload-shared" aria-label="Reload shared data" title="Reload shared data"${manualPullPending||startupLoading||cachedPreview?' disabled':''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7"/></svg></button>`;container.hidden=false;
 }
 function adoptSidebarProfile(result,context=sidebarIdentityContext(cloud)){
  if(context!==sidebarIdentityContext(cloud)||context!==sidebarIdentityContext(store.getCloudStatus())||!cloud.signedIn)return;
@@ -229,6 +229,7 @@ function canEditRecords(section=route){
  const key=({mice:'mice',matings:'breeding',litters:'breeding',cages:'housing',locations:'housing',rooms:'housing',racks:'housing',housing:'housing',locobox:'housing',planner:'genetics',family:'genetics',experiments:'experiments',iacuc:'iacuc',cryo:'cryo',fees:'fees',archive:'archive'})[section]||section;
  return normalizeManagerPermissions(cloud.permissions)[key]===true;
 }
+function canEditCryopreservation(){return ['owner','manager'].includes(cloud.role)&&canEditRecords('cryo');}
 function canArchiveRecords(){return canEditRecords()&&(cloud.mode!=='cloud'||cloud.role!=='manager'||normalizeManagerPermissions(cloud.permissions).archive)}
 function canWriteCloud(){return !startupLoading&&!historyLoadState&&cloudReady&&!cloud.passwordRecovery&&cloud.signedIn&&(['owner','editor'].includes(cloud.role)||cloud.role==='manager'&&normalizeManagerPermissions(cloud.permissions).imports)}
 function records(type, includeArchived = true) { const rows = dataset?.tables?.[type] || []; return includeArchived ? rows : rows.filter(r => !archived(r)); }
@@ -311,23 +312,34 @@ function startupProgress(value){
  if(!phase)return;
  startupProgressValue=value;startupMessage=phase+'…'+(counts?' '+counts:'');if(cachedPreview)renderConnection();else renderStartupLoading();
 }
-async function loadSharedColony(){
+async function loadSharedColony({preserveView=false,confirm=true,throwOnError=false,fromCryoEditor=false}={}){
  if(manualPullPending||startupLoading||cachedPreview)return;
+ if(historyLoadState)throw new Error('Wait for history loading to finish.');
+ if(!fromCryoEditor&&isCryopreservationBusy($('main')))throw new Error('Wait for the current save to finish.');
+ if(editor||busy||hasCageSheetDrafts())throw new Error('Save or cancel changes before reloading.');
+ const view=route,selection=detail,keepCryoDraft=route==='cryo'&&hasCryopreservationDraft($('main'));
+ const restoreCryoHistory=preserveView&&view==='cryo'&&!deferredHistoryTables().includes('historical_observations');
+ if(keepCryoDraft&&!preserveView)throw new Error('Save or cancel the cryopreservation draft first.');
  manualPullPending=true;let loading=false,openingContext=null;
+ let failure=null;
  const accessContext=()=>{const status=store.getCloudStatus();return JSON.stringify([status.url,status.colonyId,status.email,Boolean(status.signedIn),Boolean(status.passwordRecovery)]);};
  try{
-  if(dataset&&!await confirmAction('Load shared colony?','<p class="subtle">The shared database will replace this browser’s working snapshot. Back up local changes before continuing.</p>','Load shared colony'))return;
+  if(confirm&&dataset&&!keepCryoDraft&&!await confirmAction('Load shared colony?','<p class="subtle">Reload the latest shared records?</p>','Reload'))return;
   openingContext=accessContext();loading=true;cloudLoadError='';cloudReady=false;startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
-  const fresh=await store.pullFromCloud({onProgress:startupProgress,deferHistory:true});await refreshCloud();
+  let fresh=await store.pullFromCloud({onProgress:startupProgress,deferHistory:true});await refreshCloud();
   if(accessContext()!==openingContext||store.getCloudStatus().readyForEdits===false||!fresh)throw new Error('Access changed during reconnect. Sign in and load the shared colony again.');
+  if(restoreCryoHistory)fresh=await store.ensureHistory(fresh,{tables:['historical_observations'],onProgress:startupProgress});
+  if(accessContext()!==openingContext)throw new Error('Account changed during reload.');
   dataset=fresh;cloudReady=true;
  }catch(error){
+  failure=error;
   cloudReady=false;cloud=store.getCloudStatus();if(openingContext!==null&&accessContext()!==openingContext)dataset=null;
   cloudLoadError=error.message||String(error);showToast(cloudLoadError,true);
  }finally{
   manualPullPending=false;
-  if(loading){startupLoading=false;navigate(cloudLoadError?'settings':'overview');if(!cloudLoadError)showToast('Shared colony loaded.');}
+  if(loading){startupLoading=false;if(preserveView&&dataset){route=view;detail=selection;render();}else navigate(cloudLoadError?'settings':'overview');if(!cloudLoadError)showToast('Shared data reloaded.');}
  }
+ if(failure&&throwOnError)throw failure;
 }
 function renderPlanner(){
  const snapshot=dataset,token=++plannerRenderToken;
@@ -337,15 +349,19 @@ function renderPlanner(){
 }
 async function loadCryoHistory(){
  if(dataset?.demo||dataset?.is_demo||dataset?.synthetic)return null;
- if(cryoHistoryPending)return cryoHistoryPending;
- cryoHistoryPending=(async()=>{const saved=await history.loadHistoryIndex();if(saved)return saved.index;if(cloud.mode==='cloud'&&cloud.signedIn){const index=await store.downloadHistoryIndex();await history.saveHistoryIndex(index,'Shared cloud source-cell index');return index}return null})();
- try{return await cryoHistoryPending}finally{cryoHistoryPending=null}
+ const context=labUserDirectoryContext(store.getCloudStatus());
+ if(cryoHistoryContext===context&&cryoHistoryIndex)return cryoHistoryIndex;
+ if(cryoHistoryPending?.context===context)return cryoHistoryPending.promise;
+ const request={context,promise:null};cryoHistoryPending=request;
+ const check=()=>{if(context!==labUserDirectoryContext(store.getCloudStatus()))throw new Error('Account changed. Reopen cryopreservation.');};
+ request.promise=(async()=>{const saved=await history.loadHistoryIndex();check();if(saved)return saved.index;if(cloud.mode==='cloud'&&cloud.signedIn){const index=await store.downloadHistoryIndex();check();await history.saveHistoryIndex(index,'Shared cloud source-cell index');check();return index}return null})();
+ try{const index=await request.promise;check();cryoHistoryIndex=index;cryoHistoryContext=context;return index}finally{if(cryoHistoryPending===request)cryoHistoryPending=null}
 }
 function renderCryo(){
  const token=++cryoRenderToken,context=labUserDirectoryContext(store.getCloudStatus());
  const current=()=>route==='cryo'&&token===cryoRenderToken&&context===labUserDirectoryContext(store.getCloudStatus());
- const hooks={reloadPage:()=>location.reload(),canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const fresh=await loadHistoryTables(['historical_observations']);if(!current())return;const index=await loadCryoHistory();if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
- renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:true,historyLoading:false});
+ const hooks={draftContext:context,reloadShared:()=>loadSharedColony({preserveView:true,confirm:false,throwOnError:true,fromCryoEditor:true}),canEdit:canEditCryopreservation,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,toast:showToast,openMouse:id=>navigate('mice',id),isCurrent:current,loadHistory:async()=>{const fresh=await loadHistoryTables(['historical_observations']);if(!current())return;const index=await loadCryoHistory();if(current()&&dataset===fresh&&!historyDraftOpen())renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:false,historyIndex:index,historyLoading:false});},save:async next=>{if(!canEditCryopreservation())throw new Error('Manager or owner access is required.');await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
+ renderCryopreservation($('main'),dataset,{...hooks,historyDeferred:deferredHistoryTables().includes('historical_observations'),historyIndex:cryoHistoryContext===context?cryoHistoryIndex:null,historyLoading:false});
 }
 function renderExperimentSection(){
  renderExperiments($('main'),dataset,{reloadPage:()=>location.reload(),canLoadHistory:()=>!cachedPreview&&!startupLoading&&cloudReady,historyDeferred:deferredHistoryTables().some(name=>['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage'].includes(name)),loadSourceHistory:async()=>loadHistoryTables(['experiment_sources','experiment_source_catalog','experiment_source_contexts','experiment_source_coverage']),isCurrent:()=>route==='experiments',initialMouseId:experimentMouseId,initialRecordId:experimentRecordId,canEdit:canEditRecords,openMouse:id=>navigate('mice',id),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});experimentMouseId=null;experimentRecordId=null;
@@ -793,6 +809,7 @@ async function action(name,target=null){
  if(name==='locobox-cage'){locoboxContextKey++;locoboxCage=detail.id;locoboxPosition=findRecord('cages',detail.id)?.location_id||null;navigate('locobox');return}
  if(name==='iacuc-assignment'){iacucEntity={entity_type:detail.type,entity_id:detail.id};navigate('iacuc');return}
  if(name==='cloud-pull'){await loadSharedColony();return}
+ if(name==='reload-shared'){await loadSharedColony({preserveView:true,confirm:false});return}
  if(name==='cloud-push'){if(!dataset)throw new Error('Import or create a dataset first.');if(!await confirmAction('Upload records to shared colony?',`<p class="subtle">This sends the current browser’s records to the configured cloud colony. Authorized members will be able to access them.</p>${kv([['Mouse records',records('mice').length],['Colony UUID',cloud.colonyId]])}<p class="subtle" style="margin-top:15px">Existing-record conflicts are rejected. Only proceed when this is the intended colony.</p>`,'Upload to shared colony'))return;await store.pushToCloud(dataset);dataset=await store.loadDataset();cloudReady=true;await refreshCloud();render();showToast('Upload completed. Shared cloud mode is active.');return}
  if(isLegacySite(location)&&['change-email','resend-link'].includes(name)){navigate('settings');showToast('Request sign-in links at the new lab address.');return}if(name==='change-email'){authPendingEmail='';renderSettings();return}if(name==='resend-link'){if(!authPendingEmail)throw new Error('Enter your email first.');await store.requestEmailLink(authPendingEmail,appRedirectURL());showToast('A new sign-in link was requested.');return}
  if(name==='sign-out'){setSidebarMenuOpen(false);clearSidebarProfile();cloud={...cloud,signedIn:false};renderSidebarAccount();startupRequest++;cachedPreview=false;startupLoading=false;dataset=null;cloudLoadError='';accessActivity.signOut(route);clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearCageSheetDrafts();await store.signOut();await refreshCloud();cloudReady=true;render();showToast('Signed out.');return}

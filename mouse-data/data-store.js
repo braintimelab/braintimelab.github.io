@@ -494,7 +494,13 @@ async function readCloudPage(read,limit,check){
 }
 // A verified baseline can save network traffic, never authorize access.
 // Membership and visibility are checked anew before any of these rows are reused.
-function persistentIdentity(){const s=session();return stable({configuration:configuration(),user:s?.user?.id,role:s?.role,permissions:s?.permissions,exportLevel:s?.exportLevel});}
+function persistentIdentity(){
+ const s=session(),c=configuration();
+ // Discovering a verified source-cell index remembers its historyPath locally.
+ // Only connection credentials and colony selection identify the cloud; that
+ // source locator must not invalidate an otherwise verified edit baseline.
+ return stable({configuration:c?{url:c.url,anonKey:c.anonKey,colonyId:c.colonyId}:null,user:s?.user?.id,role:s?.role,permissions:s?.permissions,exportLevel:s?.exportLevel});
+}
 function syncIdentity(){return stable({generation:authGeneration,identity:persistentIdentity()});}
 async function cacheDigest(value){
   const bytes=new TextEncoder().encode(stable(value));
