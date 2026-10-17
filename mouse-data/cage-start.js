@@ -1,7 +1,8 @@
 /* Cage start dates are cage/card metadata. DOB and capture dates never become
  * exact insertion dates, and this module never creates animal identities. */
-import {cageObservations,cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=99';
-import {roomOrderRank} from './room-order.js?v=99';
+import {cageObservations,cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=100';
+import {mouseLineAssignments} from './mouse-summary.js?v=100';
+import {roomOrderRank} from './room-order.js?v=100';
 const active=row=>row&&!row.app_archived_at&&row.archived!==true;
 const historical=row=>row?.history_read_only===true||row?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(row?.record_origin||'');
 const text=value=>typeof value==='string'?value.trim():value==null?'':String(value);
@@ -72,12 +73,18 @@ function historySources(dataset){
  }
  historyCache.set(dataset,{events,rows});return rows;
 }
+/** A provisional, unnumbered litter is not an individually identified mouse. */
+export function isCageLitterPlaceholder(row){
+ const value=text(row?.sourceTag||row?.tag);
+ return !row?.mouseSid&&!row?.sex&&!/[MF]\s*-?\s*\d+/i.test(value)&&
+  (/\b(?:pups?|newborns?|litter)\b/i.test(value)||/[()]/.test(value)&&Object.keys(mouseLineAssignments({physical_tag:value})).length>0);
+}
 const identifier=value=>text(value).replace(/^(.*?)(?:\s+|-)([MF]\d+)$/,'$1-$2');
 function inferResidentStart(dataset,item,asOf,housing,observationsDataset){
  const {cage,position,origin,card,mice}=housing;if(!origin)return unknown();
  const key=sourceKey(dataset,origin);if(!key)return unknown();
  const samePositions=(dataset?.tables?.locations||[]).filter(p=>active(p)&&!historical(p)&&p.source_current!==false&&sourceKey(dataset,p)===key);if(samePositions.length>1)return unknown();
- const rows=cageSheetAnimals(observationsDataset,{cage,position:position||origin,mice});
+ const rows=cageSheetAnimals(observationsDataset,{cage,position:position||origin,mice}).filter(row=>!isCageLitterPlaceholder(row));
  if(!rows.length||rows.some(row=>!knownDate(row.dateOfBirth,asOf)))return unknown();
  const oldest=rows.reduce((date,row)=>row.dateOfBirth<date?row.dateOfBirth:date,rows[0].dateOfBirth),candidates=rows.filter(row=>row.dateOfBirth===oldest&&text(row.sourceTag||row.tag)&&rows.filter(other=>identifier(other.sourceTag||other.tag)===identifier(row.sourceTag||row.tag)&&other.dateOfBirth===row.dateOfBirth).length===1);
  if(!candidates.length)return unknown();

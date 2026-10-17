@@ -1,10 +1,10 @@
 /* Current-month forecasts from physical cage cards. No source label creates a
  * Mouse identity, historical occupancy interval, or SPF arrival date. */
-import {projectAnimalSheet} from './animal-sheet-export.js?v=99';
-import {cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=99';
-import {resolveCageStart,validCageStartDate} from './cage-start.js?v=99';
-import {classifyAnimalSheetBreedingBlock,sourceChangeBlocks} from './breeding-summary.js?v=99';
-import {mouseLineAssignments} from './mouse-summary.js?v=99';
+import {projectAnimalSheet} from './animal-sheet-export.js?v=100';
+import {cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=100';
+import {resolveCageStart,validCageStartDate,isCageLitterPlaceholder} from './cage-start.js?v=100';
+import {classifyAnimalSheetBreedingBlock,sourceChangeBlocks} from './breeding-summary.js?v=100';
+import {mouseLineAssignments} from './mouse-summary.js?v=100';
 
 const defs={clean_room:'cage',rat_locobox:'cage',spf_room:'mouse'};
 const list=v=>Array.isArray(v)?v.filter(r=>r&&typeof r==='object'&&!Array.isArray(r)):[];
@@ -22,6 +22,9 @@ const emptyObservation=()=>({schemaVersion:1,animals:[]});
 function classify(observation){
  const evidence=[],unresolved=[];let uncertain=false;
  for(const animal of observation.animals||[]){
+  // Unnumbered provisional litters are excluded from this estimate, not counted
+  // as one pup. Their raw row and unresolved headcount stay in the cage card.
+  if(isCageLitterPlaceholder(animal))continue;
   const value=id(animal.tag),note=id(animal.note),result=classifyAnimalSheetBreedingBlock({source_cell:'A1',source_block_text:'A2: '+value.replace(/[\r\n]/g,' ')+'\nA2 comment: '+note.replace(/[\r\n]/g,' ')});
   evidence.push(...result.evidence.map(row=>({...row,sourceCell:animal.sourceCell??null,dateOfBirth:animal.dateOfBirth??null,requiresReview:animal.requiresReview===true})));
   unresolved.push(...result.unresolved);
@@ -32,11 +35,31 @@ function classify(observation){
  return {evidence,unresolved,uncertain};
 }
 
+const forecastDays=(date,calendar)=>Math.max(0,(Date.parse(calendar.end+'T00:00:00Z')-Date.parse((date>calendar.start?date:calendar.start)+'T00:00:00Z'))/86400000+1);
+// Only explicit, current-room movement records establish an SPF admission.
+// A receipt date without a room is not an insertion date.
+function roomAdmission(events,mouse,roomIds,asOf){
+ const rows=list(events).filter(e=>active(e)&&['cage_move','cage_assignment'].includes(e.event_type));
+ if(!rows.length)return null;
+ if(rows.some(e=>!iso(e.event_date)||e.event_date>asOf))return null;
+ rows.sort((a,b)=>a.event_date.localeCompare(b.event_date));
+ const latest=rows.at(-1);if(id(latest.cage_sid)!==id(mouse.cage_sid)||!roomIds.includes(id(latest.room_id)))return null;
+ let entered=null,previous=null;
+ for(const event of rows){
+  if(previous?.event_date===event.event_date&&(id(previous.cage_sid)!==id(event.cage_sid)||id(previous.room_id)!==id(event.room_id)))return null;
+  if(!roomIds.includes(id(event.room_id)))entered=null;
+  else if(!roomIds.includes(id(event.old_room_id)))entered=event.event_date;
+  else if(!previous||!roomIds.includes(id(previous.room_id))||id(event.old_cage_sid)!==id(previous.cage_sid))entered=null;
+  previous=event;
+ }
+ return entered;
+}
+
 /** Per-group quantities retain their exact configured cage/mouse and day/month
  * units. Unknown groups return null with a compact reason and known partials. */
 export function currentCageStartQuantities(dataset,month,options,{asOf=todayTaipei()}={}){
  const calendar=bounds(month);if(!calendar||!iso(asOf))throw new TypeError('Choose a valid fee month and observation date.');
- const configured=list(options?.groups),groups=Object.fromEntries(Object.entries(defs).map(([key,unit])=>{const setting=configured.find(g=>g.key===key),period=setting?.rate_period==='month'?'month':'day';return [key,{quantity:0,quantity_unit:unit+'_'+period,basis:'cage_start_projection',reason:'Current physical cage forecast',occupied_cages:0,mouse_count:0,partial_quantity:0,unknown_count:0,estimated_starts:0,source_cages:0,registered_cages:0}];}));
+ const configured=list(options?.groups),groups=Object.fromEntries(Object.entries(defs).map(([key,unit])=>{const setting=configured.find(g=>g.key===key),period=setting?.rate_period==='month'?'month':'day';return [key,{quantity:0,quantity_unit:unit+'_'+period,basis:'cage_start_projection',reason:'Current physical cage forecast',occupied_cages:0,mouse_count:0,partial_quantity:0,unknown_count:0,estimated_starts:0,skipped_cages:0,skipped_mice:0,source_cages:0,registered_cages:0}];}));
  const result={basis:'cage_start_projection',groups,excluded_mice:0,unmapped_mice:0,unmapped_cages:0};
  const problems=Object.fromEntries(Object.keys(defs).map(k=>[k,new Set()]));
  const fail=(keys,reason)=>{for(const key of keys){if(!groups[key])continue;problems[key].add(reason);groups[key].unknown_count++;}};
@@ -61,6 +84,7 @@ export function currentCageStartQuantities(dataset,month,options,{asOf=todayTaip
   if(matched.length!==1){if(affected.length)fail(affected,'Room or rack mapping needs review');result.unmapped_mice+=item.mice.length;if(item.cage)result.unmapped_cages++;return null;}
   return {key:matched[0],roomId:roomIds[0],rackId:rackIds[0]||'',locationId,position};
  }
+ const movementEvents=index(list(tables.husbandry_events).filter(e=>active(e)&&['cage_move','cage_assignment'].includes(e.event_type)),'mouse_sid');
  const projection=projectAnimalSheet(view,{entityTypes:[],capturedAt:asOf+'T12:00:00+08:00'}),slots=new Map(),seenMice=new Set();
  for(const item of projection.rows){
   if(item.cage?._derived){const rooms=[id(item.roomId)].filter(Boolean),affected=byRoom(rooms);fail(affected,'Current cage record unavailable');result.unmapped_mice+=item.mice.length;result.unmapped_cages++;continue;}
@@ -91,11 +115,13 @@ export function currentCageStartQuantities(dataset,month,options,{asOf=todayTaip
   g.occupied_cages++;if(slot.residents.size)g.registered_cages++;else g.source_cages++;
   if(setting.unit==='cage'){
    if(setting.rate_period==='month'){g.partial_quantity++;continue;}
-   const dates=new Set();let estimated=false;for(const item of slot.items){const contains=item.mice.length||slot.sources.some(s=>s.item===item&&s.classified.evidence.length);if(!contains)continue;const start=resolveCageStart(view,item,{asOf});if(!iso(start.date)||start.date>asOf)fail([slot.key],'Cage start date unavailable');else{dates.add(start.date);estimated||=start.estimated===true;}}
-   if(dates.size!==1){if(dates.size>1)fail([slot.key],'Physical cage start dates disagree');continue;}
-   const start=[...dates][0],first=start>calendar.start?start:calendar.start;g.partial_quantity+=(Date.parse(calendar.end+'T00:00:00Z')-Date.parse(first+'T00:00:00Z'))/86400000+1;if(estimated)g.estimated_starts++;continue;
+   const dates=new Set();let estimated=false,undated=false;for(const item of slot.items){const contains=item.mice.length||slot.sources.some(s=>s.item===item&&s.classified.evidence.length);if(!contains)continue;const start=resolveCageStart(view,item,{asOf});if(!iso(start.date)||start.date>asOf)undated=true;else{dates.add(start.date);estimated||=start.estimated===true;}}
+   if(dates.size>1){fail([slot.key],'Physical cage start dates disagree');continue;}
+   if(undated){g.skipped_cages++;continue;}
+   if(dates.size!==1)continue;
+   const start=[...dates][0];g.partial_quantity+=forecastDays(start,calendar);if(estimated)g.estimated_starts++;continue;
   }
-  const counted=new Set([...slot.residents.keys()].map(sid=>'sid:'+sid));
+  const counted=new Map([...slot.residents].map(([sid,mouse])=>['sid:'+sid,{mouse,dateOfBirth:mouse.date_of_birth}]));
   for(const source of slot.sources){
    if(source.classified.uncertain||source.classified.unresolved.length)fail([slot.key],'SPF mouse count needs review');
    const localTags=new Set();
@@ -104,11 +130,23 @@ export function currentCageStartQuantities(dataset,month,options,{asOf=todayTaip
     const previousTags=sourceTags.get(tag(evidence.tag))||[];if(previousTags.some(previous=>previous.physical!==physical&&(!previous.dateOfBirth||!evidence.dateOfBirth||previous.dateOfBirth===evidence.dateOfBirth)||previous.physical===physical&&previous.dateOfBirth!==evidence.dateOfBirth&&(!previous.dateOfBirth||!evidence.dateOfBirth)))fail([slot.key],'SPF mouse appears in multiple cages');previousTags.push({physical,dateOfBirth:evidence.dateOfBirth});sourceTags.set(tag(evidence.tag),previousTags);
     const rows=source.rows.filter(row=>row.sourceCell===evidence.sourceCell&&tag(row.sourceTag||row.tag)===tag(evidence.tag)),row=rows.length===1?rows[0]:null;
     if(row&&['ambiguous','conflict','duplicate_position','invalid_mouse'].includes(row.matchStatus)){fail([slot.key],'SPF mouse identity needs review');continue;}
-    const key=row?.mouseSid?'sid:'+id(row.mouseSid):'tag:'+identity,previous=sourceMice.get(key);if(previous&&previous!==physical)fail([slot.key],'SPF mouse appears in multiple cages');sourceMice.set(key,physical);counted.add(key);
+    const key=row?.mouseSid?'sid:'+id(row.mouseSid):'tag:'+identity,previous=sourceMice.get(key);if(previous&&previous!==physical)fail([slot.key],'SPF mouse appears in multiple cages');sourceMice.set(key,physical);const mouse=row?.mouseSid?slot.residents.get(id(row.mouseSid)):null;counted.set(key,{mouse,dateOfBirth:mouse?.date_of_birth||evidence.dateOfBirth});
    }
   }
-  g.mouse_count+=counted.size;g.partial_quantity+=counted.size*(setting.rate_period==='day'?calendar.days:1);
+  g.mouse_count+=counted.size;
+  if(setting.rate_period==='month'){g.partial_quantity+=counted.size;continue;}
+  const starts=slot.items.map(item=>resolveCageStart(view,item,{asOf})),dates=new Set(starts.map(s=>s.date).filter(iso));
+  const cageDate=starts.every(s=>iso(s.date))&&dates.size===1?[...dates][0]:null;
+  if(dates.size>1)fail([slot.key],'Physical cage start dates disagree');
+  for(const resident of counted.values()){
+   const admission=resident.mouse?roomAdmission(movementEvents.get(id(resident.mouse.mouse_sid)),resident.mouse,setting.room_ids,asOf):null;
+   let date=admission||cageDate;
+   if(!date){g.skipped_mice++;continue;}
+   const born=iso(resident.dateOfBirth)?resident.dateOfBirth:null;if(born&&born>asOf){fail([slot.key],'SPF mouse birth date needs review');continue;}
+   if(born&&born>date)date=born;
+   g.partial_quantity+=forecastDays(date,calendar);if(!admission)g.estimated_starts++;
+  }
  }
- for(const key of allKeys){const g=groups[key];g.quantity=problems[key].size?null:g.partial_quantity;g.reason=problems[key].size?[...problems[key]][0]:defs[key]==='cage'?'Current cages projected from '+(g.estimated_starts?'recorded or estimated':'recorded')+' starts to month end':'Current SPF mice projected to month end';}
+ for(const key of allKeys){const g=groups[key];g.quantity=problems[key].size||g.occupied_cages>0&&g.partial_quantity===0&&(g.skipped_cages||g.skipped_mice)?null:g.partial_quantity;g.reason=problems[key].size?[...problems[key]][0]:g.skipped_cages||g.skipped_mice?'Undated entries excluded':defs[key]==='cage'?'Current cages projected from '+(g.estimated_starts?'recorded or estimated':'recorded')+' starts to month end':'Current SPF mice projected to month end';}
  return result;
 }

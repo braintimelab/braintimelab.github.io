@@ -1,13 +1,13 @@
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=99';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=99';
-import { sortRooms } from './room-order.js?v=99';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=99';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=99';
-import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=99';
-import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=99';
-import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=99';
-import { cageBreedingLayout } from './mouse-registration.js?v=99';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=99';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=100';
+import { sortRooms } from './room-order.js?v=100';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=100';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=100';
+import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=100';
+import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=100';
+import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
+import { cageBreedingLayout } from './mouse-registration.js?v=100';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=100';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id',husbandry_events:'event_id'};

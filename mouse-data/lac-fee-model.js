@@ -1,6 +1,6 @@
 /* LAC estimates use explicit mappings and dated evidence. Current occupancy is
  * only a labelled projection of the current month, never historical evidence. */
-import {currentCageStartQuantities} from './lac-fee-occupancy.js?v=99';
+import {currentCageStartQuantities} from './lac-fee-occupancy.js?v=100';
 export const LAC_FEE_GROUPS=Object.freeze([{key:'clean_room',label:'SHLAC Conventional',unit:'cage'},{key:'rat_locobox',label:'SHLAC Rat room',unit:'cage'},{key:'spf_room',label:'SHLAC SPF',unit:'mouse'}]);
 const TYPES=['lac_fee_options','lac_fee_month'],clone=structuredClone,object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x),present=x=>x!==null&&x!==undefined&&x!=='';
 const archived=r=>Boolean(r?.app_archived_at)||r?.archived===true;
@@ -134,6 +134,7 @@ export function calculateLacFeeMonth(dataset,month,{nowDate=localDate()}={}){
  if(projection&&snapshot.unmapped_mice)result.notices.push(snapshot.unmapped_mice+' current mice have no mapped LAC room.');
  if(projection&&!options.excluded_room_ids.length)result.warnings.push('Map the Ani Beh room exclusion before using the projection.');
  let complete=result.warnings.length===0;
+ result.skipped_cages=0;result.skipped_mice=0;
  for(const base of LAC_FEE_GROUPS){
   const groupLines=lines.filter(l=>l.group_key===base.key&&present(l.quantity)),snapshotLine=groupLines.length===1&&groupLines[0].evidence_kind==='snapshot_projection'?groupLines[0]:null,rateRecord=projection?record:getLacFeeOptions(dataset,snapshotLine?.evidence_start||bounds.start),rateOptions=rateRecord?.lac_fee_options;
   let group=rateOptions?.groups.find(g=>g.key===base.key)||options.groups.find(g=>g.key===base.key),quantity=null,reason;
@@ -143,8 +144,10 @@ export function calculateLacFeeMonth(dataset,month,{nowDate=localDate()}={}){
   else if(monthConflict){reason='Conflicting monthly quantities require review'}
   else if(projection){const forecast=snapshot.groups[group.key];quantity=forecast?.quantity??null;reason=forecast?.reason||'Cage start date unavailable';if(!group.room_ids.length){quantity=null;reason='Room mapping missing'}}
   else {({quantity,reason}=historicQuantity(lines,group,bounds,{allowSnapshot:current,asOfDate:nowDate}));if(!snapshotLine&&rateOptions.rate_scope==='snapshot_only'){quantity=null;reason='A snapshot-only rate does not establish the rate for the full billing month'}if(!snapshotLine&&feeRecords(dataset,'lac_fee_options').some(r=>r.lac_fee_options.rate_scope!=='snapshot_only'&&r.lac_fee_options.effective_from>bounds.start&&r.lac_fee_options.effective_from<=bounds.end)){quantity=null;reason='Billing options changed during this month; split billing needs review';if(!result.warnings.includes(reason))result.warnings.push(reason)}}
-  const charge=amount(quantity)&&amount(group.rate)?quantity*group.rate:null;if(charge===null)complete=false;else result.partial_estimate+=charge;
-  result.groups.push({...group,quantity,quantity_unit:group.unit+'_'+group.rate_period,charge,actual:lines.some(l=>l.group_key===group.key&&present(l.actual_amount))?lines.filter(l=>l.group_key===group.key&&present(l.actual_amount)).reduce((sum,l)=>sum+l.actual_amount,0):null,reason,rate_effective_from:rateOptions?.effective_from??null,snapshot_date:projection?nowDate:snapshotLine?.evidence_start??null,quantity_basis:projection?'cage_start_projection':groupLines.find(l=>l.quantity_basis==='ambiguous')?'ambiguous':groupLines.some(l=>l.quantity_basis==='source_formula')?'source_formula':'recorded',quantity_note:[...new Set(lines.filter(l=>l.group_key===base.key&&l.quantity_note).map(l=>String(l.quantity_note)))].join(' ')});
+  const forecast=projection?snapshot.groups[base.key]:null,skippedCages=forecast?.skipped_cages||0,skippedMice=forecast?.skipped_mice||0,ignoredDateGap=projection&&!forecast?.unknown_count&&(skippedCages||skippedMice)&&amount(group.rate)&&!monthConflict&&!rateErrors.length&&!rateConflict;
+  result.skipped_cages+=skippedCages;result.skipped_mice+=skippedMice;
+  const charge=amount(quantity)&&amount(group.rate)?quantity*group.rate:null;if(charge===null&&!ignoredDateGap)complete=false;else if(charge!==null)result.partial_estimate+=charge;
+  result.groups.push({...group,skipped_cages:skippedCages,skipped_mice:skippedMice,estimated_starts:forecast?.estimated_starts||0,quantity,quantity_unit:group.unit+'_'+group.rate_period,charge,actual:lines.some(l=>l.group_key===group.key&&present(l.actual_amount))?lines.filter(l=>l.group_key===group.key&&present(l.actual_amount)).reduce((sum,l)=>sum+l.actual_amount,0):null,reason,rate_effective_from:rateOptions?.effective_from??null,snapshot_date:projection?nowDate:snapshotLine?.evidence_start??null,quantity_basis:projection?'cage_start_projection':groupLines.find(l=>l.quantity_basis==='ambiguous')?'ambiguous':groupLines.some(l=>l.quantity_basis==='source_formula')?'source_formula':'recorded',quantity_note:[...new Set(lines.filter(l=>l.group_key===base.key&&l.quantity_note).map(l=>String(l.quantity_note)))].join(' ')});
  }
- result.excluded_mice=snapshot?.excluded_mice??null;result.unmapped_mice=snapshot?.unmapped_mice??null;result.estimate=complete?result.partial_estimate:null;result.comparison=compareLacFees(result.estimate,result.actual,options);return result;
+ result.excluded_mice=snapshot?.excluded_mice??null;result.unmapped_mice=snapshot?.unmapped_mice??null;result.estimate_incomplete=result.skipped_cages>0||result.skipped_mice>0;result.estimate=complete&&(!result.estimate_incomplete||result.groups.some(g=>g.quantity>0))?result.partial_estimate:null;result.comparison=compareLacFees(result.estimate_incomplete?null:result.estimate,result.actual,options);return result;
 }

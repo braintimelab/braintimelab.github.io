@@ -1,4 +1,4 @@
-import { getStrainRegistry, buildStrainDefinition, INSERTION_TYPES, strainNamingHelpHTML } from './strain-registry.js?v=99';
+import { getStrainRegistry, buildStrainDefinition, INSERTION_TYPES, strainNamingHelpHTML } from './strain-registry.js?v=100';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
