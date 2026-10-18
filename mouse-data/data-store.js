@@ -808,9 +808,14 @@ async function incrementalManaged(type,c,check,reuse,restricted=false,read=reque
     }
   }}catch(error){failure??=error;throw error;}}
   await Promise.all(Array.from({length:Math.min(3,batches.length)},()=>worker()));check();
-  // Never silently merge against an index that changed while payloads arrived.
-  const final=await managedVersionIndex(type,c,check,read);
-  if(final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Pull again.');
+  // If every live tuple exactly matches the verified atomic cache, retain that
+  // existing snapshot. There are no incoming payloads to merge or recheck.
+  // A changed payload or missing cached ID still requires the final scan.
+  let cachedCount=0;for(const row of reuse.records.values())if(row.entity_type===type)cachedCount++;
+  if(pending.length||index.size!==cachedCount){
+    const final=await managedVersionIndex(type,c,check,read);
+    if(final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Pull again.');
+  }
   const result=[...index.keys()].map(id=>rows.get(id)).filter(row=>!restricted||ordinaryManagedRecord(row));result.reused=result.filter(row=>reused.has(row.entity_id)).length;return result;
 }
 // Only the manifest-selected chunks are needed to reconstruct a workspace.
