@@ -1,8 +1,8 @@
-import {cageEntrainmentTimeline,entrainmentConditionLabel} from './entrainment-history.js?v=131';
+import {cageEntrainmentTimeline,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import {cageObservations,ageWeeks,todayTaipei} from './cage-observations.js?v=100';
 import {compareRooms,sortRooms} from './room-order.js?v=100';
 /* Editable housing and recorded light history. No bundled laboratory data. */
-import { cageManager, buildCageLocationEvent } from './model.js?v=131';
+import { cageManager, buildCageLocationEvent } from './model.js?v=132';
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => JSON.parse(JSON.stringify(value));
 const labels={rooms:'Rooms',racks:'Racks',locations:'Positions',light_events:'Light history',husbandry_events:'Husbandry history'};
@@ -81,7 +81,7 @@ export function lightClock(event={}){
  return {label:on||off?`On ${on||'?'} · Off ${off||'?'}`:'Clock times unknown',zone,defaulted};
 }
 function lightCard(position,cage){
- const timeline=cageEntrainmentTimeline(context.dataset,{cageSid:cage?.cage_sid||null,locationId:position?.location_id||cage?.location_id||null}),rows=timeline.rows||[],shown=rows.slice(-6);
+ const timeline=cageEntrainmentTimeline(context.dataset,{cageSid:cage?.cage_sid||null,locationId:position?.location_id||cage?.location_id||null}),rows=(timeline.rows||[]).filter(row=>row.historical!==true&&row.source_record?.source_historical!==true&&row.source_record?.history_read_only!==true),shown=rows.slice(-6);
  const open=(row,label)=>typeof context.hooks.openLocobox==='function'?`<button class="record-link" data-housing-locobox="${esc(cage?.cage_sid||'')}" data-position="${esc(position?.location_id||cage?.location_id||'')}" data-source-event="${esc(row?.source_event_id||'')}">${esc(label)}</button>`:'';
  const clock=row=>row.scheme==='DD'?'Dark all day':row.scheme==='LL'?'Light all day':row.lights_on||row.lights_off?`${row.lights_on||'—'} / ${row.lights_off||'—'}`:'—';
  return `<div class="cage-light"><div class="small muted">Entrainment</div>${rows.length?`<div class="table-scroll"><table class="compact-table"><thead><tr><th>Date</th><th>Condition</th><th>On / off</th></tr></thead><tbody>${shown.map(row=>`<tr><td>${esc(row.start_date||'—')}${row.end_date?`<div class="small muted">to ${esc(row.end_date)}</div>`:''}</td><td>${esc(entrainmentConditionLabel(row.scheme))}${row.source_record?.locobox_protocol?.status==='planned'?'<span class="badge amber">Planned</span>':''}${row.needs_clarification?`<div class="small muted">${canEdit()?open(row,'Clarify'):'Needs clarification'}</div>`:''}</td><td>${esc(clock(row))}</td></tr>`).join('')}</tbody></table></div>${rows.length>shown.length?`<div class="small muted">${rows.length-shown.length} earlier rows · ${open(null,'Full timeline')}</div>`:''}`:'<span class="small muted">—</span>'}</div>`;

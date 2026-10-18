@@ -1,15 +1,15 @@
-import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=131';
+import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
 import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=118';
-import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=131';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=131';
+import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=132';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=132';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { renderMouseReview } from './mouse-review-view.js?v=100';
-import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=131';
+import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=132';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=131';
-import * as model from './model.js?v=131';
+import * as store from './data-store.js?v=132';
+import * as model from './model.js?v=132';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=118';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=118';
 import { renderStrainManagement, hasStrainDrafts, clearStrainManagement } from './strain-management.js?v=118';
@@ -19,18 +19,18 @@ import { summarizeCages } from './cage-summary.js?v=118';
 import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { summarizeBreeding } from './breeding-summary.js?v=118';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=131';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=132';
 import * as history from './history-index.js?v=100';
 import { renderUserManagement } from './user-management.js?v=100';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=100';
 import { renderAccessLogs } from './access-logs.js?v=113';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=131';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=132';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=131';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=132';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
-import { renderCageLabelEditor } from './cage-label.js?v=131';
+import { renderCageLabelEditor } from './cage-label.js?v=132';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
 import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
@@ -38,16 +38,16 @@ import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=118';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=118';
-import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=131';
-import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=131';
-import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=131';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=131';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=132';
+import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=132';
+import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=132';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=132';
 import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=100';
 import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126';
-import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=131';
-import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=131';
-import { protocolsForEntity } from './iacuc-model.js?v=131';
-import { renderExportCenter } from './export-center.js?v=131';
+import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=132';
+import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=132';
+import { protocolsForEntity } from './iacuc-model.js?v=132';
+import { renderExportCenter } from './export-center.js?v=132';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -585,7 +585,7 @@ function tableCell(r,key,cfg){const value=columnValue(r,key);if(route==='mice'&&
 function sourceHTML(record){return `<div class="provenance">${kv([['Origin',human(record.record_origin||'app_created')],['Source file',record.source_filename],['Worksheet',record.source_sheet],['Source row',record.source_row],['Created in app',record.app_created_at],['Last app edit',record.app_modified_at]])}${record.source_sha256?`<p>SHA-256<br><code>${esc(record.source_sha256)}</code></p>`:''}${record.source_record_id?`<p>Source record<br><code>${esc(record.source_record_id)}</code></p>`:''}<details class="source-disclosure"><summary>Read full stored record</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></div>`}
 function parentHTML(mouse){return ['sire','dam'].map(role=>{const candidates=ids(mouse[role+'_sids']),amb=candidates.length>1;return `<div class="parent-block"><div class="parent-label">${role==='sire'?'Sire':'Dam'} ${candidates.length?badge(amb?'Recorded alternatives':'Single recorded parent',amb?'amber':'blue'):''}</div><div class="chips">${candidates.length?candidates.map(id=>mouseChip(id,amb)).join(''):'<span class="small muted">Not recorded</span>'}</div>${amb?'<p class="small muted" style="margin-top:9px">Candidate parents · Unresolved</p>':''}</div>`}).join('')+'<p class="small muted" style="margin-top:18px">Current recorded parent IDs</p>'}
 function mouseEntrainmentTable(mouse){const older=deferredHistoryTables().includes('husbandry_events')?button('Load older history','mouse-entrainment-history'):'';const rows=mouseEntrainmentHistory(dataset,mouse.mouse_sid);return rows.length?`<div class="table-scroll"><table class="compact-table"><thead><tr><th>Start</th><th>End</th><th>Condition</th><th>On / off</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.start_date||'—')}</td><td>${esc(row.end_date||'—')}</td><td>${esc(entrainmentConditionLabel(row.scheme))}${row.needs_clarification?'<span class="badge amber">Clarify</span>':''}</td><td>${esc(row.lights_on||'—')} / ${esc(row.lights_off||'—')}</td></tr>`).join('')}</tbody></table></div>${rows.some(row=>row.association_needs_review)?'<p class="small muted">Source-card association; earlier exposure needs review.</p>':''}${older}`:'<p class="small muted">—</p>'+older;}
-function entrainmentReviewHTML(){const issues=entrainmentClarifications(dataset);if(!issues.length)return '';const groups=new Map();for(const row of issues){const key=row.location_id;if(!groups.has(key))groups.set(key,{...row,dates:[]});groups.get(key).dates.push(row.start_date||'—');}return panel('Entrainment to clarify',`<div class="table-scroll"><table><thead><tr><th>LocoBox</th><th>Manager</th><th>Dates</th><th></th></tr></thead><tbody>${[...groups.values()].map(row=>`<tr><td>${esc(row.label||'—')}</td><td>${esc(row.manager||'—')}</td><td>${esc([...new Set(row.dates)].join(', '))}</td><td><button class="button secondary" data-entrainment-position="${esc(row.location_id)}">Clarify</button></td></tr>`).join('')}</tbody></table></div>`);}
+function entrainmentReviewHTML(){const issues=entrainmentClarifications(dataset);if(!issues.length)return '';const groups=new Map();for(const row of issues){const key=row.location_id;if(!groups.has(key))groups.set(key,{...row,dates:[]});groups.get(key).dates.push(row.start_date||'—');}const positions=new Map((dataset.tables.locations||[]).map(row=>[row.location_id,row])),rooms=new Map((dataset.tables.rooms||[]).map(row=>[row.room_id,row])),ordered=[...groups.values()].sort((a,b)=>compareRooms(rooms.get(positions.get(a.location_id)?.room_id),rooms.get(positions.get(b.location_id)?.room_id))||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));return panel('Entrainment to clarify',`<div class="table-scroll"><table><thead><tr><th>LocoBox</th><th>Manager</th><th>Dates</th><th></th></tr></thead><tbody>${ordered.map(row=>`<tr><td>${esc(row.label||'—')}</td><td>${esc(row.manager||'—')}</td><td>${esc([...new Set(row.dates)].sort().join(', '))}</td><td><button class="button secondary" data-entrainment-position="${esc(row.location_id)}">Clarify</button></td></tr>`).join('')}</tbody></table></div>`);}
 function renderDetail(){const {type,id}=detail,r=findRecord(type,id);if(!r){$('main').innerHTML=`<div class="empty">No record for SID ${esc(id)} exists in this workspace. ${button('Back','back')}</div>`;return}const cfg=entity[type];let left='',right='';
  if(type==='mice'){
  left=panel('Animal record',kv([['Mouse SID',r.mouse_sid],['Physical tag',r.physical_tag],['Ear mark',r.ear_mark],['Alternate ID',r.alternate_id],['Manager',managerText(model.mouseManager(r))],['Sex',r.sex],['Genotype',r.genotype],['Mouseline',r.mouseline],['Strain',r.strain],['State',r.state],['Status',r.status],['Protocol',r.protocol],['Comment',r.comment]]))+panel('Dates and housing',kv([['Born',r.date_of_birth],['Weaned',r.wean_date],['Ended',r.end_date],['End reason',r.end_reason],['Cage SID',r.cage_sid],['Cage tag',r.cage_tag],['Cage manager',r.cage_sid?managerText(model.cageManager(findRecord('cages',r.cage_sid)||{cage_sid:r.cage_sid},records('mice'))):'No cage assigned'],['Litter SID',r.litter_sid]]));

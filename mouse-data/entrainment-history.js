@@ -1,6 +1,8 @@
 /* Recorded schedules stay with their captured animal card, not today's slot. */
 const list=x=>Array.isArray(x)?x:[];
 const text=x=>typeof x==='string'?x.trim():x==null?'':String(x);
+const managerName=value=>{const name=text(value);return /^(?:guest|unknown|not\s*set|unassigned|none|[-—–])$/i.test(name)?'':name;};
+const firstManager=(...values)=>values.map(managerName).find(Boolean)||null;
 const date=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x+'T00:00:00Z').toISOString().slice(0,10)===x;
 const instant=x=>typeof x==='string'&&x.length<=40&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/.test(x)&&date(x.slice(0,10))&&Number.isFinite(Date.parse(x));
 const active=x=>x&&!x.app_archived_at&&x.archived!==true;
@@ -24,16 +26,30 @@ function reviewedGroups(dataset){const ctx=context(dataset);if(ctx.reviewedGroup
 function sourceLocation(dataset,cageSid,locationId){const cage=context(dataset).cages.get(text(cageSid));return {cage,location:text(cage?.cage_sheet_card?.source_location_id||cage?.cage_sheet_source_location_id||locationId||cage?.location_id)};}
 const animalAnchor=animal=>JSON.stringify([tagKey(animal?.tag??animal?.source_tag),text(animal?.dateOfBirth??animal?.source_dob),text(animal?.sourceCell??animal?.source_cell)]);
 function sameCohort(captured,observed){const left=list(captured?.animals).map(animalAnchor).sort(),right=list(observed?.animals).map(animalAnchor).sort();return left.length===right.length&&eq(left,right);}
+const historicalSource=event=>event.source_historical===true||event.history_read_only===true||event.source_current===false||event.record_origin==='historical_google_sheet';
+const currentMapSource=event=>event.record_origin==='current_google_sheet_map'&&event.source_current===true&&!historicalSource(event);
 export function cageEntrainmentTimeline(dataset,{cageSid=null,locationId=null}={}){
  const ctx=context(dataset),key=JSON.stringify([cageSid,locationId]);if(ctx.timelines.has(key))return ctx.timelines.get(key);
  const {cage,location}=sourceLocation(dataset,cageSid,locationId),position=ctx.locations.get(location),rows=[];
  const captured=cage?.cage_sheet_card?.observation;
- for(const event of ctx.lights){const historical=event.source_historical===true||event.history_read_only===true,explicitHistorical=historical&&cageSid&&text(event.cage_sid)===text(cageSid);if(historical&&cageSid&&!explicitHistorical)continue;const matches=cageSid&&event.cage_sid?text(event.cage_sid)===text(cageSid):location&&text(event.location_id)===location;if(!matches||captured&&!explicitHistorical&&!sameCohort(captured,event.source_cohort_observation))continue;rows.push(phase(event,event));}
+ const hasCurrentMap=Boolean(location)&&ctx.lights.some(event=>text(event.location_id)===location&&currentMapSource(event));
+ for(const event of ctx.lights){
+  const legacyMap=event.record_origin==='current_google_sheet_map'&&!currentMapSource(event),historical=historicalSource(event)||legacyMap,explicitHistorical=historical&&cageSid&&text(event.cage_sid)===text(cageSid);
+  // A new slot observation supersedes unlinked snapshots of that slot. It does
+  // not supersede a schedule explicitly attached to an identified cage.
+  if(hasCurrentMap&&!text(event.cage_sid)&&(legacyMap||historicalSource(event)))continue;
+  if(historical&&cageSid&&!explicitHistorical)continue;
+  const matches=cageSid&&event.cage_sid?text(event.cage_sid)===text(cageSid):location&&text(event.location_id)===location;
+  if(!matches||captured&&!explicitHistorical&&!sameCohort(captured,event.source_cohort_observation))continue;
+  rows.push({...phase(event,event),historical});
+ }
  if(cageSid&&captured)for(const record of ctx.stored){const e=record.entrainment;if(!e||text(e.source_location_id)!==location||!list(captured.animals).some(animal=>animalAnchor(animal)===animalAnchor(e)))continue;const row=phase({...e,phase_id:e.source_phase_id},{...record,event_id:e.source_event_id});row.source_record=record;row.persisted=true;row.managed=e.association_basis==='manual';row.needs_clarification=e.status==='needs_clarification'||e.association_needs_review===true||row.scheme==='unknown';rows.push(row);}
  for(const event of ctx.protocols){
   const p=event.locobox_protocol;if(event.event_type!=='locobox_protocol'||!p)continue;
   if(cageSid&&p.cage_sid?text(p.cage_sid)!==text(cageSid):!location||text(p.location_id)!==location)continue;
-  for(const [i,value]of list(p.phases).entries()){const row=phase(value,event,i);row.managed=['active','completed'].includes(p.status)&&p.evidence_status==='recorded'&&(p.link_status==='confirmed'||Boolean(p.reviewed_source_event_id));if(row.managed&&p.reviewed_source_event_id){row.reviewed_source_event_id=text(p.reviewed_source_event_id);row.reviewed_source_phase_id=p.reviewed_source_phase_id??null;}rows.push(row);}
+  const historical=p.status==='source';
+  if(historical&&!text(p.cage_sid)&&(hasCurrentMap||cageSid))continue;
+  for(const [i,value]of list(p.phases).entries()){const row=phase(value,event,i);row.historical=historical;row.managed=['active','completed'].includes(p.status)&&p.evidence_status==='recorded'&&(p.link_status==='confirmed'||Boolean(p.reviewed_source_event_id));if(row.managed&&p.reviewed_source_event_id){row.reviewed_source_event_id=text(p.reviewed_source_event_id);row.reviewed_source_phase_id=p.reviewed_source_phase_id??null;}rows.push(row);}
  }
  rows.sort((a,b)=>text(a.start_date).localeCompare(text(b.start_date))||Number(b.managed||false)-Number(a.managed||false)||text(a.id).localeCompare(text(b.id)));
  // Precedence requires an explicit source identity. Date equality does not
@@ -41,12 +57,12 @@ export function cageEntrainmentTimeline(dataset,{cageSid=null,locationId=null}={
  const reviewMap=reviewedGroups(dataset);for(const row of rows)if(row.reviewed_source_event_id){const group=reviewMap.get(phaseKey(row.reviewed_source_event_id,row.reviewed_source_phase_id))??[];if(new Set(group.map(item=>reviewSignature(item.row))).size>1)row.needs_clarification=true;}
  const reviewed=new Set(rows.filter(r=>r.reviewed_source_event_id).map(r=>phaseKey(r.reviewed_source_event_id,r.reviewed_source_phase_id)));
  const seen=new Set(),selected=rows.filter(row=>{const key=phaseKey(row.source_event_id,row.source_phase_id);if(reviewed.has(key)&&!row.reviewed_source_event_id||seen.has(key))return false;seen.add(key);return true;});
- const manager=text(cage?.manager||position?.source_manager_name||position?.source_manager_raw)||null;
- const result={rows:selected,issues:selected.filter(r=>r.needs_clarification).map(r=>({id:'ENTRAIN-REVIEW:'+r.source_event_id+':'+(r.source_phase_id||''),location_id:location,scheme:r.scheme,start_date:r.start_date,end_date:r.end_date,manager:manager||text(r.source_record?.clarification_manager_name||r.source_record?.clarification_manager_raw)||cohortManager(dataset,r.source_record)||null,reason:r.scheme==='unknown'?'Condition unspecified':'Confirm schedule details',source_event_id:r.source_event_id})),label:text(position?.label||cage?.cage_tag||location),hasSchedule:selected.length>0};ctx.timelines.set(key,result);return result;
+ const manager=firstManager(cage?.manager,position?.source_manager_name,position?.source_manager_raw);
+ const result={rows:selected,issues:selected.filter(r=>r.needs_clarification).map(r=>({id:'ENTRAIN-REVIEW:'+r.source_event_id+':'+(r.source_phase_id||''),location_id:location,scheme:r.scheme,start_date:r.start_date,end_date:r.end_date,manager:manager||firstManager(r.source_record?.clarification_manager_name,r.source_record?.clarification_manager_raw)||cohortManager(dataset,r.source_record)||null,reason:r.scheme==='unknown'?'Condition unspecified':'Confirm schedule details',source_event_id:r.source_event_id})),label:text(position?.label||cage?.cage_tag||location),hasSchedule:selected.length>0};ctx.timelines.set(key,result);return result;
 }
 const tagKey=x=>text(x).replace(/[’′]/g,"'").replace(/\s+/g,'').toUpperCase();
 function identities(dataset){const ctx=context(dataset);if(ctx.identities)return ctx.identities;const index=new Map();for(const mouse of ctx.mice){for(const tag of [mouse.physical_tag,...list(mouse.physical_tag_aliases)]){const key=tagKey(tag);if(!key)continue;const rows=index.get(key)||[];if(!rows.includes(mouse))rows.push(mouse);index.set(key,rows);}}return ctx.identities=index;}
-function cohortManager(dataset,source){const found=new Set(),index=identities(dataset);for(const animal of list(source?.source_cohort_observation?.animals)){const rows=(index.get(tagKey(animal.tag))||[]).filter(m=>date(animal.dateOfBirth)&&m.date_of_birth===animal.dateOfBirth);if(rows.length===1){const name=text(rows[0].manager||rows[0].owner);if(name)found.add(name);}}return found.size===1?[...found][0]:null;}
+function cohortManager(dataset,source){const found=new Set(),index=identities(dataset);for(const animal of list(source?.source_cohort_observation?.animals)){const rows=(index.get(tagKey(animal.tag))||[]).filter(m=>date(animal.dateOfBirth)&&m.date_of_birth===animal.dateOfBirth);if(rows.length===1){const name=firstManager(rows[0].manager,rows[0].owner);if(name)found.add(name);}}return found.size===1?[...found][0]:null;}
 function sourceAssociations(dataset,{includeManaged=true}={}){
  const ctx=context(dataset),cacheKey=includeManaged?'associations':'sourceAssociations';if(ctx[cacheKey])return ctx[cacheKey];
  const index=identities(dataset),results=[],unresolved=[];

@@ -1,4 +1,4 @@
-import { buildCryoActivity, cryoSourceLotId } from './cryopreservation-model.js?v=131';
+import { buildCryoActivity, cryoSourceLotId } from './cryopreservation-model.js?v=132';
 import { discoverCryoSources } from './cryo-sources.js?v=100';
 import { strainCodesForCryo } from './strain-cryo-links.js?v=118';
 import { STRAIN_ACRONYMS } from './strain-registry.js?v=118';

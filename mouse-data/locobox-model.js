@@ -27,6 +27,16 @@ function checkInterval(errors,p,label){
     if(p.end_date===p.start_date&&clock(p.start_time)&&clock(p.end_time)&&p.end_time<=p.start_time)errors.push(`${label}: exclusive end must follow its start.`);
   }
 }
+function sourceClarificationProof(p,dataset,old,errors){
+  const referenced=present(p.reviewed_source_event_id)||present(p.reviewed_source_phase_id),previous=old?.locobox_protocol;
+  if(previous&&(present(previous.reviewed_source_event_id)||present(previous.reviewed_source_phase_id))&&['reviewed_source_event_id','reviewed_source_phase_id','location_id'].some(key=>stable(previous[key]??null)!==stable(p[key]??null)))errors.push('Preserve the original source clarification reference.');
+  if(!referenced)return false;
+  const rows=array(dataset.tables?.light_events).filter(row=>live(row)&&row.source_current===true&&row.record_origin==='current_google_sheet_map'&&row.event_id===p.reviewed_source_event_id),source=rows.length===1?rows[0]:null,phase=array(p.phases)[0];
+  const valid=typeof p.reviewed_source_event_id==='string'&&txt(p.reviewed_source_event_id).length>0&&p.reviewed_source_event_id.length<=200&&typeof p.reviewed_source_phase_id==='string'&&source&&validTimingDate(source.start_date)&&p.reviewed_source_phase_id===source.start_date&&txt(source.location_id)&&p.location_id===source.location_id&&array(p.phases).length===1&&phase&&phase.start_date===source.start_date&&(phase.end_date??null)===(source.end_date??null)&&(!Number.isFinite(source.duration_days)||phase.duration_days===source.duration_days)&&(!txt(source.cage_sid)||p.cage_sid===source.cage_sid);
+  if(!valid)errors.push('Source clarification must retain its original dated phase, interval and position.');
+  if(!txt(p.cage_sid)&&['animal_sids','animal_associations'].some(key=>Object.hasOwn(p,key)&&(!Array.isArray(p[key])||p[key].length>0)))errors.push('A source clarification cannot enroll animals.');
+  return Boolean(valid);
+}
 export function validateLocoboxRecord(record,dataset={},old=null){
   const errors=[],warnings=[],kind=record?.event_type;
   if(!['locobox_protocol','locobox_revision'].includes(kind))return {errors,warnings};
@@ -50,7 +60,8 @@ export function validateLocoboxRecord(record,dataset={},old=null){
   if(present(p.cage_sid)&&!array(dataset.tables?.cages).some(c=>String(c.cage_sid)===p.cage_sid))errors.push('Select an existing cage SID.');
   if(present(p.location_id)&&!array(dataset.tables?.locations).some(l=>l.location_id===p.location_id))errors.push('Select an existing physical position.');
   if(p.status==='source'&&p.evidence_status!=='source')errors.push('A source observation must retain source evidence status.');
-  if(p.status==='active'&&(p.evidence_status!=='recorded'||p.link_status!=='confirmed'))errors.push('An active protocol requires recorded evidence and a confirmed cage association.');
+  const sourceClarification=sourceClarificationProof(p,dataset,old,errors),unlinkedClarification=sourceClarification&&!txt(p.cage_sid)&&p.link_status==='unresolved';
+  if(p.status==='active'&&(p.evidence_status!=='recorded'||p.link_status!=='confirmed'&&!unlinkedClarification))errors.push('An active protocol requires recorded evidence and a confirmed cage association.');
   for(const key of ['title','source_cage_label'])checkText(errors,p,key,'Protocol',500);
   checkText(errors,p,'notes','Protocol');
   if(!Array.isArray(p.phases)||p.phases.length<1||p.phases.length>100)errors.push('Keep between 1 and 100 timeline phases.');
