@@ -40,14 +40,11 @@ h2 { font-size: 27px; line-height: 1.25; font-weight: 550; letter-spacing: -.035
 .status { margin: 25px 0; color: var(--blue-dark); font-size: 14px; max-width: 680px; }
 .status:empty { display: none; }
 .status[data-error="true"] { color: #8c2f2f; border-left: 3px solid #ad5750; padding: 10px 16px; background: #fff4ed; }
-.sign-in-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: start; margin-top: 52px; }
-.access-note { padding-top: 16px; max-width: 350px; }
-.access-note p { color: var(--muted); }
-.rule { width: 56px; height: 3px; background: var(--blue); margin-bottom: 28px; }
+.sign-in-layout { width: 100%; max-width: 480px; margin-top: 32px; }
 .small { font-size: 13px; line-height: 1.65; }
-.access-note .small { border-top: 1px solid var(--line); padding-top: 23px; margin-top: 30px; }
 .sign-in-card { background: var(--surface); border: 1px solid var(--line); padding: 32px 36px; border-radius: 12px; }
 .sign-in-card h2 { font-size: 23px; }
+.registration-note { margin: 20px 0 0; color: var(--muted); }
 form { display: flex; flex-direction: column; }
 label { margin: 10px 0 6px; font-size: 13px; font-weight: 550; }
 input { width: 100%; min-height: 46px; padding: 9px 12px; background: #fffefc; border: 1px solid #9198a0; border-radius: 5px; color: var(--ink); min-width: 0; }
@@ -105,10 +102,7 @@ summary { color: var(--blue-dark); font-size: 13px; padding: 6px 0; }
   .site-header nav a { gap: 6px; }
   .portal { padding: 42px 0 65px; }
   .intro-copy { max-width: 350px; font-size: 16px; }
-  .sign-in-layout { grid-template-columns: 1fr; gap: 28px; margin-top: 30px; }
-  .access-note { padding-top: 0; max-width: none; }
-  .access-note h2, .access-note .rule, .access-note > p:not(.small) { display: none; }
-  .access-note .small { border: 0; padding: 0; margin: 0; max-width: 450px; }
+  .sign-in-layout { margin-top: 30px; }
   .sign-in-card { padding: 26px; }
   .tool-grid { grid-template-columns: 1fr; }
   .tools-heading { align-items: flex-start; margin-top: 36px; }
