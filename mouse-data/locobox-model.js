@@ -10,7 +10,7 @@ const zone=x=>{try{return Boolean(txt(x))&&Boolean(new Intl.DateTimeFormat('en',
 const instant=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/.test(x)&&validTimingDate(x.slice(0,10))&&Number.isFinite(Date.parse(x));
 const id=prefix=>prefix+'-'+(globalThis.crypto?.randomUUID?.()??Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
 const stable=x=>JSON.stringify(x,(key,value)=>object(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
-export const LOCOBOX_SCHEMES=Object.freeze(['unknown','LD','DD','LL','LP1','LP2','Custom']);
+export const LOCOBOX_SCHEMES=Object.freeze(['unknown','LD','DD','DL','LL','LDLD','SP','SP1','SP2','LP','LP1','LP2','T22','T23','T24','T25','Custom']);
 export function blankLocoboxTreatment(){return {treatment_id:id('TREAT'),name:'',status:'planned',dose:null,dose_unit:null,concentration:null,concentration_unit:null,route:null,vehicle:null,delivery:null,frequency:null,start_date:null,end_date:null,start_time:null,end_time:null,notes:null};}
 export function blankLocoboxPhase(){return {phase_id:id('PHASE'),label:'',start_date:null,end_date:null,start_time:null,end_time:null,timezone:'Asia/Taipei',scheme:'unknown',cycle_hours:null,light_hours:null,lights_on:null,lights_off:null,transition_minutes:null,intensity_lux:null,duration_days:null,duration_basis:'unknown',schedule_details:null,measured_phase:{measured_at:null,phase_hours:null,basis:'unknown',method:null,notes:null},treatments:[],notes:null};}
 export function blankLocoboxProtocol(){return {schema_version:1,protocol_id:'',title:'',status:'planned',evidence_status:'planned',cage_sid:null,location_id:null,source_cage_label:null,link_status:'unresolved',phases:[blankLocoboxPhase()],notes:null};}
@@ -119,6 +119,8 @@ export function validateLocoboxRecord(record,dataset={},old=null){
 export function buildLocoboxProtocol(input,dataset,previous=null,{eventId=null,now=new Date().toISOString(),sourceRecord=null}={}){
   if(!instant(now))throw new Error('Save time must be a valid ISO datetime with UTC offset.');
   const event_id=previous?.event_id||eventId||id('LOCO'),p={...blankLocoboxProtocol(),...clone(input),protocol_id:event_id};
+  if(p.link_status==='confirmed'&&p.cage_sid)p.animal_sids=unique([...array(previous?.locobox_protocol?.animal_sids),...array(p.animal_sids),...array(dataset.tables?.mice).filter(m=>live(m)&&m.state==='Stock'&&String(m.cage_sid)===String(p.cage_sid)).map(m=>String(m.mouse_sid))]);
+  if(p.link_status==='confirmed'&&p.cage_sid){const known=array(previous?.locobox_protocol?.animal_associations).filter(x=>object(x)&&typeof x.mouse_sid==='string'&&validTimingDate(x.start_date));const joined=new Set(known.map(x=>x.mouse_sid));const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));p.animal_associations=[...known,...array(p.animal_sids).filter(sid=>!joined.has(sid)).map(mouse_sid=>({mouse_sid,start_date:day}))];}
   const existing=array(dataset.tables?.husbandry_events).find(r=>r.event_id===event_id);
   if(!previous&&existing)throw new Error('This Locobox event ID already exists.');
   if(previous&&(previous.event_type!=='locobox_protocol'||!existing||stable(existing)!==stable(previous)))throw new Error('The Locobox record changed. Reload it before saving.');

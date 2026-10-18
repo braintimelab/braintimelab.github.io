@@ -1,9 +1,10 @@
+import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=131';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
 import { PUBLIC_CONFIG } from './config.js?v=100';
 import { validateManagerPermissions } from './permissions.js?v=100';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=118';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=118';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=131';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=131';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -21,7 +22,7 @@ let deferredArchiveState=null;
 let versions=new Map(),baseline=null,baselineIdentity=null,synced=false,refreshPromise=null,statusMessage='',pendingEmail=null,pullGeneration=0;
 const memory=new Map();
 const activeDatasetSaves=new Set();
-const READ_DEPENDENCY_TYPES=new Set(['mice','cages','locations','rooms','racks','husbandry_events']);
+const READ_DEPENDENCY_TYPES=new Set(['mice','cages','locations','rooms','racks','husbandry_events','light_events']);
 function getStorage(kind,key){try{return globalThis[kind]?.getItem(key)??null;}catch{return memory.get(`${kind}:${key}`)??null;}}
 function setStorage(kind,key,value){try{if(!globalThis[kind])throw Error();value===null?globalThis[kind].removeItem(key):globalThis[kind].setItem(key,value);}catch{value===null?memory.delete(`${kind}:${key}`):memory.set(`${kind}:${key}`,value);}}
 function readJSON(kind,key){try{return JSON.parse(getStorage(kind,key)||'null');}catch{return null;}}
@@ -950,7 +951,7 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
     if(!dependency||typeof dependency!=='object'||Array.isArray(dependency)||Object.keys(dependency).length!==2||!READ_DEPENDENCY_TYPES.has(dependency.type)||typeof dependency.id!=='string'||!dependency.id||dependency.id.trim()!==dependency.id||dependency.id.length>200)throw new Error('Invalid save dependencies. Reload and review the changes.');
     dependencyKeys.add(`${dependency.type}:${dependency.id}`);
   }
-  const data=normalizeDataset(dataset);
+  const data=normalizeDataset(applyAnimalEntrainmentSync(null,dataset).dataset);
   if(data.source_archive_deferred&&(localOnly||mode()==='local'))throw new Error('A deferred workspace cannot replace a complete local dataset. Load all history first.');
   if(localOnly||mode()==='local'){
     const generation=authGeneration,context=exportContext();

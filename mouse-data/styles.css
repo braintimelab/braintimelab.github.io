@@ -321,3 +321,5 @@
 .sheet-empty-slot:has(.sheet-badge-editor){height:auto;min-height:160px;overflow:visible}
 .sheet-empty-slot>.sheet-badge-editor{position:relative;z-index:2;margin-top:5px}
 @media(any-pointer:coarse){.sheet-cage button.sheet-work-badge{min-height:28px}.sheet-cage .sheet-badge-editor input,.sheet-cage .sheet-badge-editor select{min-height:32px}}
+
+.cage-light .compact-table{margin:4px 0}.cage-light .compact-table th,.cage-light .compact-table td{padding:4px 3px;font-size:10px}.locobox .compact-table th,.locobox .compact-table td{padding:6px 8px;font-size:12px}.locobox-timeline .compact-table{margin:6px 0}

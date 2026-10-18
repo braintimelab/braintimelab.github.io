@@ -1,14 +1,15 @@
-import { validateLocoboxRecord } from './locobox-model.js?v=100';
-import { validateIacucRecord } from './iacuc-model.js?v=100';
-import { validateLacFeeRecord } from './lac-fee-model.js?v=118';
+import {validateMouseEntrainment} from './entrainment-history.js?v=131';
+import { validateLocoboxRecord } from './locobox-model.js?v=131';
+import { validateIacucRecord } from './iacuc-model.js?v=131';
+import { validateLacFeeRecord } from './lac-fee-model.js?v=131';
 import { validateUserAcronym } from './user-acronyms.js?v=100';
 import { validateCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { validateBreedingOptions } from './breeding-options.js?v=100';
 import { validateStrainDefinition } from './strain-registry.js?v=118';
 import { validateGeneticProfile } from './genotype-schema.js?v=100';
 import { validateScenario } from './genetics.js?v=100';
-import { validateExperimentRecord } from './experiment-model.js?v=100';
-import { validateCryoRecord } from './cryopreservation-model.js?v=100';
+import { validateExperimentRecord } from './experiment-model.js?v=131';
+import { validateCryoRecord } from './cryopreservation-model.js?v=131';
 export const ID_FIELDS = Object.freeze({mice:'mouse_sid',matings:'mating_sid',litters:'litter_sid',cages:'cage_sid',rooms:'room_id',racks:'rack_id',locations:'location_id',light_events:'event_id',husbandry_events:'event_id'});
 const copy = value => structuredClone(value);
 const ids = value => Array.isArray(value) ? value : (typeof value==='string' ? value.split(/[\n,]/).map(s=>s.trim()).filter(Boolean) : []);
@@ -310,7 +311,7 @@ export function validateRecord(type,draft,dataset,originalId=null) {
   for(const name of ['sire_sids','dam_sids','male_sids','female_sids'])if(populated(draft[name])&&(!Array.isArray(draft[name])||draft[name].some(id=>typeof id!=='string'||!id.trim())))errors.push(`${name} must contain text identifiers.`);
   validateHousing(type,draft,old,base,errors);
   if(type==='husbandry_events')errors.push(...validateStrainDefinition(draft,old),...validateBreedingOptions(draft,old),...validateCageSummaryOptions(draft,old),...validateUserAcronym(draft,old));
-  if(type==='husbandry_events'){for(const checked of [validateIacucRecord(draft,base),validateLocoboxRecord(draft,base,old)]){errors.push(...checked.errors);warnings.push(...checked.warnings);}}
+  if(type==='husbandry_events'){for(const checked of [validateIacucRecord(draft,base),validateLocoboxRecord(draft,base,old),validateMouseEntrainment(draft,base,old)]){errors.push(...checked.errors);warnings.push(...checked.warnings);}}
   if(type==='husbandry_events'){const checked=validateLacFeeRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}
   if(type==='husbandry_events'){const checked=validateExperimentRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}
   if(type==='husbandry_events'){const checked=validateCryoRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}

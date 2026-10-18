@@ -1,14 +1,15 @@
+import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=131';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
 import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=118';
-import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=100';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=118';
+import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=131';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=131';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { renderMouseReview } from './mouse-review-view.js?v=100';
-import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=118';
+import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=131';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=120';
-import * as model from './model.js?v=118';
+import * as store from './data-store.js?v=131';
+import * as model from './model.js?v=131';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=118';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=118';
 import { renderStrainManagement, hasStrainDrafts, clearStrainManagement } from './strain-management.js?v=118';
@@ -18,18 +19,18 @@ import { summarizeCages } from './cage-summary.js?v=118';
 import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { summarizeBreeding } from './breeding-summary.js?v=118';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=118';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=131';
 import * as history from './history-index.js?v=100';
 import { renderUserManagement } from './user-management.js?v=100';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=100';
 import { renderAccessLogs } from './access-logs.js?v=113';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=118';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=131';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=118';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=131';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
-import { renderCageLabelEditor } from './cage-label.js?v=118';
+import { renderCageLabelEditor } from './cage-label.js?v=131';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
 import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
@@ -37,16 +38,16 @@ import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=100';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=118';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=118';
-import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=118';
-import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=120';
-import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=100';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=118';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=131';
+import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=131';
+import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=131';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=131';
 import { renderAnimalSheetImport, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=100';
 import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126';
-import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=100';
-import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=100';
-import { protocolsForEntity } from './iacuc-model.js?v=100';
-import { renderExportCenter } from './export-center.js?v=118';
+import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=131';
+import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=131';
+import { protocolsForEntity } from './iacuc-model.js?v=131';
+import { renderExportCenter } from './export-center.js?v=131';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -74,7 +75,7 @@ let authPendingEmail = '';
 let passwordSetupRequired=false;
 let currentRows = [];
 let plannerMouseId = null, plannerTargetDraft = null;
-let experimentMouseId=null, experimentRecordId=null, iacucEntity=null,locoboxCage=null,locoboxPosition=null,locoboxContextKey=0;
+let experimentMouseId=null, experimentRecordId=null, iacucEntity=null,locoboxCage=null,locoboxPosition=null,locoboxContextKey=0,locoboxSourceEvent=null;
 let familyClassifications = new Map();
 let plannerRenderToken = 0, plannerModule = null, plannerModulePending = null;
 let pageRenderGeneration = 0;
@@ -293,16 +294,16 @@ function render() {
  if(route==='overview'){renderOverview();return}
  if(route==='cages'){renderCages();return}
  if(route==='family'){renderFamily();return}
- if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position)=>{locoboxContextKey++;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:()=>navigate('cryo'),openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
+ if(route==='housing'){renderHousing($('main'),dataset,{openLocobox:(cage,position,sourceEvent)=>{locoboxContextKey++;locoboxSourceEvent=sourceEvent||null;locoboxCage=cage||null;locoboxPosition=position||null;navigate('locobox')},openImports:()=>navigate('settings'),exportSheet:options=>openExportCenter({scope:'animal-sheet',...options}),openCryo:()=>navigate('cryo'),openCage:id=>navigate('cages',id),printCage:id=>printCageCards([id]),openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,confirm:confirmAction,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}});return}
  if(route==='strains'){renderStrains();return}
  if(route==='planner'){renderPlanner();return}
  if(route==='cryo'){renderCryo();return}
  if(route==='experiments'){renderExperimentSection();return}
- if(route==='locobox'){renderLocobox($('main'),dataset,{printLabel:id=>openCageLabel(id,'locobox'),initialCage:locoboxCage,initialLocationId:locoboxPosition,initialContextKey:locoboxContextKey,canEdit:()=>canEditRecords('housing'),openCage:id=>navigate('cages',id),openMouse:id=>navigate('mice',id),toast:showToast,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
+ if(route==='locobox'){renderLocobox($('main'),dataset,{printLabel:id=>openCageLabel(id,'locobox'),initialCage:locoboxCage,initialLocationId:locoboxPosition,initialContextKey:locoboxContextKey,initialSourceEventId:locoboxSourceEvent,canEdit:()=>canEditRecords('housing'),openCage:id=>navigate('cages',id),openMouse:id=>navigate('mice',id),toast:showToast,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='iacuc'){renderIacuc($('main'),dataset,{initialEntity:iacucEntity,canEdit:()=>canEditRecords('iacuc'),openMouse:id=>navigate('mice',id),openCage:id=>navigate('cages',id),toast:showToast,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='fees'){renderLacFees($('main'),dataset,{isCurrent:()=>generation===pageRenderGeneration&&route==='fees'&&!detail,getVisibility:()=>store.getLacFeeVisibility(),saveVisibility:input=>store.saveLacFeeVisibility(input),canEdit:()=>canEditRecords('fees'),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='archive'){renderArchive();return}
- if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;renderMouseReview($('main'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
+ if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;$('main').innerHTML=entrainmentReviewHTML()+'<div id="animal-review-content"></div>';$('main').onclick=event=>{const target=event.target.closest?.('[data-entrainment-position]');if(target){locoboxContextKey++;locoboxCage=null;locoboxSourceEvent=null;locoboxPosition=target.dataset.entrainmentPosition;navigate('locobox');}};renderMouseReview($('animal-review-content'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
 function startupProgressBar(){
@@ -563,7 +564,7 @@ function renderCages(){
   canImport:()=>!view.readOnly&&canImportAnimalsSheet(),importFromSheet:openCageSheetImport,
   openCage:view.readOnly?undefined:id=>navigate('cages',id),openMouse:view.readOnly?undefined:id=>navigate('mice',id),printLabel:view.readOnly?undefined:id=>openCageLabel(id),printPositionLabel:view.readOnly?undefined:id=>openCageLabel(null,'front',id),
   openExperiment:view.readOnly?undefined:id=>{experimentRecordId=id;navigate('experiments')},
-  openLocobox:view.readOnly?undefined:(cage,position)=>{locoboxContextKey++;locoboxCage=cage;locoboxPosition=position;navigate('locobox')},
+  openLocobox:view.readOnly?undefined:(cage,position)=>{locoboxContextKey++;locoboxSourceEvent=null;locoboxCage=cage;locoboxPosition=position;navigate('locobox')},
   help:()=>showHelp(false,false,true),confirm:message=>confirmAction('Discard pending edits',`<p>${esc(message)}</p>`,'Discard'),
   loadFresh:async()=>{if(cloud.mode==='cloud'){const fresh=await store.pullFromCloud({deferHistory:true});await refreshCloud();return fresh;}return store.loadDataset();},
   save:async (next,options)=>{await store.saveDataset(next,options);dataset=await store.loadDataset();await refreshCloud();},
@@ -583,6 +584,8 @@ async function refreshCageTableManagers(){const context=cageSheetContext();try{c
 function tableCell(r,key,cfg){const value=columnValue(r,key);if(route==='mice'&&key==='mouseline'){const labels=Object.entries(mouseStrains(r));if(labels.length)return `<div class="chips">${labels.map(([code,status])=>`<span class="badge ${status==='uncertain'?'amber':'blue'}" title="${esc(getStrainRegistry(dataset).find(row=>row.key===code)?.name||code)}${status==='uncertain'?' · Undetermined until genotyping':''}">${esc(status==='uncertain'?'('+code+')':code)}</span>`).join('')}</div>${value?`<div class="small muted">${esc(value)}</div>`:''}`;}if(key==='_manager'){const info=managerFor(route,r);return route==='cages'?`<button type="button" class="text-button" data-action="edit-cage-manager" data-id="${esc(r.cage_sid)}" aria-label="Manager for ${esc(r.cage_tag||r.cage_sid)}"${canEditRecords('housing')&&!archived(r)?'':' disabled'}>${esc(cageManagerShortName(currentCageManagers(),info.name))}</button>`:managerHTML(info);}if(key===cfg.id)return `<button class="record-link" data-open="${route}" data-id="${esc(value)}">${esc(value)}</button>${archived(r)?'<div class="small muted">Archived</div>':''}`;if(key==='state')return badge(value||'Unknown',value==='Stock'||value==='Active'?'green':'');if(key==='_parents')return badge(value,value==='Ambiguous'?'amber':value==='Recorded'?'blue':'');if(key==='_origin')return badge(value,r._derived?'amber':'');if(value===null||value===undefined||value==='')return'<span class="muted">Unknown</span>';return esc(text(value))}
 function sourceHTML(record){return `<div class="provenance">${kv([['Origin',human(record.record_origin||'app_created')],['Source file',record.source_filename],['Worksheet',record.source_sheet],['Source row',record.source_row],['Created in app',record.app_created_at],['Last app edit',record.app_modified_at]])}${record.source_sha256?`<p>SHA-256<br><code>${esc(record.source_sha256)}</code></p>`:''}${record.source_record_id?`<p>Source record<br><code>${esc(record.source_record_id)}</code></p>`:''}<details class="source-disclosure"><summary>Read full stored record</summary><pre>${esc(JSON.stringify(record,null,2))}</pre></details></div>`}
 function parentHTML(mouse){return ['sire','dam'].map(role=>{const candidates=ids(mouse[role+'_sids']),amb=candidates.length>1;return `<div class="parent-block"><div class="parent-label">${role==='sire'?'Sire':'Dam'} ${candidates.length?badge(amb?'Recorded alternatives':'Single recorded parent',amb?'amber':'blue'):''}</div><div class="chips">${candidates.length?candidates.map(id=>mouseChip(id,amb)).join(''):'<span class="small muted">Not recorded</span>'}</div>${amb?'<p class="small muted" style="margin-top:9px">Candidate parents · Unresolved</p>':''}</div>`}).join('')+'<p class="small muted" style="margin-top:18px">Current recorded parent IDs</p>'}
+function mouseEntrainmentTable(mouse){const older=deferredHistoryTables().includes('husbandry_events')?button('Load older history','mouse-entrainment-history'):'';const rows=mouseEntrainmentHistory(dataset,mouse.mouse_sid);return rows.length?`<div class="table-scroll"><table class="compact-table"><thead><tr><th>Start</th><th>End</th><th>Condition</th><th>On / off</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.start_date||'—')}</td><td>${esc(row.end_date||'—')}</td><td>${esc(entrainmentConditionLabel(row.scheme))}${row.needs_clarification?'<span class="badge amber">Clarify</span>':''}</td><td>${esc(row.lights_on||'—')} / ${esc(row.lights_off||'—')}</td></tr>`).join('')}</tbody></table></div>${rows.some(row=>row.association_needs_review)?'<p class="small muted">Source-card association; earlier exposure needs review.</p>':''}${older}`:'<p class="small muted">—</p>'+older;}
+function entrainmentReviewHTML(){const issues=entrainmentClarifications(dataset);if(!issues.length)return '';const groups=new Map();for(const row of issues){const key=row.location_id;if(!groups.has(key))groups.set(key,{...row,dates:[]});groups.get(key).dates.push(row.start_date||'—');}return panel('Entrainment to clarify',`<div class="table-scroll"><table><thead><tr><th>LocoBox</th><th>Manager</th><th>Dates</th><th></th></tr></thead><tbody>${[...groups.values()].map(row=>`<tr><td>${esc(row.label||'—')}</td><td>${esc(row.manager||'—')}</td><td>${esc([...new Set(row.dates)].join(', '))}</td><td><button class="button secondary" data-entrainment-position="${esc(row.location_id)}">Clarify</button></td></tr>`).join('')}</tbody></table></div>`);}
 function renderDetail(){const {type,id}=detail,r=findRecord(type,id);if(!r){$('main').innerHTML=`<div class="empty">No record for SID ${esc(id)} exists in this workspace. ${button('Back','back')}</div>`;return}const cfg=entity[type];let left='',right='';
  if(type==='mice'){
  left=panel('Animal record',kv([['Mouse SID',r.mouse_sid],['Physical tag',r.physical_tag],['Ear mark',r.ear_mark],['Alternate ID',r.alternate_id],['Manager',managerText(model.mouseManager(r))],['Sex',r.sex],['Genotype',r.genotype],['Mouseline',r.mouseline],['Strain',r.strain],['State',r.state],['Status',r.status],['Protocol',r.protocol],['Comment',r.comment]]))+panel('Dates and housing',kv([['Born',r.date_of_birth],['Weaned',r.wean_date],['Ended',r.end_date],['End reason',r.end_reason],['Cage SID',r.cage_sid],['Cage tag',r.cage_tag],['Cage manager',r.cage_sid?managerText(model.cageManager(findRecord('cages',r.cage_sid)||{cage_sid:r.cage_sid},records('mice'))):'No cage assigned'],['Litter SID',r.litter_sid]]));
@@ -592,6 +595,7 @@ function renderDetail(){const {type,id}=detail,r=findRecord(type,id);if(!r){$('m
  const children=records('mice').filter(m=>ids(m.sire_sids).includes(id)||ids(m.dam_sids).includes(id));
  const groups=records('matings').filter(m=>ids(m.male_sids).includes(id)||ids(m.female_sids).includes(id));
  right=panel('Recorded parents',parentHTML(r),button('Family tree','detail-family'))+panel(`Current child links (${children.length})`,children.length?children.map(m=>`<div class="line-item"><div>${mouseChip(m.mouse_sid,ids(m.sire_sids).includes(id)?ids(m.sire_sids).length>1:ids(m.dam_sids).length>1)}<div class="small muted">Born ${esc(m.date_of_birth||'not recorded')}</div></div></div>`).join(''):'<p class="subtle">No current mouse parent fields reference this ID.</p>')+panel('Breeding memberships',groups.length?groups.map(m=>`<div class="line-item"><button class="record-link" data-open="matings" data-id="${esc(m.mating_sid)}">Mating ${esc(m.mating_sid)}</button>${badge(m.state||'Unknown')}</div>`).join(''):'<p class="subtle">No current mating member fields reference this ID.</p>');
+ right+=panel('Entrainment history',mouseEntrainmentTable(r));
  const experiments=experimentsForMouse(dataset,id),samples=samplesForMouse(dataset,id);
  right+=panel(`Experiments (${experiments.length})`,experiments.map(e=>`<div class="line-item"><button class="record-link" data-open-experiment="${esc(e.event_id)}">${esc(e.experiment.title)}</button><span class="small muted">${esc(e.event_date||'Unknown date')}</span></div>`).join('')||'<p class="subtle">No confirmed experiment links.</p>',button('View experiments','mouse-experiments'))+panel(`Samples (${samples.length})`,samples.map(e=>`<div class="line-item"><button class="record-link" data-open-experiment="${esc(e.event_id)}">${esc(e.experiment_sample.label)}</button><span class="small muted">${esc(e.experiment_sample.tissue||'')}</span></div>`).join('')||'<p class="subtle">No confirmed sample donors.</p>');
  }else if(type==='matings'){
@@ -846,7 +850,7 @@ async function action(name,target=null){
  if(startupLoading&&name!=='settings'){showToast('The shared workspace is still loading. Please wait for verification.');return;}
  if((cachedPreview||historyLoadState)&&['retry-startup','cloud-pull','cloud-push','import','import-history','upload-history','download-history','clear-history','clear-workspace','demo','empty-workspace','export'].includes(name)){showToast('Synchronizing. Editing is paused.');return;}
  if(name==='retry-startup'){await start();return;}
- if(name==='cancel-recovery'){await store.signOut();dataset=null;passwordSetupRequired=false;await refreshCloud();navigate('settings');return}if(cloud.passwordRecovery&&name!=='help')throw new Error('Complete or cancel password recovery first.');if(name==='cage-import'){await openCageSheetImport();return}if(name==='cage-current'){setCageDate('');return}if(name==='planner'){navigate('planner');return}if(name==='mouse-genotypes'){plannerMouseId=detail?.type==='mice'?detail.id:null;navigate('planner');return}
+ if(name==='cancel-recovery'){await store.signOut();dataset=null;passwordSetupRequired=false;await refreshCloud();navigate('settings');return}if(cloud.passwordRecovery&&name!=='help')throw new Error('Complete or cancel password recovery first.');if(name==='cage-import'){await openCageSheetImport();return}if(name==='cage-current'){setCageDate('');return}if(name==='planner'){navigate('planner');return}if(name==='mouse-entrainment-history'){await loadHistoryTables(['husbandry_events']);render();return;}if(name==='mouse-genotypes'){plannerMouseId=detail?.type==='mice'?detail.id:null;navigate('planner');return}
  if(name==='litter-help'){showHelp(false,false,false,false,true);return}if(name==='overview-help'){showHelp(false,false,false,true);return}if(name==='cage-summary-options'){await openCageSummaryOptions();return}if(name==='cage-summary-help'){showHelp(false,false,true);return}if(name==='breeding-options'){await openBreedingOptions();return}if(name==='breeding-help'){showHelp(false,true);return}if(name==='strains'){await openStrains();return}if(name==='mouse-count-help'){showHelp(true);return}if(name==='help'){showHelp();return}if(name==='close-print'){$('print-preview').close();return}if(name==='system-print'){await printPreparedCards();return}if(name==='import'){$('import-file').click();return}if(name==='import-history'){$('history-file').click();return}if(name==='clear-history'){if(await confirmAction('Remove local history index?','<p class="subtle">Only this browser’s full-cell index will be removed. The shared cloud copy and colony records remain.</p>','Remove local index')){await history.clearHistoryIndex();renderArchive()}return}if(name==='upload-history'){const saved=await history.loadHistoryIndex();if(!saved)throw new Error('Import a full-cell index first.');if(!await confirmAction('Upload source archive to private cloud?',`<p class="subtle">Upload ${count(saved.index.cells.length)} archived source cells to the configured colony’s private Storage bucket. Authorized members can download this history on their devices.</p>`,'Upload private archive'))return;const result=await store.uploadHistoryIndex(saved.index);showToast('Private source archive uploaded.');await refreshCloud();renderArchive();return}if(name==='download-history'){if(!await confirmAction('Download shared source archive?','<p class="subtle">The latest private index in this colony replaces this browser’s full-cell index. Current mouse and breeding records are unchanged.</p>','Download private index'))return;const index=await store.downloadHistoryIndex();await history.saveHistoryIndex(index,'Shared cloud source-cell index');renderArchive();showToast('Private source archive downloaded.');return}if(name==='export'){await exportDataset();return}if(name==='settings'){navigate('settings');return}if(name==='back'){navigate(detail?.type||route);return}if(name==='add'){openEditor(route);return}if(name.startsWith('new-')){openEditor(name.slice(4));return}if(name==='edit-cage-manager'){openEditor('cages',target?.dataset.id);return}if(name==='edit'){openEditor(detail.type,detail.id);return}if(name==='close-modal'){$('record-dialog').close();editor=null;return}
  if(name==='mouse-experiments'){experimentMouseId=detail.id;navigate('experiments');return}
  if(name==='previous'||name==='next'){if(route!=='archive'&&tableHistoryConfig(route)){const next=tableHistoryPage({windowIndex:tableWindowIndex,undated:tableUndated,page,rowCount:currentRows.length,pageSize,hasOlder:tableWindow?.hasOlder},name);tableWindowIndex=next.windowIndex;tableUndated=next.undated;page=next.page;}else page+=name==='next'?1:-1;route==='archive'?renderArchive():renderTable();return}if(name==='view-mice'){navigate('mice');return}if(name==='family'){navigate('family');return}if(name==='detail-family'){familyFocus=detail.id;navigate('family');return}if(name==='family-record'){navigate('mice',familyFocus);return}if(name==='tree-fit'){treeZoom=1;renderFamily();return}if(name==='tree-zoom-in'){treeZoom=Math.min(4,treeZoom+.5);renderFamily();return}if(name==='tree-zoom-out'){treeZoom=Math.max(1,treeZoom-.5);renderFamily();return}if(name==='show-family'){const input=$('family-search').value.trim(),m=records('mice').find(m=>String(m.mouse_sid)===input)||records('mice').find(m=>m.physical_tag===input);if(!m)throw new Error('No mouse matches that SID or physical tag.');familyFocus=m.mouse_sid;renderFamily();return}
@@ -855,7 +859,7 @@ async function action(name,target=null){
  if(name==='archive-record'){await archiveRecord();return}
  if(name==='empty-workspace'){await store.saveDataset(model.normalizeDataset({tables:{mice:[]}}),{localOnly:true});dataset=await store.loadDataset();await refreshCloud();navigate('overview');return}
  if(name==='demo'){if(dataset&&!await confirmAction('Replace local workspace with demo?','<p class="subtle">This loads invented examples and switches to Local only. Export a backup first if needed.</p>','Load synthetic demo'))return;const demo=model.createSyntheticDataset();demo.demo=true;clearCageSheetDrafts();cageDate='';await store.saveDataset(demo,{localOnly:true,localKind:'demo'});dataset=await store.loadDataset();cloudReady=true;await refreshCloud();navigate('overview');showToast('Synthetic demo loaded locally.');return}
- if(name==='locobox-cage'){locoboxContextKey++;locoboxCage=detail.id;locoboxPosition=findRecord('cages',detail.id)?.location_id||null;navigate('locobox');return}
+ if(name==='locobox-cage'){locoboxContextKey++;locoboxSourceEvent=null;locoboxCage=detail.id;locoboxPosition=findRecord('cages',detail.id)?.location_id||null;navigate('locobox');return}
  if(name==='iacuc-assignment'){iacucEntity={entity_type:detail.type,entity_id:detail.id};navigate('iacuc');return}
  if(name==='cloud-pull'){await loadSharedColony();return}
  if(name==='reload-shared'){await loadSharedColony({preserveView:true,confirm:false});return}

@@ -1,16 +1,17 @@
+import {cageEntrainmentTimeline} from './entrainment-history.js?v=131';
 /* Cage-card display schedules. Inferred/default LD never becomes exposure evidence. */
 import {cageObservations,cageCardObservation,todayTaipei} from './cage-observations.js?v=100';
 import {validTimingDate as timingDate} from './experiment-timing.js?v=100';
-import {blankLocoboxProtocol,blankLocoboxPhase,buildLocoboxProtocol,validateLocoboxRecord} from './locobox-model.js?v=100';
+import {blankLocoboxProtocol,blankLocoboxPhase,buildLocoboxProtocol,validateLocoboxRecord} from './locobox-model.js?v=131';
 const list=value=>Array.isArray(value)?value:[];
 const text=value=>typeof value==='string'?value.trim():value==null?'':String(value);
 const active=row=>row&&!row.app_archived_at&&row.archived!==true;
 const historical=row=>row?.history_read_only===true||row?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(row?.record_origin||'');
 const equal=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
 const validTimingDate=value=>timingDate(value)&&!value.startsWith('0000-');
-export const CAGE_ENTRAINMENT_SCHEMES=Object.freeze(['LD','DD','DL','LL','LDLD','SP','SP1','SP2','LP','LP1','LP2','T23','T24','T25']);
+export const CAGE_ENTRAINMENT_SCHEMES=Object.freeze(['unknown','LD','DD','DL','LL','LDLD','SP','SP1','SP2','LP','LP1','LP2','T23','T24','T25']);
 export function normalizeCageEntrainmentScheme(value){
- const code=text(value).toUpperCase();if(CAGE_ENTRAINMENT_SCHEMES.includes(code))return code;
+ const code=text(value).toUpperCase();if(code==='UNKNOWN')return 'unknown';if(CAGE_ENTRAINMENT_SCHEMES.includes(code))return code;
  const match=code.match(/^T\s*(\d+(?:\.\d+)?)\s*(?:H|HR|HOURS?)?$/),hours=match&&Number(match[1]);
  return hours>0&&hours<=1000?'T'+hours:null;
 }
@@ -80,6 +81,8 @@ export function resolveCageEntrainment(dataset,item={}, {asOf=todayTaipei(),capt
  if(!validTimingDate(asOf))return fallback();
  const value=cageEntrainmentForCard(dataset,item),entry=value?.entries.filter(row=>row.date<=asOf).at(-1);
  if(entry)return {scheme:entry.scheme,date:entry.date,basis:'manual',contradictory:false,inferred:false,eventIds:[]};
+ const timeline=cageEntrainmentTimeline(dataset,{cageSid:item.cageId||item.cage?.cage_sid||null,locationId:item.locationId||item.position?.location_id||item.cage?.location_id||null}),available=timeline.rows.filter(row=>row.source_record?.source_current!==false&&row.source_record?.locobox_protocol?.status!=='planned'&&validTimingDate(row.start_date)&&row.start_date<=asOf&&(!row.end_date||asOf<row.end_date));
+ if(available.length){const latest=available.map(row=>row.start_date).sort().at(-1),current=available.filter(row=>row.start_date===latest),codes=[...new Set(current.map(row=>row.scheme))],chosen=codes.length===1?codes[0]:'unknown';return {scheme:chosen,date:latest,basis:'schedule',contradictory:codes.length>1,inferred:true,eventIds:current.map(row=>row.source_event_id)};}
  const candidates=list(lights).filter(event=>applicable(event,asOf,capturedAt)).map(event=>({event,scope:scope(event,item)})).filter(row=>row.scope),specificity=Math.max(0,...candidates.map(row=>row.scope));
  const selected=candidates.filter(row=>row.scope===specificity),codes=[...new Set(selected.flatMap(row=>scheduleCodes(row.event)))];
  if(codes.length!==1)return fallback(codes.length>1);
@@ -107,14 +110,14 @@ export function planCageEntrainmentRowsEdit(dataset,context={},rows=[],options={
  entries.sort((a,b)=>a.date.localeCompare(b.date));const plan=planCageEntrainmentEdit(dataset,context,entries[0],options),type=context.cageSid?'cages':'locations',id=text(context.cageSid||context.positionId),record=currentEditable(dataset,type,id),value={schemaVersion:1,entries,...(type==='locations'?{source_fingerprint:sourceFingerprint(record)}:{})};
  const change=plan.changes[0]||{type,id,field:'cage_entrainment',base:record.cage_entrainment??null};return {...plan,changes:equal(record.cage_entrainment,value)?[]:[{...change,value}]};
 }
-export function cageEntrainmentRows(dataset,item={},fallbackValue=null){return cageEntrainmentForCard(dataset,item)?.entries||[{date:fallbackValue?.date||'',scheme:fallbackValue?.scheme||'LD'}];}
+export function cageEntrainmentRows(dataset,item={},fallbackValue=null){const manual=cageEntrainmentForCard(dataset,item)?.entries;if(manual)return manual;const timeline=cageEntrainmentTimeline(dataset,{cageSid:item.cageId||item.cage?.cage_sid||null,locationId:item.locationId||item.position?.location_id||item.cage?.location_id||null}),dates=new Map();for(const row of timeline.rows.filter(row=>validTimingDate(row.start_date)&&row.source_record?.locobox_protocol?.status!=='planned'))dates.set(row.start_date,dates.has(row.start_date)&&dates.get(row.start_date)!==row.scheme?'unknown':row.scheme);return dates.size?[...dates].map(([date,scheme])=>({date,scheme})).sort((a,b)=>a.date.localeCompare(b.date)):[{date:fallbackValue?.date||'',scheme:fallbackValue?.scheme||'LD'}];}
 function exactLocobox(dataset,cageSid){
  currentEditable(dataset,'cages',cageSid);const rows=list(dataset?.tables?.husbandry_events).filter(row=>active(row)&&row.event_type==='locobox_protocol'&&row.locobox_protocol?.status!=='source'&&text(row.locobox_protocol?.cage_sid)===text(cageSid)&&row.locobox_protocol?.link_status==='confirmed'),activeRows=rows.filter(row=>row.locobox_protocol.status==='active'),selected=activeRows.length?activeRows:rows;
  if(selected.length>1)throw new Error('Several LocoBox timelines match this cage. Open LocoBox to choose one.');return selected[0]||null;
 }
 const locoboxPhaseCode=phase=>{const exact=normalizeCageEntrainmentScheme(phase.scheme);if(exact)return exact;if(phase.scheme!=='Custom')return null;const label=normalizeCageEntrainmentScheme(phase.label),cycle=scheduleCodes({protocol:phase.scheme,cycle_hours:phase.cycle_hours})[0],period=normalizeCageEntrainmentScheme('T'+phase.cycle_hours);return label&&label.startsWith('T')&&period&&label!==period?null:label||cycle||null;};
 export function loadCageEntrainmentFromLocobox(dataset,context={}){
- if(!context.cageSid)throw new Error('Link or register this cage to exchange with LocoBox.');const record=exactLocobox(dataset,context.cageSid);if(!record)throw new Error('No LocoBox timeline is linked to this cage.');
+ if(!context.cageSid)throw new Error('Link or register this cage to exchange with LocoBox.');const record=exactLocobox(dataset,context.cageSid);if(!record){const rows=cageEntrainmentRows(dataset,{cage:currentEditable(dataset,'cages',context.cageSid)});if(!rows.some(row=>validTimingDate(row.date)))throw new Error('No LocoBox schedule is available for this cage.');const plan=planCageEntrainmentRowsEdit(dataset,context,rows),timeline=cageEntrainmentTimeline(dataset,{cageSid:context.cageSid}),sources=[...new Map(timeline.rows.filter(row=>row.source_record?.event_id&&list(dataset.tables?.light_events).includes(row.source_record)).map(row=>[row.source_event_id,row.source_record])).values()];for(const change of plan.changes)change.sourceScheduleRead=sources.map(value=>({eventId:value.event_id,value:structuredClone(value)}));return {...plan,readDependencies:[...plan.readDependencies,...sources.map(row=>({type:'light_events',id:row.event_id}))]};}
  const rows=list(record.locobox_protocol.phases).map(phase=>({date:phase.start_date,scheme:locoboxPhaseCode(phase)}));
  if(!rows.length||rows.some(row=>!validTimingDate(row.date)||!row.scheme))throw new Error('The LocoBox timeline has unknown dates or conditions. Review it in LocoBox.');
  const plan=planCageEntrainmentRowsEdit(dataset,context,rows);for(const change of plan.changes)change.locoboxRead={eventId:record.event_id,value:structuredClone(record)};
@@ -131,6 +134,7 @@ export function planCageEntrainmentToLocobox(dataset,context={},rows=[],{replace
  return {changes:[{type:'husbandry_events',id:built.record.event_id,field:'$locobox',base:previous?structuredClone(previous):null,value:built.record,locoboxRevisions:extras,locoboxCage:{id:text(cage.cage_sid),location_id:cage.location_id??null,room_id:cage.room_id??null,rack_id:cage.rack_id??null}}],readDependencies:[{type:'cages',id:text(cage.cage_sid)},...(previous?[{type:'husbandry_events',id:previous.event_id}]:[])]};
 }
 export function applyCageEntrainmentLocoboxDrafts(dataset,changes,{canEdit=()=>true}={}){
+ for(const change of Array.from(changes||[]))for(const guard of list(change.sourceScheduleRead)){const current=list(dataset.tables?.light_events).find(row=>row.event_id===guard.eventId);if(!equal(current,guard.value))throw new Error('The source schedule changed. Load it again before saving.');}
  const drafts=Array.from(changes||[]),exchanges=drafts.filter(row=>row.type==='husbandry_events'&&row.field==='$locobox');let rows=list(dataset.tables?.husbandry_events);
  for(const change of drafts.filter(row=>row.locoboxRead)){const current=rows.find(row=>row.event_id===change.locoboxRead.eventId),selected=exactLocobox(dataset,change.locoboxRead.value?.locobox_protocol?.cage_sid);if(!equal(current,change.locoboxRead.value)||selected?.event_id!==current?.event_id)throw new Error('The LocoBox timeline changed. Load it again before saving.');}
  if(exchanges.length&&!canEdit('cages'))throw new Error('Housing edit permission is required to save to LocoBox.');

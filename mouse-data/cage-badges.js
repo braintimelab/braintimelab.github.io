@@ -1,7 +1,7 @@
 /* Work follows its recorded cage or animal. Equipment faults belong to the
  * physical position, in one editable husbandry status record, never an import
  * override or an inferred task from an unknown genotype. */
-import {listExperiments,experimentMouseSids} from './experiment-model.js?v=100';
+import {listExperiments,experimentMouseSids} from './experiment-model.js?v=131';
 import {cageCardObservation,createCageObservationContext} from './cage-observations.js?v=100';
 import {inferNoteBadges,noteTextsFromPosition,sourceBadgeTarget,buildSourceBadgeIndex,sourceBadgeRows,planSourceBadgeEdit} from './cage-note-badges.js?v=103';
 

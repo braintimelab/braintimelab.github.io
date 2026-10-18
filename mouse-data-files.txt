@@ -10,10 +10,10 @@ archive-format.js
 brainbot-review-runner.js
 brainbot-review.js
 brainbot.js
+breeding-guidance.js
 breeding-options.js
 breeding-planner.js
 breeding-presets.js
-breeding-guidance.js
 breeding-strategy.js
 breeding-summary.js
 cage-badges.js
@@ -33,6 +33,7 @@ cryo-sources.js
 cryopreservation-model.js
 cryopreservation.js
 data-store.js
+entrainment-history.js
 experiment-model.js
 experiment-sheet-import.js
 experiment-source-timing.js

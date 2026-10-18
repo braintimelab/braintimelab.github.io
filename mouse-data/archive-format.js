@@ -1,4 +1,4 @@
-import {ID_FIELDS} from './model.js?v=118';
+import {ID_FIELDS} from './model.js?v=131';
 
 export const ARCHIVE_MANIFEST_FORMAT='colony-archive-manifest-v1';
 export const ARCHIVE_CHUNK_FORMAT='colony-archive-chunk-v1';

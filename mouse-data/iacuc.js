@@ -1,4 +1,4 @@
-import {IACUC_SECTIONS,blankIacucProtocol,listIacucProtocols,protocolDateStatus,protocolAssignments,summarizeIacuc,validateIacucRecord} from './iacuc-model.js?v=100';
+import {IACUC_SECTIONS,blankIacucProtocol,listIacucProtocols,protocolDateStatus,protocolAssignments,summarizeIacuc,validateIacucRecord} from './iacuc-model.js?v=131';
 import {planContinuousSampleSize,planBreedingYield,IACUC_PLANNING_REFERENCES} from './iacuc-planning.js?v=100';
 
 const mounts=new WeakMap();
