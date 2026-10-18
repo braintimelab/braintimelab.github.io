@@ -1,3 +1,4 @@
+import {backupViewerLinkHTML} from '../../colony-app/web/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -183,6 +184,62 @@ test('published page starts with tools hidden, accessible labels and a Reagents 
   assert(!html.includes('Coming soon'));
 });
 
+test('Cloud 2 app entries are available in initial HTML before any shared sign-in check', async () => {
+  const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
+  const entry = html.match(/<nav id="cloud2-entry"[^>]*>[\s\S]*?<\/nav>/)?.[0];
+  assert(entry);
+  assert(!/\bhidden\b|aria-disabled|target=/.test(entry));
+  assert.match(entry, /aria-label="Cloud 2 apps"/);
+  assert.deepEqual([...entry.matchAll(/href="([^"]+)"/g)].map(match => match[1]), [
+    'https://braintimedisk.tail933238.ts.net:10000/mouse-data/',
+    'https://braintimedisk.tail933238.ts.net:10000/reagents/'
+  ]);
+  assert(html.indexOf(entry) < html.indexOf('id="portal-status"'));
+  assert(html.indexOf(entry) < html.indexOf('id="sign-in-panel"'));
+  assert(html.indexOf(entry) < html.indexOf('id="tools-panel"'));
+});
+
+test('the portal imports the same maintained store release as Mouse Data and Reagents', async () => {
+  const [portal, mouse, reagents] = await Promise.all([
+    '../internal/portal.js', '../../colony-app/web/app.js', '../../reagents-app/web/app.js'
+  ].map(path => readFile(new URL(path, import.meta.url), 'utf8')));
+  const version = text => text.match(/data-store\.js\?v=(\d+)/)?.[1];
+  assert(version(mouse));
+  assert.equal(version(portal), version(mouse));
+  assert.equal(version(reagents), version(mouse));
+});
+
+test('a hanging or failed Cloud 1 verification leaves native Cloud 2 navigation usable and tools hidden', async () => {
+  const waiting = deferred(), elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {hidden: ['sign-in-panel', 'tools-panel', 'account-panel'].includes(id), textContent: '', innerHTML: '', dataset: {}, listeners: new Map(), attributes: new Map(),
+      setAttribute(name, value) { this.attributes.set(name, value); }, addEventListener(name, callback) { this.listeners.set(name, callback); }});
+    return elements.get(id);
+  };
+  const fallback = element('cloud2-entry'), nativeLinks = [element('cloud2-mouse-link'), element('cloud2-reagents-link')];
+  const document = {hidden: false, getElementById: element, querySelectorAll: () => [], addEventListener() {}};
+  const window = {location: new URL('https://braintime.example/internal/'), addEventListener() {}};
+  const store = {getCloudStatus: () => member(), verifyCloudMembership: () => waiting.promise};
+  const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
+    .replace(/^export /gm, '')
+    .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
+    .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
+  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+  vm.runInContext(source, context);
+  const mounted = context.mountPortal(document, window);
+  await Promise.resolve();
+  assert.equal(element('main').attributes.get('aria-busy'), 'true');
+  assert.equal(element('tools-panel').hidden, true);
+  assert.equal(fallback.hidden, false);
+  for (const link of nativeLinks) assert.equal(link.listeners.size, 0);
+  waiting.reject(new TypeError('Cloud 1 is unavailable'));
+  const controller = await mounted;
+  assert.equal(controller.getState().phase, 'signed-out');
+  assert.equal(element('tools-panel').hidden, true);
+  assert.equal(fallback.hidden, false);
+  for (const link of nativeLinks) assert.equal(link.listeners.size, 0);
+});
+
 
 test('opening Reagents independently rechecks live access and fails closed after revocation', async () => {
   let permitted = true;
@@ -246,10 +303,12 @@ test('submitting a visible password clears and conceals it before authentication
   const store = {getCloudStatus: signedOut, async signIn(identifier, password) { calls.push({identifier, password}); await waiting.promise; }};
   const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
     .replace(/^export /gm, '')
-    .replace(/const \[store, \{PUBLIC_CONFIG\}\] = await Promise\.all\(\[[\s\S]*?\]\);/, 'const store = globalThis.testStore, PUBLIC_CONFIG = globalThis.testConfig;');
-  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+    .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = globalThis.testBackupLink;')
+    .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
+  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
   vm.runInContext(source, context);
   await context.mountPortal(document, window);
+  assert.equal(element('backup-viewer').hidden,true);assert.equal(element('backup-viewer').innerHTML,'');assert.equal(calls.length,0);
   element('login-id').value = ' lab.member ';element('login-password').value = 'synthetic-only-password';
   element('show-password').listeners.get('click')();assert.equal(element('login-password').type, 'text');
   let prevented = false;

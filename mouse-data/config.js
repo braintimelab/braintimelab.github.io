@@ -6,15 +6,18 @@ export const PUBLIC_CONFIG = Object.freeze({
   usernameAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qaGV0d29ydG5nbm5peXJoY2ZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5MTcyNzcsImV4cCI6MjEwNzQ5MzI3N30.UxkxmrZH3wuYZDC-7FVH1BLbiOwgy_tbyTuW-rbQVHQ',
   colonyId: '57a26815-ca94-413b-891a-e0e85ff59d69',
   // Enable only after the independent NAS viewer has been verified.
-  backupViewerUrl: 'https://braintimedisk.tail933238.ts.net/'
+  backupViewerUrl: 'https://braintimedisk.tail933238.ts.net/',
+  // Set only after the independent authenticated provider is deployed.
+  cloud2Url: 'https://braintimedisk.tail933238.ts.net:10000/cloud2/api/'
 });
 
 /** Explicit navigation only. Never append app URLs, sessions or credentials. */
-export function backupViewerLinkHTML(config = PUBLIC_CONFIG) {
+export function backupViewerLinkHTML(config = PUBLIC_CONFIG,{owner=false,parallel=false}={}) {
+  if(!owner)return '';
   if (typeof config?.backupViewerUrl !== 'string' || !config.backupViewerUrl.trim()) return '';
   let url;
   try { url = new URL(config.backupViewerUrl); } catch { return ''; }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return '';
   const href = url.href.replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  return `<div class="backup-viewer-link"><p><a href="${href}" target="_blank" rel="noopener noreferrer" aria-label="Read-only backup (opens in a new tab)">Read-only backup ↗</a></p><p class="small muted">Tailscale and NAS sign-in required. Owner-only for now.</p></div>`;
+  return `<div class="backup-viewer-link"><p><a href="${href}" target="_blank" rel="noopener noreferrer" aria-label="Private recovery backup (opens in a new tab)">${parallel?'Private recovery backup':'Read-only backup'} ↗</a></p></div>`;
 }

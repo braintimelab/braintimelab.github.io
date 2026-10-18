@@ -2,7 +2,7 @@
 const mounts=new WeakMap();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const apps={mouse:'Mouse Data',reagents:'Reagents'},events={session_start:'Session opened',page_view:'Section opened',sign_out:'Sign-out requested'};
-const sections={overview:'Overview',mice:'Mice',matings:'Breeding',litters:'Litters',cages:'Cages',family:'Family tree',planner:'Planning',experiments:'Experiments',iacuc:'IACUC',housing:'Housing & light',locobox:'Locobox',cryo:'Cryopreservation',fees:'LAC fees',archive:'Source archive',brainbot:'Braintime Bot (BB)',settings:'Settings',inventory:'Inventory',safety:'Chemical safety',usage:'Usage',orders:'Orders',vendors:'Vendors',equipment:'Equipment',history:'History',review:'Review'};
+const sections={overview:'Overview',mice:'Mice',strains:'Strains',matings:'Breeding',litters:'Litters',cages:'Cages',family:'Family tree',planner:'Planning',experiments:'Experiments',iacuc:'IACUC',housing:'Housing & light',locobox:'Locobox',cryo:'Cryopreservation',fees:'LAC fees',archive:'Source archive',brainbot:'Braintime Bot (BB)',settings:'Settings',inventory:'Inventory',safety:'Chemical safety',usage:'Usage',orders:'Orders',vendors:'Vendors',equipment:'Equipment',history:'History',review:'Review'};
 const EXCLUDE_OWNER='all_except_owner';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const decimal=v=>typeof v==='string'&&/^[1-9]\d*$/.test(v);

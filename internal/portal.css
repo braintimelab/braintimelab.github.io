@@ -31,6 +31,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
 h1, h2, h3, p { margin-top: 0; }
 h1 { font-size: clamp(42px, 5vw, 60px); font-weight: 500; letter-spacing: -.055em; line-height: 1.08; margin-bottom: 20px; }
 .intro-copy { font-size: 18px; color: var(--muted); margin-bottom: 0; }
+.cloud2-entry { display: flex; flex-wrap: wrap; align-items: center; column-gap: 20px; row-gap: 0; border-block: 1px solid var(--line); margin-top: 24px; padding: 4px 0; font-size: 14px; }
+.cloud2-label { color: var(--ink); font-weight: 550; }
+.cloud2-label small { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.cloud2-entry a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+.cloud2-entry a:hover { text-decoration: underline; }
 h2 { font-size: 27px; line-height: 1.25; font-weight: 550; letter-spacing: -.035em; margin-bottom: 16px; }
 .status { margin: 25px 0; color: var(--blue-dark); font-size: 14px; max-width: 680px; }
 .status:empty { display: none; }

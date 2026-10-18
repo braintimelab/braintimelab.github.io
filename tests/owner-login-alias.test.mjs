@@ -10,15 +10,26 @@ class Storage {
   setItem(key,value){this.values.set(key,String(value));}
   removeItem(key){this.values.delete(key);}
 }
+// The same bounded in-memory IndexedDB fixture used by parallel-store tests.
+function memoryIndexedDB(){
+ const cache=new Map();
+ return {open(){const request={};queueMicrotask(()=>{request.result={close(){},objectStoreNames:{contains:()=>true},transaction(){
+  const tx={},updates=new Map();let pending=0;
+  const run=fn=>{const r={};pending++;queueMicrotask(()=>{r.result=structuredClone(fn());r.onsuccess?.();if(--pending===0)queueMicrotask(()=>{for(const [key,value] of updates)value===undefined?cache.delete(key):cache.set(key,value);tx.oncomplete?.();});});return r;};
+  tx.objectStore=()=>({get:key=>run(()=>updates.has(key)?updates.get(key):cache.get(key)),put:(value,key)=>run(()=>updates.set(key,structuredClone(value))),delete:key=>run(()=>updates.set(key,undefined))});
+  tx.abort=()=>queueMicrotask(()=>tx.onabort?.());return tx;
+ }};request.onsuccess?.();});return request;}};
+}
 const owner='7f58cb96-5677-4c78-b94b-c72362ee1fea',other='11111111-1111-4111-8111-111111111111',primary='jhmyung@gmail.com',alias='jihwan@tmu.edu.tw';
 async function fixture(t,options={}){
-  const previous={fetch:globalThis.fetch,localStorage:globalThis.localStorage,sessionStorage:globalThis.sessionStorage};
-  globalThis.localStorage=new Storage();globalThis.sessionStorage=new Storage();
+  const previous={fetch:globalThis.fetch,localStorage:globalThis.localStorage,sessionStorage:globalThis.sessionStorage,indexedDB:globalThis.indexedDB};
+  globalThis.localStorage=new Storage();globalThis.sessionStorage=new Storage();globalThis.indexedDB=memoryIndexedDB();
   t.after(()=>{Object.assign(globalThis,previous);});
   store.configureCloud(options.config||PUBLIC_CONFIG);
   const state={calls:[],role:'owner',uid:owner,email:primary,resolver:null,...options};
   globalThis.fetch=async(url,init={})=>{
     const path=new URL(url),body=init.body?JSON.parse(init.body):null;state.calls.push({url,path:path.pathname,init,body});
+    if(path.pathname==='/cloud2/api/session/status')return Response.json({error:'Sign in to Cloud 2.'},{status:401});
     if(path.pathname==='/rest/v1/rpc/resolve_lab_login'){
       if(state.started)state.started();if(state.wait)await state.wait;if(state.failure)throw new TypeError('Offline');
       const result=state.resolver?state.resolver(body):body.p_identifier===alias?{email:primary,user_id:owner,alias:true}:{email:body.p_identifier,user_id:null,alias:false};
@@ -38,7 +49,11 @@ test('owner email alias resolves on the server and authenticates with the one ca
   assert.equal(resolve.path,'/rest/v1/rpc/resolve_lab_login');assert.deepEqual(resolve.body,{p_colony_id:PUBLIC_CONFIG.colonyId,p_identifier:alias});assert.equal(resolve.init.cache,'no-store');assert.equal(resolve.init.redirect,'error');assert.equal(resolve.init.headers.apikey,PUBLIC_CONFIG.anonKey);assert.equal(JSON.stringify(resolve.body).includes('synthetic-password'),false);
   assert.equal(auth.path,'/auth/v1/token');assert.deepEqual(auth.body,{email:primary,password:'synthetic-password'});assert.equal(store.getCloudStatus().role,'owner');assert.equal(store.getCloudStatus().email,primary);
   const saved=sessionStorage.getItem('mouse-colony.session.v1');assert.equal(JSON.parse(saved).user.id,owner);assert.equal(saved.includes(alias),false);assert.equal(saved.includes('synthetic-password'),false);
-  assert.deepEqual(state.calls.map(call=>call.path),['/rest/v1/rpc/resolve_lab_login','/auth/v1/token','/rest/v1/memberships','/rest/v1/memberships']);
+  const reads=state.calls.slice(2);
+  assert.equal(reads.filter(call=>call.path==='/rest/v1/memberships').length,3);
+  assert.equal(reads.filter(call=>call.path==='/cloud2/api/session/status').length,0);
+  assert(reads.every(call=>call.path==='/rest/v1/memberships'));
+  assert(reads.every(call=>!JSON.stringify(call.body).includes('synthetic-password')));
 });
 
 test('ordinary emails pass through without owner identity substitution, and pending setup remains restricted',async t=>{

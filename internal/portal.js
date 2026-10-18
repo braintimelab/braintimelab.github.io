@@ -128,11 +128,12 @@ export function createPortalController({store, config, location, navigate, onSta
 }
 
 export async function mountPortal(document, window) {
-  const [store, {PUBLIC_CONFIG}] = await Promise.all([
-    import('../mouse-data/data-store.js?v=119'),
-    import('../mouse-data/config.js')
-  ]);
+  const {PUBLIC_CONFIG, backupViewerLinkHTML} = await import('../mouse-data/config.js');
   const element = id => document.getElementById(id);
+  const backup = element('backup-viewer');
+  backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
+  backup.hidden = !backup.innerHTML;
+  const store = await import('../mouse-data/data-store.js?v=138');
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,
     navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),

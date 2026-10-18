@@ -1,4 +1,4 @@
-import {esc,hazardous,itemClassification,labels,quantity,safeURL,text} from './model.js?v=5';
+import {esc,hazardous,labels,quantity,safeURL,text} from './model.js';
 
 // The caller supplies only records already authorized by the server. This module
 // never fetches data, expands a filter, or includes raw source/history payloads.
@@ -19,7 +19,7 @@ function metadata(options={}) {
 
 function scopedRows(rows,dangerous) {
   if(!Array.isArray(rows))throw Error('Choose inventory records to export.');
-  const selected=rows.filter(row=>(row?.kind==='item'||!dangerous&&row?.kind==='equipment')&&!row.archived&&row.payload&&typeof row.payload==='object'&&!Array.isArray(row.payload)&&(!dangerous||hazardous(row.payload)));
+  const selected=rows.filter(row=>row?.kind==='item'&&!row.archived&&row.payload&&typeof row.payload==='object'&&!Array.isArray(row.payload)&&(!dangerous||hazardous(row.payload)));
   if(!selected.length)throw Error('There are no matching items to export.');
   return selected;
 }
@@ -36,7 +36,7 @@ function safetySummary(payload) {
 }
 
 const INVENTORY_COLUMNS = [
-  ['Record ID',(_,row)=>row.id,26],['Name',p=>p.name||p.title,34],['Inventory classification',(_,row)=>itemClassification(row),22],['Category',p=>p.category,18],
+  ['Record ID',(_,row)=>row.id,26],['Name',p=>p.name,34],['Category',p=>p.category,18],
   ['CAS number',p=>p.cas_number||p.cas_raw,18],['CAS as recorded',p=>p.cas_raw,18],['CAS status',p=>p.cas_status,18],['Brand',p=>p.brand,20],
   ['Catalogue number',p=>p.catalog_number,22],['Barcode / container ID',p=>p.barcode,24],['Lot / batch',p=>p.lot_number,20],
   ['Supplier',p=>p.supplier,24],['Location',p=>p.location,24],['Storage conditions',p=>p.storage,24],['Responsible person',p=>p.owner,22],
@@ -75,7 +75,7 @@ export function inventoryExportFilename(options={},extension='xlsx') {
 
 const line=(label,input)=>present(input)?`<div class="export-detail"><span>${esc(label)}</span> ${esc(value(input))}</div>`:'';
 function itemCell(payload,row) {
-  return `<strong>${esc(shown(payload.name||payload.title,row.id))}</strong>${line('',payload.category)}${line('Notes:',payload.notes)}`;
+  return `<strong>${esc(shown(payload.name,row.id))}</strong>${line('',payload.category)}${line('Notes:',payload.notes)}`;
 }
 function identifiersCell(payload) {
   return `${line('CAS:',payload.cas_number||payload.cas_raw)}${line('Brand:',payload.brand)}${line('Cat.:',payload.catalog_number)}${line('Lot:',payload.lot_number)}${line('Container:',payload.barcode)}`||'Not recorded';
@@ -113,13 +113,12 @@ export const INVENTORY_PRINT_CSS = `
 .inventory-print a { color: #111; text-decoration: underline; }
 .inventory-print thead { display: table-header-group; }
 .inventory-print tr { break-inside: avoid; page-break-inside: avoid; }
-.inventory-print .export-item { width: 20%; }
-.inventory-print .export-classification { width: 10%; }
-.inventory-print .export-identifiers { width: 15%; }
-.inventory-print .export-storage { width: 14%; }
-.inventory-print .export-quantity { width: 10%; }
-.inventory-print .export-hazards { width: 15%; }
-.inventory-print .export-review { width: 16%; }
+.inventory-print .export-item { width: 23%; }
+.inventory-print .export-identifiers { width: 16%; }
+.inventory-print .export-storage { width: 15%; }
+.inventory-print .export-quantity { width: 11%; }
+.inventory-print .export-hazards { width: 17%; }
+.inventory-print .export-review { width: 18%; }
 @media print {
   .inventory-print { width: 100%; padding: 0; }
   .inventory-print h1, .inventory-print .export-meta { break-after: avoid; }
@@ -130,7 +129,7 @@ export const INVENTORY_PRINT_CSS = `
 /** HTML fragment for a permission-fenced preview. No scripts, inline events or remote assets. */
 export function inventoryPrintBodyHTML(rows,options={}) {
   const meta=metadata(options),selected=scopedRows(rows,meta.dangerous);
-  return `<article class="inventory-print"><p class="export-brand">Braintime Reagents</p><h1>${esc(meta.title)}</h1><p class="export-meta">${esc(meta.localTime)} · ${selected.length.toLocaleString('en-US')} ${selected.length===1?'item':'items'}<br>${esc(meta.filterSummary)}</p><table><colgroup><col class="export-item"><col class="export-classification"><col class="export-identifiers"><col class="export-storage"><col class="export-quantity"><col class="export-hazards"><col class="export-review"></colgroup><thead><tr><th>Item</th><th>Classification</th><th>Identifiers</th><th>Location / storage</th><th>Quantity / status</th><th>Safety / GHS</th><th>SDS review</th></tr></thead><tbody>${selected.map(row=>{const p=row.payload;return `<tr><td>${itemCell(p,row)}</td><td>${esc(itemClassification(row))}</td><td>${identifiersCell(p)}</td><td>${storageCell(p)}</td><td>${quantityCell(p)}</td><td>${hazardCell(p)}</td><td>${sdsCell(p)}</td></tr>`;}).join('')}</tbody></table><p class="export-legend">Safety fields show recorded information. Unrecorded or unflagged does not mean safe.</p></article>`;
+  return `<article class="inventory-print"><p class="export-brand">Braintime Reagents</p><h1>${esc(meta.title)}</h1><p class="export-meta">${esc(meta.localTime)} · ${selected.length.toLocaleString('en-US')} ${selected.length===1?'item':'items'}<br>${esc(meta.filterSummary)}</p><table><colgroup><col class="export-item"><col class="export-identifiers"><col class="export-storage"><col class="export-quantity"><col class="export-hazards"><col class="export-review"></colgroup><thead><tr><th>Reagent</th><th>Identifiers</th><th>Location / storage</th><th>Quantity / status</th><th>Classification / GHS</th><th>SDS review</th></tr></thead><tbody>${selected.map(row=>{const p=row.payload;return `<tr><td>${itemCell(p,row)}</td><td>${identifiersCell(p)}</td><td>${storageCell(p)}</td><td>${quantityCell(p)}</td><td>${hazardCell(p)}</td><td>${sdsCell(p)}</td></tr>`;}).join('')}</tbody></table><p class="export-legend">Safety fields show recorded information. Unrecorded or unflagged does not mean safe.</p></article>`;
 }
 
 /** Standalone print-ready HTML, also useful for saved preview artifacts. */

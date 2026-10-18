@@ -28,7 +28,7 @@ export function allowedOrderActions(row,role){
  return [...allowed].filter(a=>['approve','reject'].includes(a)?owner:['ordered','receive','cancel'].includes(a)&&(owner||own));
 }
 export function notificationText(notifications=[]){
- return notifications.map(n=>{const name=n.event==='submitted'?'Approval email':n.event==='approved'?'Purchase email':n.event==='rejected'?'Decision email':['received','receipt_reminder'].includes(n.event)?'Receipt email':'Email';return `${name} ${({queued:'queued',pending:'queued',leased:'pending delivery',cancelled:'cancelled',sending:'pending delivery',sent:'sent',failed:'failed',provider_unconfigured:'not configured',uncertain:'delivery unconfirmed',retrying:'awaiting retry',suppressed:'not sent'})[n.status]||'status unknown'}`;}).join(' · ');
+ return notifications.map(n=>{const name=n.event==='submitted'?'Approval email':n.event==='approved'?'Purchase email':n.event==='rejected'?'Decision email':['received','receipt_reminder'].includes(n.event)?'Receipt email':'Email';return `${name} ${({queued_cloud:'queued for Cloud 1',queued:'queued',pending:'queued',leased:'pending delivery',cancelled:'cancelled',sending:'pending delivery',sent:'sent',failed:'failed',provider_unconfigured:'not configured',uncertain:'delivery unconfirmed',retrying:'awaiting retry',suppressed:'not sent'})[n.status]||'status unknown'}`;}).join(' · ');
 }
 const price=p=>typeof p.price==='number'&&Number.isFinite(p.price)?`${text(p.currency||'Currency unknown')} ${p.price.toLocaleString(undefined,{maximumFractionDigits:4})}`:text(p.price_text||'Price not recorded');
 const date=value=>value?text(value).slice(0,10):'Date unknown';

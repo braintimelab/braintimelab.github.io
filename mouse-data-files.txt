@@ -28,6 +28,11 @@ cage-sheet.js
 cage-start.js
 cage-summary-options.js
 cage-summary.js
+cloud-bridge.js
+cloud-intents.js
+cloud-monitor.js
+cloud-provider.js
+cloud-status.js
 config.js
 cryo-sources.js
 cryopreservation-model.js
