@@ -54,7 +54,7 @@ function locoboxLightIndex(dataset,capturedAt,historicalView){
   return index;
 }
 function specialLightBadges(entrainment){
-  return entrainment.scheme==='LD'?'':`<span class="sheet-condition-label" title="${esc(entrainment.date||entrainment.scheme)}" aria-label="${esc('Lighting: '+entrainment.scheme)}">${esc(entrainment.scheme==='unknown'?'—':entrainment.scheme)}</span>`;
+  return ['','LD','unknown','—','–','-'].includes(entrainment.scheme||'')?'':`<span class="sheet-condition-label" title="${esc(entrainment.date||entrainment.scheme)}" aria-label="${esc('Lighting: '+entrainment.scheme)}">${esc(entrainment.scheme)}</span>`;
 }
 const entrainmentSchemes=['unknown','LD','DD','DL','LL','LDLD','SP','SP1','SP2','LP','LP1','LP2','T23','T24','T25'];
 function mergedCageNotes(note,warnings=[]){
