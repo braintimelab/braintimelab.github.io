@@ -1,3 +1,4 @@
+import {isGuest,guestAllows,validateGuestPermissions} from './guest-access.js?v=134';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
@@ -106,6 +107,8 @@ async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseli
 export async function loadDataset(){
  if(session()?.passwordRecovery||pendingAccount(session()))return null;
  const generation=authGeneration;
+ if(mode()==='cloud'&&session()?.access_token)await membership();
+ if(isGuest(session()))return pullFromCloud({deferHistory:true});
  const d=await local('get');if(!d||generation!==authGeneration||session()?.passwordRecovery||pendingAccount(session()))return null;
  if(mode()==='cloud'||readJSON('localStorage',CLOUD_CACHE_KEY)){
   const c=configuration(),u=session()?.user?.id,previous=readJSON('localStorage',CLOUD_CACHE_KEY);
@@ -158,7 +161,7 @@ export function configureCloud({url,anonKey,colonyId}){
 }
 export function getCloudStatus(){
   const c=configuration(),s=session();
-  return {configured:Boolean(c),signedIn:Boolean(s?.access_token),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:statusMessage||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?'Cloud connected.':'Changes are saved on this device.'),mode:mode(),readyForEdits:s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null};
+  return {configured:Boolean(c),signedIn:Boolean(s?.access_token),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:statusMessage||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?'Cloud connected.':'Changes are saved on this device.'),mode:mode(),readyForEdits:s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -203,7 +206,7 @@ async function accessToken(){
   let s=session();if(!s?.access_token)throw new Error('Sign in before using cloud data.');
   if(s.expires_at<=Date.now()/1000+60){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{if(current()){invalidate();if(e.sessionRejected===true)saveSession(null);else statusMessage='Cloud connection unavailable. Reconnect before editing.';}throw e;}).finally(()=>{refreshPromise=null;});
+    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{if(current()){invalidate();if(e.sessionRejected===true)saveSession(null);else statusMessage='Cloud connection unavailable. Reconnect before editing.';}throw e;}).finally(()=>{refreshPromise=null;});
     s=await refreshPromise;
   }
   return s.access_token;
@@ -218,11 +221,12 @@ async function request(route,{method='GET',body}={}){
 async function membership(action){
   const c=configuration(),s=session();
   if(!s?.user?.id)throw new Error('The signed-in user is unavailable. Sign in again.');
-  const rows=await request(`memberships?select=role,active,export_level,permissions&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
   if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The cloud account or colony changed. Sign in again.');
   action?.check();
-  saveSession({...session(),role:rows[0].role,permissions:rows[0].permissions||{},setupRequired:false,exportLevel:rows[0].role==='owner'?'max':rows[0].export_level||'low'});return rows[0].role;
+  if(stable({level:s.guestLevel||null,permissions:s.guestPermissions||{}})!==stable({level:rows[0].guest_level||null,permissions:rows[0].guest_permissions||{}})){invalidate();feeVisibility=null;feeVisibilityContext=null;await local('delete');}
+  saveSession({...session(),role:rows[0].role,guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},permissions:rows[0].permissions||{},setupRequired:false,exportLevel:rows[0].role==='owner'?'max':rows[0].export_level||'low'});return rows[0].role;
 }
 // A live, data-free access check for the internal tools portal. Cached roles
 // alone never unlock the portal; no animal records or roster are requested.
@@ -253,7 +257,7 @@ export async function callReagents(action,args={}){
 }
 async function establishMembershipOrSetup(action){
   const c=configuration(),s=session();
-  const rows=await request(`memberships?select=role,active,export_level,permissions&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   action?.check();if(!Array.isArray(rows))throw new Error('Unable to verify colony access.');
   if(rows.length){await membership();return;}
   const profile=await request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId}});
@@ -345,7 +349,7 @@ export async function consumeAuthCallback(){
     action.check();if(!verified.ok)throw new Error('The cloud project rejected this sign-in link. Request a new link.');
     action.check();
     if(user?.id!==claims.sub||user.is_anonymous)throw new Error('The cloud project could not verify this account.');
-    const {response:membershipResponse,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store'});
+    const {response:membershipResponse,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store'});
     action.check();if(!membershipResponse.ok)throw new Error('Unable to verify colony membership. Sign in again or contact the colony owner.');
     action.check();
     let pendingSetup=false;
@@ -359,7 +363,7 @@ export async function consumeAuthCallback(){
     if(type==='recovery'){await local('delete');await clearHistoryIndex();action.check();setStorage('localStorage',CLOUD_CACHE_KEY,null);}
     // A local JWT decode only checks scope; the current project's Auth endpoint
     // authenticates the token. Persist only after that and membership both pass.
-    saveSession({access_token:access,refresh_token:refresh,token_type:'bearer',expires_at:claims.exp,user,role:member.role,passwordRecovery:type==='recovery',permissions:type==='recovery'?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
+    saveSession({access_token:access,refresh_token:refresh,token_type:'bearer',expires_at:claims.exp,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},passwordRecovery:type==='recovery',permissions:type==='recovery'?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
     pendingEmail=null;statusMessage=type==='recovery'?'Set a new password to finish account recovery.':'Signed in. Pull the shared colony to continue.';
     return {...getCloudStatus(),needsPasswordSetup:pendingSetup||type==='invite'||type==='recovery'};
   }catch(error){
@@ -467,6 +471,7 @@ function checkedManagedLocation(row,colonyId){
  return row;
 }
 async function refreshFeeVisibility({notify=true}={}){
+ if(isGuest(session())){const context=exportContext();const visible=guestAllows(session(),'mouse.fees.read')?checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:configuration().colonyId}})):{version:0,owner:false,estimate:false,actual:false};checkExportContext(context);feeVisibility={...visible,owner:false,source_archive_allowed:false,history_allowed:false};feeVisibilityContext=context;return clone(feeVisibility);}
  const generation=authGeneration,context=exportContext(),c=configuration();if(!c||!session()?.access_token)throw new Error('Sign in before loading shared fee visibility.');
  const check=()=>{if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
  const value=checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:c.colonyId}}));check();
@@ -854,11 +859,12 @@ function remember(rows,deferredState=null){deferredArchiveState=deferredState;ve
 export async function pullFromCloud({onProgress,forceFull=false,deferHistory=false}={}){
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
   const pull=++pullGeneration;invalidate();
-  const generation=authGeneration,context=exportContext(),config=stable(configuration());
-  const check=()=>{if(pull!==pullGeneration||generation!==authGeneration||config!==stable(configuration())||context!==exportContext())throw new Error('The account or colony changed during loading. Open the shared colony again.');};
+  const generation=authGeneration,config=stable(configuration());let context=null;
+  const check=()=>{if(pull!==pullGeneration||generation!==authGeneration||config!==stable(configuration())||context!==null&&context!==exportContext())throw new Error('The account or colony changed during loading. Open the shared colony again.');};
   const progress=value=>{check();if(typeof onProgress==='function'){try{onProgress(Object.freeze({...value}));}catch{/* Presentation cannot interrupt a verified read. */}}};
   progress({phase:'access',recordsLoaded:0,recordsTotal:null,recordsReused:0,archiveBlocksLoaded:0,archiveBlocksTotal:null,archiveBlocksReused:0});
-  await membership({check});check();
+  await membership({check});context=exportContext();check();
+  if(isGuest(session()))return pullGuestRecords({check,onProgress:progress});
   const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();const deferredState=await deferredStateOf(rows,data);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
@@ -945,6 +951,7 @@ export async function saveDataset(dataset,options={}){
   finally{activeDatasetSaves.delete(scope);}
 }
 async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDependencies=[]}={}){
+ if(isGuest(session())){if(localOnly)throw new Error('Guest changes must be verified by the shared database.');return saveGuestDataset(dataset,{readDependencies});}
   if(!Array.isArray(readDependencies)||readDependencies.length>500)throw new Error('Invalid save dependencies. Reload and review the changes.');
   const dependencyKeys=new Set();
   for(const dependency of readDependencies){
@@ -1012,7 +1019,7 @@ function checkedExportPermission(value){
   if(!value||!['low','high','max'].includes(value.level)||!exportDate(value.as_of_date)||value.full_history!==(value.level==='max')||(value.level==='max'?value.cutoff_date!==null:!exportDate(value.cutoff_date)))throw new Error('Export permission could not be verified. Reload and try again.');
   return value;
 }
-function exportContext(){const c=configuration();return stable({url:c?.url,colony:c?.colonyId,user:session()?.user?.id,mode:mode(),demo:getStorage('localStorage',DEMO_KEY)});}
+function exportContext(){const c=configuration();return stable({url:c?.url,colony:c?.colonyId,user:session()?.user?.id,guestLevel:session()?.guestLevel,guestPermissions:session()?.guestPermissions,mode:mode(),demo:getStorage('localStorage',DEMO_KEY)});}
 function checkExportContext(context){if(exportContext()!==context)throw new Error('Your account or colony changed. Reopen Export.');}
 async function localExportDataset(){
   // A configured real colony always rechecks server permission, including after
@@ -1278,6 +1285,7 @@ export async function manageColonyUsers(action,payload={}) {
     return {person_id:fields.person_id,invitation_link:link.href,link_kind:result.link_kind,expires_at:null,email_sent:false,delivery_status:'not_sent'};
   }
   if(!result||typeof result!=='object'||(action==='list'?!Array.isArray(result.users):action==='invite_preregistered'?result.person_id!==fields.person_id||result.email_sent!==true:!result.user||typeof result.user!=='object'))throw new Error('The server did not return a verifiable user-management result. Reload the user list before retrying.');
+  if(action==='list'){const profiles=await request('rpc/list_guest_access',{method:'POST',body:{p_colony_id:c.colonyId}});for(const user of result.users){const profile=profiles?.users?.find(p=>p.user_id===user.user_id);if(profile)Object.assign(user,profile);}}
   return result;
 }
 
@@ -1380,6 +1388,7 @@ export async function listLabMembers(){
  return request('rpc/list_lab_members',{method:'POST',body:{p_colony_id:configuration().colonyId}});
 }
 export async function listCageManagers(){
+ if(isGuest(session())){const value=await request('rpc/get_lab_collaboration_members',{method:'POST',body:{p_colony_id:configuration().colonyId}});return {managers:(value.members||[]).map(m=>({person_id:m.id,name:m.name,acronym:m.acronym,status:'current'}))};}
  const config=configuration(),actor=session()?.user?.id;
  if(!config||!actor)throw new Error('Sign in to load cage managers.');
  const result=await request('rpc/list_cage_managers',{method:'POST',body:{p_colony_id:config.colonyId}});
@@ -1408,7 +1417,9 @@ export async function listCageNoteHints(){
 }
 export async function saveLabMember(person){
  if(await membership()!=='owner')throw new Error('Only the owner can edit lab-member records.');
- return request('rpc/save_lab_member',{method:'POST',body:{p_colony_id:configuration().colonyId,p_person:person}});
+ const {guest_level,guest_permissions,...profile}=person;
+ const hasGuest=Object.hasOwn(person,'guest_level');
+ return request(hasGuest?'rpc/save_guest_lab_member':'rpc/save_lab_member',{method:'POST',body:hasGuest?{p_colony_id:configuration().colonyId,p_person:profile,p_guest_level:guest_level||null,p_guest_permissions:guest_permissions||{}}:{p_colony_id:configuration().colonyId,p_person:profile}});
 }
 export async function approveLabMemberEmail(payload){
  const keys=['request_person_id','request_version','target_person_id','target_version'];
@@ -1460,7 +1471,7 @@ export async function saveMyLabProfile(fields,version){
  if(!result?.member||result.member.name!==profile.name||!Number.isSafeInteger(result.member.version)||result.member.version<1||result.member.version<version)throw new Error('Your profile save was not confirmed. Reload your profile.');
  applyMyLabProfile(result);return result;
 }
-export async function getLabUserDirectory(){return request('rpc/get_lab_user_directory',{method:'POST',body:{p_colony_id:configuration().colonyId}});}
+export async function getLabUserDirectory(){if(isGuest(session()))return {users:[]};return request('rpc/get_lab_user_directory',{method:'POST',body:{p_colony_id:configuration().colonyId}});}
 export async function updateMyLabAcronym({acronym,version}={}){
  const c=configuration(),actor=session()?.user?.id,code=typeof acronym==='string'?acronym.trim().toUpperCase():'';
  if(!c||!actor)throw new Error('Sign in before changing your acronym.');
@@ -1600,7 +1611,7 @@ export async function completePasswordRecovery(password){
   const result=await responseJSON(response);check();
   if(!response.ok||result?.user?.id!==signedIn.user.id||result.user.is_anonymous||!result.user.email_confirmed_at)throw new Error('verification');
   const next=normalizeSession(result),headers={apikey:publicKey(c.anonKey),Authorization:`Bearer ${next.access_token}`};
-  const memberResponse=await fetch(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});
+  const memberResponse=await fetch(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});
   const rows=await responseJSON(memberResponse);check();
   if(!memberResponse.ok||!Array.isArray(rows))throw new Error('membership');
   let pendingSetup=false;
@@ -1610,7 +1621,7 @@ export async function completePasswordRecovery(password){
   }
   if(!pendingSetup&&(rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role)))throw new Error('membership');
   const member=rows[0]||{role:'pending',permissions:{},export_level:null};check();
-  saveSession({...next,passwordRecovery:false,passwordRecoveryUpdated:false,role:member.role,permissions:pendingSetup?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
+  saveSession({...next,passwordRecovery:false,passwordRecoveryUpdated:false,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},permissions:pendingSetup?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
   pendingEmail=null;invalidate();statusMessage='Password saved and sign-in verified.';
   // Do not call global logout here: it would revoke the newly verified session.
   return {updated:true,signedIn:true,message:statusMessage};
@@ -1618,4 +1629,36 @@ export async function completePasswordRecovery(password){
   check();
   throw new Error('Your password was saved, but sign-in could not be verified. Re-enter the password you just saved to retry, or return to sign in and request a new reset link.');
  }
+}
+
+async function pullGuestRecords({check=()=>{},onProgress=()=>{}}={}){
+ const c=configuration(),rows=[];let offset=0;const expected=stable({level:session()?.guestLevel,permissions:session()?.guestPermissions});
+ while(true){check();const page=await request('rpc/get_guest_mouse_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:250}});check();
+  if(!page||!Array.isArray(page.rows)||page.rows.length>250||stable({level:page.guest_level,permissions:page.guest_permissions})!==expected)throw new Error('Guest access changed. Reconnect before opening records.');
+  for(const row of page.rows){if(row.colony_id!==c.colonyId||!MANAGED.includes(row.entity_type)||row.entity_type==='archive'||row.archived||!Number.isInteger(row.version)||row.version<1||row.payload?.[ID_FIELDS[row.entity_type]]!==row.entity_id)throw new Error('Unverified guest record projection.');rows.push(row);}
+  onProgress({phase:'records',recordsLoaded:rows.length,archiveBlocksLoaded:0});if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset!==offset+250)throw new Error('Invalid guest page cursor.');offset=page.next_offset;
+ }
+ rows.fee_visibility=await refreshFeeVisibility();const data=await assemble(rows);check();data.guest_projection=true;
+ const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};await local('put',data,{check,cacheWrite});check();rememberCloudCache(cacheWrite.id);remember(rows);deferredArchiveState=null;setMode('cloud');statusMessage='Cloud connected.';return clone(data);
+}
+async function saveGuestDataset(dataset,{readDependencies=[]}={}){
+ await membership();if(!isGuest(session())||!guestAllows(session(),'mouse.cages.write'))throw new Error('Cage editing is not allowed for this account.');
+ if(!synced||!baseline||!dataset?.guest_projection)throw new Error('Reload the current cages before saving.');
+ const context=exportContext(),generation=authGeneration;const check=()=>{if(generation!==authGeneration||context!==exportContext())throw new Error('The account or guest access changed. Reload before saving.');};
+ const data=normalizeDataset(dataset),incoming=await entityRecords(data),byId=new Map(incoming.map(r=>[recordKey(r),r]));check();
+ for(const [key,row] of baseline)if(!byId.has(key))throw new Error('Guest edits cannot delete records.');
+ const pending=incoming.filter(row=>{const old=baseline.get(recordKey(row));return !old||stable(old.payload)!==stable(row.payload)||old.archived!==row.archived;}).map(row=>({...row,expected_version:versions.get(recordKey(row))||0}));
+ for(const dep of readDependencies){const key=dep?.type+':'+dep?.id;if(!pending.some(row=>recordKey(row)===key)){const row=baseline.get(key);if(!row)throw new Error('A move dependency is unavailable. Reload before saving.');pending.push({...row,expected_version:versions.get(key)});}}
+ if(!pending.length)return;if(pending.length>500||utf8Size(pending)>MAX_RPC_BYTES)throw new Error('Split this cage edit into smaller changes.');
+ await request('rpc/save_guest_mouse_records',{method:'POST',body:{p_colony_id:configuration().colonyId,p_changes:pending}});check();await pullFromCloud({deferHistory:true});
+}
+export async function setGuestAccess({user_id,guest_level,guest_permissions={},expected_updated_at}={}){
+ if(await membership()!=='owner')throw new Error('Only the owner can change guest access.');
+ if(guest_level!==null&&!['guest1','guest2','guest3'].includes(guest_level)||validateGuestPermissions(guest_permissions).length)throw new Error('Choose a valid guest level and permissions.');
+ return request('rpc/set_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_user_id:user_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_updated_at:expected_updated_at}});
+}
+export async function setPreregisteredGuestAccess({person_id,guest_level,guest_permissions={},expected_version}={}){
+ if(await membership()!=='owner')throw new Error('Only the owner can change guest access.');
+ if(guest_level!==null&&!['guest1','guest2','guest3'].includes(guest_level)||validateGuestPermissions(guest_permissions).length)throw new Error('Choose a valid guest level and permissions.');
+ return request('rpc/set_preregistered_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_person_id:person_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_version:expected_version}});
 }

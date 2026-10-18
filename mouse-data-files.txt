@@ -47,6 +47,7 @@ family-targets.js
 genetics.js
 genotype-catalog.js
 genotype-schema.js
+guest-access.js
 history-index.js
 husbandry.js
 iacuc-model.js

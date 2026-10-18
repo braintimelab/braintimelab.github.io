@@ -5,14 +5,17 @@ export const SECTIONS = Object.freeze([
 ]);
 export const canReviewHistory = permissions => ['owner','manager'].includes(permissions?.role);
 export const canViewHistory = permissions => permissions?.role==='owner';
-export const visibleSections = permissions => SECTIONS.filter(([id])=>id==='history'?canViewHistory(permissions):id!=='review'||canReviewHistory(permissions));
+export const canViewSection = (permissions,id) => permissions?.guest_level ? Array.isArray(permissions.allowed_sections)&&permissions.allowed_sections.includes(id)&&!['history','review'].includes(id) : id==='history'?canViewHistory(permissions):id!=='review'||canReviewHistory(permissions);
+export const visibleSections = permissions => SECTIONS.filter(([id])=>canViewSection(permissions,id));
+export function canWriteKind(permissions,kind='item'){if(!permissions?.can_write)return false;if(!permissions.guest_level)return kind!=='safety'||permissions.can_manage_safety===true;const key=({item:'inventory',equipment:'equipment',usage:'usage',vendor:'vendors',safety:'dangerous'})[kind];return Boolean(key)&&permissions.guest_flags?.[key+'_read']===true&&permissions.guest_flags?.[key+'_write']===true;}
+
 export const STATUSES = ['listed_current','in_stock','low_stock','depleted','out_of_stock','ordered','disposed','unverified','historical'];
 export const labels = {listed_current:'Listed in current sheet',in_stock:'In stock',low_stock:'Low stock',depleted:'Used up',out_of_stock:'Out of stock',ordered:'Ordered',disposed:'Disposed',unverified:'Needs verification',historical:'Historical',open:'Open',resolved:'Resolved',complete:'Complete',pending:'Pending'};
 export const text = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 export const esc = v => text(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function safeURL(value) {try {const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password?u.href:'';}catch{return '';}}
 export function hazardous(p) {
-  const known=value=>Array.isArray(value)?value.some(known):!['','unknown','unverified','none','n','no','無','未確認','未分類','not recorded'].includes(text(value).trim().toLowerCase());
+  const known=value=>Array.isArray(value)?value.some(known):!['','unknown','unverified','none','n','no','na','n/a','無','未確認','未分類','not recorded'].includes(text(value).trim().toLowerCase());
   return p.safety?.flagged===true || p.safety?.regulated===true || [p.safety?.hazard_codes,p.safety?.classification,p.safety?.regulatory_list,p.hazard_statements].some(known);
 }
 export function quantity(p) {

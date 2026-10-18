@@ -11,17 +11,17 @@ import * as inventoryExports from '../reagents/inventory-export.js';
 const appSource=await readFile(new URL('../reagents/app.js',import.meta.url),'utf8');
 const item=(id,classification,extra={})=>({id,kind:'item',version:1,payload:{name:`Reagent ${id}`,inventory_classification:'Chemicals',safety:{classification},...extra}});
 
-function fixture(rows,{route='safety'}={}){
+function fixture(rows,{route='safety',access={}}={}){
  const elements=new Map(),windowListeners=new Map(),workbooks=[],downloads=[],element=id=>{
   if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',dataset:{},value:'',open:false,listeners:new Map(),addEventListener(event,handler){this.listeners.set(event,handler);},setAttribute(){},focus(){},showModal(){this.open=true;},close(){this.open=false;},click(){downloads.push(this.download);}});
   return elements.get(id);
  };
  const status={url:'https://synthetic.supabase.co',colonyId:'synthetic-colony',signedIn:true,email:'member@example.invalid',username:'member',role:'editor',exportLevel:'high'};
- const permissions={role:'editor',can_write:false,can_import:false,can_manage_safety:false,export_level:'high'};
+ const permissions={role:'editor',can_write:false,can_import:false,can_manage_safety:false,export_level:'high',...access};
  const location=new URL(`https://synthetic.invalid/reagents/#${route}`);
  const context=vm.createContext({...model,...sorting,...inventoryExports,store:{getCloudStatus:()=>({...status}),callReagents:async(action,args)=>action==='access'?{permissions}:{rows:args?.p_kind==='safety'?[]:rows.filter(row=>row.kind===args?.p_kind),total:args?.p_kind==='safety'?0:rows.filter(row=>row.kind===args?.p_kind).length,next_offset:null}},PUBLIC_CONFIG:{},document:{getElementById:element,createElement:()=>element('download'),querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){}},window:{addEventListener:(event,handler)=>windowListeners.set(event,handler)},location,console,setTimeout,clearTimeout,URL,Blob,createWorkbookXlsx:book=>{workbooks.push(structuredClone(book));return new Blob(['synthetic']);},createAccessActivity:()=>({observe(){},reset(){},signOut(){}})});
  context.fixtureRows=structuredClone(rows);context.fixturePermissions=permissions;
- const expose='\nmember=true;permissions=globalThis.fixturePermissions;items=globalThis.fixtureRows;records=new Map(items.map(row=>[row.id,row]));globalThis.app={inventoryView,sortTable,toxicityClassifications,filterInventory,toxicityOptions,exportRows,resetPrivate,setFilters:value=>{filters={...filters,...value};},state:()=>({filters:{...filters},offset})};';
+ const expose='\nmember=true;permissions=globalThis.fixturePermissions;items=globalThis.fixtureRows;records=new Map(items.map(row=>[row.id,row]));globalThis.app={inventoryView,detail,editSafety,sortTable,toxicityClassifications,filterInventory,toxicityOptions,exportRows,resetPrivate,setFilters:value=>{filters={...filters,...value};},state:()=>({filters:{...filters},offset})};';
  vm.runInContext(appSource.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+expose,context);
  const renderedRows=()=>{
   const body=element('main').innerHTML.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1]||'';
@@ -136,4 +136,9 @@ test('PDF and XLSX exports use the same toxicity filter as the dangerous table',
  await f.app.exportRows();const sheet=f.workbooks[0].sheets[0],idColumn=sheet.rows[0].indexOf('Record ID');assert.deepEqual(sheet.rows.slice(1).map(row=>row[idColumn]),['combined','irritant']);
  assert.equal(f.downloads.length,1);assert.match(JSON.stringify(f.workbooks[0].sheets[1]),/toxicity.*irritant/i);
  await f.app.exportRows('item','pdf');assert.match(f.element('pdf-export-content').innerHTML,/Included combined|Included irritant/);assert.doesNotMatch(f.element('pdf-export-content').innerHTML,/Excluded toxic|Excluded ordinary/);
+});
+
+test('A safety-only Guest can edit safety without general stock editing, creation, usage or exports',async()=>{
+ const access={role:'viewer',guest_level:'guest2',allowed_sections:['settings','safety'],guest_flags:{dangerous_read:true,dangerous_write:true,inventory_read:false,inventory_write:false,usage_read:false,usage_write:false},can_write:true,can_manage_safety:true,can_export:false},f=fixture([item('hazard','Irritant')],{access});f.app.inventoryView(true);assert.doesNotMatch(f.element('main').innerHTML,/data-action="(?:new-item|use|export-pdf|export-items)"/);await f.app.detail('hazard');assert.match(f.element('main').innerHTML,/data-action="safety-edit"/);assert.doesNotMatch(f.element('main').innerHTML,/data-action="(?:edit|use)"/);
+ assert.equal(model.canWriteKind(access,'item'),false);assert.equal(model.canWriteKind(access,'usage'),false);assert.equal(model.canWriteKind(access,'safety'),true);
 });

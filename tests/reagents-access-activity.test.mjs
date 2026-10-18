@@ -11,11 +11,11 @@ import * as usage from '../reagents/usage.js';
 // Shared activity timing and server writes have their own module-level tests.
 const source=await readFile(new URL('../reagents/app.js',import.meta.url),'utf8');
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
-function fixture({role='editor',route='orders',hidden=false,access}={}){
+function fixture({role='editor',route='orders',hidden=false,access,guestLevel=null,allowedSections=[]}={}){
  const elements=new Map(),documentEvents=new Map(),windowEvents=new Map(),calls=[],activity=[];
  const element=id=>{if(!elements.has(id))elements.set(id,{id,innerHTML:'',textContent:'',value:'',open:false,hidden:false,disabled:false,dataset:{},elements:{password:{value:''}},addEventListener(){},setAttribute(){},close(){this.open=false;},showModal(){this.open=true;},focus(){},querySelectorAll(){return [];}});return elements.get(id);};
  const config={url:'https://synthetic.supabase.co',colonyId:'synthetic-colony'},status={...config,configured:true,signedIn:true,email:'member@example.invalid',name:'Synthetic Member',role,exportLevel:'high',mode:'local'};
- const permissions={role,can_write:true,can_import:role==='owner',can_manage_safety:false,export_level:'high',history_cutoff:null};
+ const permissions={role,can_write:true,can_import:role==='owner',can_manage_safety:false,export_level:'high',history_cutoff:null,...(guestLevel?{guest_level:guestLevel,allowed_sections:allowedSections,can_write:false,can_import:false,can_manage_safety:false,can_export:false}: {})};
  const store={getCloudStatus:()=>({...status}),verifyCloudMembership:async()=>{calls.push('verify');return {...status};},callReagents:async(action,args)=>{calls.push(action);if(action==='access')return access?access({permissions,status}):{permissions:{...permissions},members:[]};return {rows:[],total:0,next_offset:null};}};
  const document={hidden,getElementById:element,querySelector:()=>null,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentEvents.set(name,fn)};
  const location=new URL('https://synthetic.invalid/reagents/#'+route);
@@ -69,4 +69,23 @@ test('trusted interactions update only the current allowlisted section and never
  const events=f.activity.length;await f.documentEvents.get('pointerdown')({isTrusted:false});f.document.hidden=true;await f.documentEvents.get('keydown')({isTrusted:true});assert.equal(f.activity.length,events);
  f.document.hidden=false;f.location.hash='#history';await f.documentEvents.get('pointerdown')({isTrusted:true});assert.equal(f.activity.length,events);
  f.location.hash='#inventory';f.app.invalidate();await f.documentEvents.get('keydown')({isTrusted:true});assert.equal(f.activity.length,events);
+});
+
+
+test('Guest-1 skips inventory loads and cannot visit restricted orders or scientific views',async()=>{
+ const f=fixture({role:'viewer',guestLevel:'guest1',allowedSections:['settings']});await f.app.start();
+ assert.equal(f.calls.filter(action=>action==='list').length,0);assert.ok(!f.calls.includes('orders-mount'));
+ assert.doesNotMatch(f.element('navigation').innerHTML,/data-section="(?:inventory|orders|history|review)"/);
+ f.location.hash='#inventory';await f.app.render();assert.match(f.element('main').innerHTML,/not available/);assert.equal(f.calls.filter(action=>action==='list').length,0);
+});
+test('Guest-2 loads only own-order interface and never preloads inventory',async()=>{
+ const f=fixture({role:'viewer',guestLevel:'guest2',allowedSections:['settings','orders']});await f.app.start();
+ assert.ok(f.calls.includes('orders-mount'));assert.equal(f.calls.filter(action=>action==='list').length,0);
+ assert.doesNotMatch(f.element('navigation').innerHTML,/data-section="(?:inventory|safety|usage|history|review)"/);
+ f.location.hash='#usage';await f.app.render();assert.match(f.element('main').innerHTML,/not available/);
+});
+test('Guest-3 current-data sections remain read only and omit export controls',async()=>{
+ const f=fixture({role:'viewer',route:'inventory',guestLevel:'guest3',allowedSections:['settings','orders','inventory','safety','usage','vendors','equipment']});await f.app.start();
+ assert.equal(f.calls.filter(action=>action==='list').length,2);assert.match(f.element('navigation').innerHTML,/data-section="inventory"/);
+ assert.doesNotMatch(f.element('main').innerHTML,/data-action="(?:export-pdf|export-items|new-item)"/);
 });
