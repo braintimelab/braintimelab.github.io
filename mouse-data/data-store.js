@@ -1160,7 +1160,7 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
 }
 const exportDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 function checkedExportPermission(value){
-  if(!value||!['low','high','max'].includes(value.level)||!exportDate(value.as_of_date)||value.full_history!==(value.level==='max')||(value.level==='max'?value.cutoff_date!==null:!exportDate(value.cutoff_date)))throw new Error('Export permission could not be verified. Reload and try again.');
+  if(!value||!['low','mid','high','max'].includes(value.level)||!exportDate(value.as_of_date)||value.full_history!==(value.level==='max')||(value.level==='max'?value.cutoff_date!==null:!exportDate(value.cutoff_date)))throw new Error('Export permission could not be verified. Reload and try again.');
   return value;
 }
 function exportContext(){const c=configuration();return stable({url:c?.url,colony:c?.colonyId,user:session()?.user?.id,guestLevel:session()?.guestLevel,guestPermissions:session()?.guestPermissions,mode:mode(),demo:getStorage('localStorage',DEMO_KEY),source:providerSource||'cloud1'});}
@@ -1286,7 +1286,7 @@ async function readExportRecords({scope='current_housing',fromDate=null,toDate=n
   const c=configuration(),rows=[],seen=new Set();let offset=0,metadata=null;
   while(true){
     const page=await request('rpc/'+rpcName,{method:'POST',body:{p_colony_id:c.colonyId,p_scope:scope,p_from_date:scope==='history'?start:null,p_to_date:scope==='history'?end:null,p_entity_types:entityTypes,p_offset:offset,p_limit:250,...(boundary?{p_expected_revision:boundary.snapshot_revision}:{})}});
-    if(!page||!Array.isArray(page.rows)||page.rows.length>250||!['low','high','max'].includes(page.export_level)||!exportDate(page.as_of_date)||typeof page.snapshot_revision!=='string')throw new Error('The server returned an unverifiable export page.');
+    if(!page||!Array.isArray(page.rows)||page.rows.length>250||!['low','mid','high','max'].includes(page.export_level)||!exportDate(page.as_of_date)||typeof page.snapshot_revision!=='string')throw new Error('The server returned an unverifiable export page.');
     if(page.export_level!==permission.level||page.cutoff_date!==permission.cutoff_date||page.as_of_date!==permission.as_of_date)throw new Error('Your export permission changed. Reopen Export and try again.');
     if(page.fee_visibility){checkedFeeVisibility(page.fee_visibility);if(metadata?.fee_visibility&&stable(page.fee_visibility)!==stable(metadata.fee_visibility))throw new Error('Fee visibility changed while exporting. Reopen Export.');}
     if(boundary&&(page.snapshot_revision!==boundary.snapshot_revision||!sameFeeVisibility(checkedFeeVisibility(page.fee_visibility),boundary.fee_visibility)))throw new Error('Data or fee visibility changed while backing up. Try again.');
@@ -1395,7 +1395,7 @@ export async function manageColonyUsers(action,payload={}) {
     if(!['viewer','editor','manager'].includes(payload.role))throw new Error('Choose viewer or editor access. Owner accounts cannot be changed here.');
     fields.role=payload.role;
     if(payload.permissions!==undefined){const errors=validateManagerPermissions(payload.permissions);if(errors.length)throw new Error(errors.join(' '));fields.permissions=payload.permissions;}
-    if(payload.export_level!==undefined){if(!['low','high','max'].includes(payload.export_level))throw new Error('Choose Low, High or Max export access.');fields.export_level=payload.export_level;}
+    if(payload.export_level!==undefined){if(!['low','mid','high','max'].includes(payload.export_level))throw new Error('Choose Low, Mid, High or Max access.');fields.export_level=payload.export_level;}
   }
   if(action==='update_access') {
     if(typeof payload.user_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.user_id))throw new Error('Choose a valid colony user.');

@@ -11,7 +11,7 @@ export function verifiedInvitationLink(result,{origin=PUBLIC_CONFIG.url,redirect
 }
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const LAB_MEMBER_CATEGORIES=Object.freeze({undergraduate:'Undergraduate',masters:'Master’s student',phd:'PhD student',postdoc:'Postdoc',visiting_student:'Visiting student',visiting_faculty:'Visiting faculty',principal_investigator:'Principal investigator',other:'Other',unknown:'Not confirmed'});
-const statuses={current:'Current',historical:'Historical',review:'Review'},roles={viewer:'Read only',editor:'Read & write',manager:'Manager'},levels={low:'Low · past 3 years',high:'High · past 6 years',max:'Max · full history'};
+const statuses={current:'Current',historical:'Historical',review:'Review'},roles={viewer:'Read only',editor:'Read & write',manager:'Manager'},levels={low:'Low · past 3 years',mid:'Mid · past 3 years, 5 GB personal space',high:'High · past 6 years',max:'Max · full history'};
 const fields=['name','email','phone','acronym','category','status','intended_role','export_level','notes','cage_manager_eligible','guest_level','guest_permissions'];
 const memberDisplayName=member=>{const name=member.name||'Name not confirmed',nickname=String(member.provenance?.nickname||'').trim();return nickname&&!name.toLowerCase().includes(nickname.toLowerCase())?`${name} (${nickname})`:name;};
 const memberAliases=member=>[...new Set([...(Array.isArray(member.provenance?.aliases)?member.provenance.aliases:[]),member.provenance?.nickname].filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim()))].filter(value=>value!==member.name);
@@ -40,7 +40,7 @@ export function validateLabMemberDraft(draft){const errors=[];
  if(!Object.hasOwn(LAB_MEMBER_CATEGORIES,draft.category))errors.push('Choose a member category.');
  if(!Object.hasOwn(statuses,draft.status))errors.push('Choose Current, Historical or Review status.');
  if(!Object.hasOwn(roles,draft.intended_role))errors.push('Choose Read only, Read & write or Manager access.');
- if(!Object.hasOwn(levels,draft.export_level))errors.push('Choose Low, High or Max export access.');
+ if(!Object.hasOwn(levels,draft.export_level))errors.push('Choose Low, Mid, High or Max access.');
  if(Object.hasOwn(draft,'cage_manager_eligible')&&typeof draft.cage_manager_eligible!=='boolean')errors.push('Choose whether this member appears in the cage manager list.');
  if(draft.notes!=null&&(typeof draft.notes!=='string'||draft.notes.length>10000))errors.push('Notes must be text of at most 10,000 characters.');
  return errors;
