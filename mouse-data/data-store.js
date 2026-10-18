@@ -240,10 +240,10 @@ function provider(){
  const cloud1={idempotentWrites:true,
   async status(){
    const s=session(),c=configuration();if(!s?.access_token)return {state:'signed_out'};
-   try{const rows=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{timeoutMs:5000});
+   for(let attempt=0;attempt<2;attempt++)try{const rows=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{timeoutMs:10000});
     if(!Array.isArray(rows)||rows.length!==1||!rows[0].active)return {state:'denied'};
     return {state:'online',userId:s.user.id,colonyId:c.colonyId,enrolled:true,ready:true,canRead:true,canWrite:true,pending:0,conflicts:0};
-   }catch(error){throw providerFailure(error);}
+   }catch(error){const failure=providerFailure(error);if(attempt===0&&failure.code==='UNAVAILABLE')continue;throw failure;}
   },
   async read({query}){try{return await cloud1Request(query.route,query);}catch(error){throw providerFailure(error);}},
   async submit({operation}){
@@ -296,7 +296,7 @@ export async function resumeCloud2Session(){
 export async function connectCloud2({reset=false}={}){
  if(reset&&(!session()?.access_token||session()?.passwordRecovery||pendingAccount(session())))throw new Error('Sign in to Cloud 1 before resetting your Cloud 2 password.');
  const service=provider();if(!service)throw new Error('Cloud 2 is not configured.');
- const initialUser=session()?.user?.id,config=stable(configuration());let epoch=providerSessionEpoch;
+ const initialUser=session()?.user?.id,initialCloud1=Boolean(session()?.access_token),preferred=service.getState().preferred,config=stable(configuration());let epoch=providerSessionEpoch;
  const check=()=>{if(epoch!==providerSessionEpoch||config!==stable(configuration()))throw new Error('The account changed. Connect Cloud 2 again.');};
  return openCloud2SignIn({url:cloud2URL(),check,reset,getEnrollmentToken:async()=>{
   if(!session()?.access_token)return null;
@@ -306,7 +306,9 @@ export async function connectCloud2({reset=false}={}){
   check();service.cloud2.setBearer(token);const identity=await service.cloud2.status({});check();
   if(identity.colonyId!==configuration().colonyId||initialUser&&identity.userId!==initialUser){service.cloud2.clear();cloud2Identity=null;throw new Error('Cloud 2 must use the same lab account.');}
   adoptCloud2Identity(identity);epoch=providerSessionEpoch;
-  await service.refresh();service.choose('cloud2');setMode('cloud');invalidate();statusMessage='Cloud 2 connected.';return getCloudStatus();
+  if(preferred)service.choose(preferred);await service.refresh();
+  if(!initialCloud1){service.choose('cloud2');setMode('cloud');invalidate();}
+  statusMessage=identity.ready===true?'Cloud 2 connected.':'Cloud 2 connected; initial data is not ready.';return getCloudStatus();
  }});
 }
 async function membership(action){
@@ -375,9 +377,8 @@ async function resolveLoginEmail(identifier,action){
   if(!result||typeof result!=='object'||Array.isArray(result)||Object.keys(result).length!==3||!validEmail(result.email)||!['email','user_id','alias'].every(key=>Object.hasOwn(result,key))||!(result.alias===false&&result.user_id===null&&result.email===email||result.alias===true&&typeof result.user_id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.user_id)))throw new Error('Sign-in could not be confirmed. Try again later.');
   return result;
 }
-export async function signIn(email,password){
-  if(typeof email!=='string'||typeof password!=='string'||!email.trim()||!password)throw new Error('Enter your email or username and password.');
-  const action=beginAuthAction();saveSession(null);invalidate();let result,identity=null;
+async function passwordSignIn(email,password,action){
+  let result,identity=null;
   if(email.includes('@')){identity=await resolveLoginEmail(email,action);action.check();result=await authRequest('token?grant_type=password',{email:identity.email,password});}
   else {
     const c=configuration();if(!c)throw new Error('Configure the cloud project first.');
@@ -387,9 +388,35 @@ export async function signIn(email,password){
     const {response,result:reply}=await cloudJSON(`${c.url}/functions/v1/username-sign-in`,{method:'POST',cache:'no-store',redirect:'error',headers:{apikey:anonKey,Authorization:`Bearer ${anonKey}`,'Content-Type':'application/json'},body:JSON.stringify({username:email.trim(),password})});
     result=reply;if(!response.ok)throw new Error(result?.message||'Username sign-in was rejected.');
   }
-  action.check();if(identity?.alias&&result?.user?.id!==identity.user_id)throw new Error('Sign-in could not be confirmed. Try again later.');saveSession(normalizeSession(result));invalidate();
+  action.check();if(identity?.alias&&result?.user?.id!==identity.user_id)throw new Error('Sign-in could not be confirmed. Try again later.');return {candidate:normalizeSession(result),identity};
+}
+export async function signIn(email,password){
+  if(typeof email!=='string'||typeof password!=='string'||!email.trim()||!password)throw new Error('Enter your email or username and password.');
+  const action=beginAuthAction();saveSession(null);invalidate();const {candidate,identity}=await passwordSignIn(email,password,action);action.check();saveSession(candidate);invalidate();
   try{await establishMembershipOrSetup(action);action.check();if(identity?.alias&&session()?.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');statusMessage='Signed in.';}catch(e){if(action.current()){saveSession(null);statusMessage=e.message;}throw e;}
   return getCloudStatus();
+}
+/** Reconnect Cloud 1 without discarding an independently signed-in NAS account. */
+export async function connectCloud1(email,password,{signal}={}){
+ if(typeof email!=='string'||typeof password!=='string'||!email.trim()||!password)throw new Error('Enter your email or username and password.');
+ const initial=session(),c=configuration();
+ if(initial?.passwordRecovery||pendingAccount(initial))throw new Error('Complete your account setup before connecting Cloud 1.');
+ const action=beginAuthAction(),expectedUser=initial?.user?.id,service=provider(),preferred=service?.getState().preferred;
+ const check=()=>{action.check();if(signal?.aborted||session()?.user?.id!==expectedUser)throw new Error('Cloud 1 sign-in was cancelled or the account changed.');};
+ check();const {candidate,identity}=await passwordSignIn(email,password,{check});check();
+ if(expectedUser&&candidate.user?.id!==expectedUser)throw new Error('Cloud 1 must use the same lab account as Cloud 2.');
+ const headers={apikey:publicKey(c?.anonKey),Authorization:`Bearer ${candidate.access_token}`};
+ const {response:verified,result:user}=await cloudJSON(`${c.url}/auth/v1/user`,{headers,cache:'no-store',redirect:'error'});check();
+ if(!verified.ok||user?.id!==candidate.user?.id||user.is_anonymous||!user.email_confirmed_at)throw new Error('Your Cloud 1 sign-in could not be verified.');
+ const {response,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});check();
+ if(!response.ok)throw apiError(response,rows);
+ if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
+ const member=rows[0];if(identity?.alias&&member.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');
+ check();saveSession({...candidate,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},permissions:member.permissions||{},setupRequired:false,exportLevel:member.role==='owner'?'max':member.export_level||'low'});invalidate();
+ // Keep the NAS adapter and its bearer. Changing Cloud 1 credentials is not a
+ // request to move an existing workspace to a different data source.
+ if(service){if(preferred)service.choose(preferred);await service.refresh();}
+ statusMessage='Cloud 1 signed in.';return getCloudStatus();
 }
 function emailAddress(email){
   if(typeof email!=='string'||!/^\S+@\S+\.\S+$/.test(email.trim()))throw new Error('Enter a valid email address.');
