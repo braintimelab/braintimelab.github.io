@@ -140,6 +140,7 @@ export async function mountPortal(document, window) {
     onState(state) {
       element('sign-in-panel').hidden = state.phase !== 'signed-out';
       element('tools-panel').hidden = state.phase !== 'member';
+      element('member-account').hidden = state.phase !== 'member';
       element('account-panel').hidden = !['setup', 'recovery'].includes(state.phase);
       element('discard-session').hidden = !state.hasSession;
       element('portal-status').textContent = state.message;

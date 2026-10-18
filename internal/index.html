@@ -9,8 +9,8 @@
   <meta name="theme-color" content="#f7f4e7">
   <title>Lab tools · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
-  <link rel="stylesheet" href="./portal.css?v=11">
-  <script type="module" src="./portal.js?v=11"></script>
+  <link rel="stylesheet" href="./portal.css?v=12">
+  <script type="module" src="./portal.js?v=12"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -28,16 +28,21 @@
       <h1 id="tools-heading">Lab tools</h1>
     </div>
 
-    <nav id="cloud1-entry" class="cloud2-entry" aria-label="Cloud 1 apps">
-      <span class="cloud2-label">Cloud 1 <small>Supabase</small></span>
-      <a href="../mouse-data/#settings">Mouse Data</a>
-      <a href="../reagents/#settings">Reagents</a>
-    </nav>
-    <nav id="cloud2-entry" class="cloud2-entry" aria-label="Cloud 2 apps">
-      <span class="cloud2-label">Cloud 2 <small>BraintimeDisk</small></span>
-      <a href="https://braintimedisk.tail933238.ts.net:10000/mouse-data/#settings">Mouse Data</a>
-      <a href="https://braintimedisk.tail933238.ts.net:10000/reagents/#settings">Reagents</a>
-    </nav>
+    <div class="portal-toolbar">
+      <div class="cloud-options">
+        <nav id="cloud1-entry" class="cloud2-entry" aria-label="Cloud 1 apps">
+          <span class="cloud2-label">Cloud 1</span>
+          <a href="../mouse-data/#settings">Mouse Data</a>
+          <a href="../reagents/#settings">Reagents</a>
+        </nav>
+        <nav id="cloud2-entry" class="cloud2-entry" aria-label="Cloud 2 apps">
+          <span class="cloud2-label">Cloud 2 <small>BraintimeDisk</small></span>
+          <a href="https://braintimedisk.tail933238.ts.net:10000/mouse-data/#settings">Mouse Data</a>
+          <a href="https://braintimedisk.tail933238.ts.net:10000/reagents/#settings">Reagents</a>
+        </nav>
+      </div>
+      <div id="member-account" class="account" hidden><span id="member-identity"></span><button class="text-button" type="button" data-sign-out>Sign out</button></div>
+    </div>
 
     <p id="portal-status" class="status" role="status" aria-live="polite">Checking your session…</p>
     <div id="backup-viewer" hidden></div>
@@ -45,7 +50,7 @@
     <section id="sign-in-panel" class="sign-in-layout" hidden aria-labelledby="sign-in-heading">
       <div class="sign-in-card">
         <h2 id="sign-in-heading">Lab sign-in</h2>
-        <p class="small">Cloud 1 · Supabase</p>
+        <p class="small">Cloud 1</p>
         <button id="discard-session" class="text-button" type="button" data-sign-out hidden>Sign out of this session</button>
         <form id="sign-in-form">
           <label for="login-id">ID or email</label>
@@ -88,9 +93,6 @@
     </section>
 
     <section id="tools-panel" hidden aria-labelledby="tools-heading">
-      <div class="tools-heading">
-        <div class="account"><span id="member-identity"></span><button class="text-button" type="button" data-sign-out>Sign out</button></div>
-      </div>
       <div class="tool-grid">
         <article class="tool-card" id="lab-notes-tool">
           <div class="tool-top"><span class="tool-number" aria-hidden="true">00</span><span class="availability">BraintimeDisk</span></div>
