@@ -142,7 +142,9 @@ export async function loadStartupCache(){
   const data=await local('get',undefined,{check});check();if(!data)return null;
   const policy=await refreshFeeVisibility({notify:false});check();
   if(policy.source_archive_allowed?data.source_archive_restricted:!currentRestrictedCache(data,mark,policy))return null;
-  const preview=normalizeDataset(data);check();return preview;
+  // The preview is read-only until the live pull finishes. Do not normalize
+  // source history from a previous visit just to paint the opening screen.
+  const preview=normalizeDataset({...data,tables:Object.fromEntries(MANAGED.map(type=>[type,data.tables?.[type]||[]]))});check();return preview;
  }catch{return null;}
 }
 export async function clearDataset(){await local('delete');setStorage('localStorage',CLOUD_CACHE_KEY,null);setStorage('localStorage',DEMO_KEY,null);setMode('local');invalidate();statusMessage='Local dataset cleared.';}
@@ -213,7 +215,16 @@ async function accessToken(timeoutMs=30000){
   let s=session();if(!s?.access_token)throw new Error('Sign in before using cloud data.');
   if(s.expires_at<=Date.now()/1000+60){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{if(current()){invalidate();if(e.sessionRejected===true)saveSession(null);else statusMessage='Cloud connection unavailable. Reconnect before editing.';}throw e;}).finally(()=>{refreshPromise=null;});
+    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{
+      if(current()){
+        // An independent, verified NAS session does not depend on renewing
+        // Supabase credentials. This failure still rejects the Cloud 1 action.
+        const nas=cloud2Identity,independent=operationalProvider?.getState().active==='cloud2'&&nas?.userId===s.user?.id&&nas?.colonyId===configuration()?.colonyId&&Date.parse(nas.session_expires_at)>Date.now();
+        if(independent)statusMessage='Cloud 1 sign-in unavailable. Cloud 2 remains connected.';
+        else{invalidate();if(e.sessionRejected===true)saveSession(null);else statusMessage='Cloud connection unavailable. Reconnect before editing.';}
+      }
+      throw e;
+    }).finally(()=>{refreshPromise=null;});
     s=await refreshPromise;
   }
   return s.access_token;
@@ -730,9 +741,14 @@ async function persistedBaseline(policy,check,{managedOnly=false}={}){
     }
     // Reconstruct from the same atomically saved workspace. Normalization can
     // legitimately add defaults: mismatched rows are fetched afresh, not guessed.
-    const deferredState=snapshot.data.source_archive_deferred?await restoreDeferredState(snapshot,envelope,check):null;
-    if(!deferredState&&envelope.deferred_archive)return null;
-    const candidates=await entityRecords(snapshot.data,deferredState,{managedOnly:managedOnly&&!deferredState&&envelope.archive_complete!==true});check();const records=new Map(),knownVersions=new Map();
+    // Startup needs the current managed records, not source tables opened in a
+    // previous visit. Re-encoding a complete/deferred archive here made one old
+    // history visit permanently slow subsequent launches. Its fresh manifest
+    // is checked below by allRecords; source chunks remain available on demand.
+    const deferredState=!managedOnly&&snapshot.data.source_archive_deferred?await restoreDeferredState(snapshot,envelope,check):null;
+    if(!managedOnly&&!deferredState&&envelope.deferred_archive)return null;
+    const input=managedOnly?{...snapshot.data,tables:Object.fromEntries(MANAGED.map(type=>[type,snapshot.data.tables?.[type]||[]]))}:snapshot.data;
+    const candidates=await entityRecords(input,deferredState,{managedOnly});check();const records=new Map(),knownVersions=new Map();
     await mapBounded(candidates,async row=>{
       if(!policy.source_archive_allowed&&!ordinaryManagedRecord(row))return;
       const key=recordKey(row),entry=indexed.get(key);if(!entry||entry[3]!==row.archived)return;
@@ -769,18 +785,29 @@ async function managedVersionIndex(type,c,check,read=request){
 async function incrementalManaged(type,c,check,reuse,restricted=false,read=request){
   const index=await managedVersionIndex(type,c,check,read),rows=new Map(),pending=[],reused=new Set();
   for(const row of index.values()){const cached=reusableRecord(reuse,row,c);if(cached&&(!restricted||ordinaryManagedRecord(cached))){rows.set(row.entity_id,cached);reused.add(row.entity_id);}else pending.push(row);}
+  const batches=[];
+  for(let offset=0;offset<pending.length;){
+    const batch=[pending[offset++]];
+    // Simple literal keys can share a bounded IN request. Arbitrary IDs retain
+    // equality parameters so punctuation/Unicode never changes filter syntax.
+    if(/^[A-Za-z0-9_:-]{1,100}$/.test(batch[0].entity_id))while(offset<pending.length&&batch.length<20&&/^[A-Za-z0-9_:-]{1,100}$/.test(pending[offset].entity_id))batch.push(pending[offset++]);
+    batches.push(batch);
+  }
   let next=0,failure=null;
   const active=()=>{check();if(failure)throw failure;};
-  async function worker(){try{while(true){active();const expected=pending[next++];if(!expected)return;
-    // An equality parameter keeps punctuation and Unicode IDs literal. Fetching
-    // only changed records also avoids a large repeated historical payload.
-    const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,entity_id:`eq.${expected.entity_id}`,limit:'1'});
-    const page=(await readCloudPage(()=>read(`entity_records?${query}`),1,active)).page;
-    if(!Array.isArray(page)||page.length!==1)throw new Error('A changed cloud record is missing. Pull again.');
-    const row=checkedCloudRecord(page[0],type,c);if(row.entity_id!==expected.entity_id||row.version!==expected.version||row.archived!==expected.archived)throw new Error('A cloud record changed during loading. Pull again.');
-    rows.set(row.entity_id,row);
+  async function worker(){try{while(true){active();const batch=batches[next++];if(!batch)return;
+    let offset=0,limit=batch.length;
+    while(offset<batch.length){
+      const wanted=batch.slice(offset,offset+limit),expected=new Map(wanted.map(row=>[row.entity_id,row]));
+      const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,entity_id:wanted.length===1?`eq.${wanted[0].entity_id}`:`in.(${wanted.map(row=>row.entity_id).join(',')})`,limit:String(wanted.length)});
+      const loaded=await readCloudPage(size=>{const selected=batch.slice(offset,offset+size);query.set('entity_id',selected.length===1?`eq.${selected[0].entity_id}`:`in.(${selected.map(row=>row.entity_id).join(',')})`);query.set('limit',String(selected.length));return read(`entity_records?${query}`);},wanted.length,active);
+      const page=loaded.page,selected=batch.slice(offset,offset+loaded.limit),selectedIds=new Set(selected.map(row=>row.entity_id));
+      if(!Array.isArray(page)||page.length!==selected.length)throw new Error('A changed cloud record is missing. Pull again.');
+      for(const value of page){const row=checkedCloudRecord(value,type,c),prior=expected.get(row.entity_id);if(!selectedIds.delete(row.entity_id)||!prior||row.version!==prior.version||row.archived!==prior.archived)throw new Error('A cloud record changed during loading. Pull again.');rows.set(row.entity_id,row);}
+      offset+=selected.length;limit=loaded.limit;
+    }
   }}catch(error){failure??=error;throw error;}}
-  await Promise.all(Array.from({length:Math.min(3,pending.length)},()=>worker()));check();
+  await Promise.all(Array.from({length:Math.min(3,batches.length)},()=>worker()));check();
   // Never silently merge against an index that changed while payloads arrived.
   const final=await managedVersionIndex(type,c,check,read);
   if(final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Pull again.');
@@ -1380,6 +1407,7 @@ export async function getFullSourceExport(localLoader){
 export async function manageColonyUsers(action,payload={}) {
   const c=configuration(),signedIn=session();
   if(!c)throw new Error('Configure the cloud project first.');
+  if(signedIn?.user?.id&&!signedIn.access_token&&hasLabSession(signedIn))throw new Error('User management requires Cloud 1. Connect Cloud 1 and refresh.');
   if(!signedIn?.access_token||!signedIn.user?.id)throw new Error('Sign in before managing colony users.');
   if(action==='list'?!['owner','manager'].includes(signedIn.role):signedIn.role!=='owner')throw new Error(action==='list'?'Only an active colony owner or manager can view users.':'Only an active colony owner can manage users.');
   const allowed={list:[],invite:['email','role','export_level','permissions'],invite_preregistered:['person_id','version'],create_preregistered_link:['person_id','version'],update_access:['user_id','role','active','export_level','permissions']};
@@ -1403,7 +1431,12 @@ export async function manageColonyUsers(action,payload={}) {
     if(typeof payload.active!=='boolean')throw new Error('User access must be explicitly enabled or disabled.');
     fields.user_id=payload.user_id;fields.active=payload.active;
   }
-  const verifiedRole=await membership();
+  // Account administration belongs to Cloud 1 even while scientific records
+  // use Cloud 2. Prove its live membership without replacing the active NAS
+  // session, provider choice or pending-edit policy with another source.
+  const members=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  if(!Array.isArray(members)||members.length!==1||members[0].active!==true||!['owner','manager','editor','viewer'].includes(members[0].role))throw new Error('This account is not an active member of the configured colony.');
+  const verifiedRole=members[0].role;
   if(action==='list'?!['owner','manager'].includes(verifiedRole):verifiedRole!=='owner')throw new Error(action==='list'?'Only an active colony owner or manager can view users.':'Only an active colony owner can manage users.');
   const token=await accessToken(),current=configuration();
   if(current?.url!==c.url||current.colonyId!==c.colonyId||session()?.user?.id!==signedIn.user.id)throw new Error('The cloud account or colony changed. Reload the user list before continuing.');
@@ -1433,7 +1466,12 @@ export async function manageColonyUsers(action,payload={}) {
   if(action==='list'){
    if(result.viewer?.user_id!==signedIn.user.id||result.viewer?.role!==verifiedRole||result.colony_id&&result.colony_id!==c.colonyId)throw new Error('User list access could not be verified. Refresh and try again.');
    if(verifiedRole==='manager')result.users=result.users.filter(user=>user.role!=='owner'&&user.user_id!==signedIn.user.id);
-   else {const profiles=await request('rpc/list_guest_access',{method:'POST',body:{p_colony_id:c.colonyId}});for(const user of result.users){const profile=profiles?.users?.find(p=>p.user_id===user.user_id);if(profile)Object.assign(user,profile);}}
+   else {
+    const profiles=await cloud1Request('rpc/list_guest_access',{method:'POST',body:{p_colony_id:c.colonyId}});
+    if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==signedIn.user.id)throw new Error('The cloud account or colony changed while loading users. Refresh Members before continuing.');
+    if(!profiles||!Array.isArray(profiles.users))throw new Error('User access details could not be verified. Refresh and try again.');
+    for(const user of result.users){const profile=profiles.users.find(p=>p.user_id===user.user_id);if(profile)Object.assign(user,profile);}
+   }
   }
   return result;
 }
