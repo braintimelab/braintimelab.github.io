@@ -191,8 +191,8 @@ test('Cloud 2 app entries are available in initial HTML before any shared sign-i
   assert(!/\bhidden\b|aria-disabled|target=/.test(entry));
   assert.match(entry, /aria-label="Cloud 2 apps"/);
   assert.deepEqual([...entry.matchAll(/href="([^"]+)"/g)].map(match => match[1]), [
-    'https://braintimedisk.tail933238.ts.net:10000/mouse-data/',
-    'https://braintimedisk.tail933238.ts.net:10000/reagents/'
+    'https://braintimedisk.tail933238.ts.net:10000/mouse-data/#settings',
+    'https://braintimedisk.tail933238.ts.net:10000/reagents/#settings'
   ]);
   assert(html.indexOf(entry) < html.indexOf('id="portal-status"'));
   assert(html.indexOf(entry) < html.indexOf('id="sign-in-panel"'));
