@@ -1007,13 +1007,6 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
   catch(e){if(ownsSave())invalidate();const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(e.storageTimeout!==true)await cleanup;throw new Error(`${e.message} Cloud writes completed; pull again to restore the local copy.`);}
   versions=nextVersions;baseline=map;baselineIdentity=syncIdentity();deferredArchiveState=nextDeferred;statusMessage='Saved to cloud and this device.';
 }
-export async function getAuditLog({limit=100,before=null}={}){
-  const c=configuration();await membership();
-  const n=Math.max(1,Math.min(500,Math.floor(Number(limit)||100)));
-  if(before!==null&&!/^\d+$/.test(String(before)))throw new Error('Invalid audit cursor.');
-  return request(`audit_log?select=audit_id,colony_id,entity_type,entity_id,operation,actor_id,occurred_at,before_record,after_record&colony_id=eq.${encodeURIComponent(c.colonyId)}&order=audit_id.desc&limit=${n}${before===null?'':`&audit_id=lt.${before}`}`);
-}
-
 const exportDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 function checkedExportPermission(value){
   if(!value||!['low','high','max'].includes(value.level)||!exportDate(value.as_of_date)||value.full_history!==(value.level==='max')||(value.level==='max'?value.cutoff_date!==null:!exportDate(value.cutoff_date)))throw new Error('Export permission could not be verified. Reload and try again.');
