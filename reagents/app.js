@@ -1,4 +1,4 @@
-import * as store from '../mouse-data/data-store.js?v=146';
+import * as store from '../mouse-data/data-store.js?v=147';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=139';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';

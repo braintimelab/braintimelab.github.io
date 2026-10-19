@@ -9,7 +9,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=146';
+import * as store from './data-store.js?v=147';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -133,21 +133,35 @@ async function loadHistoryTables(tables){
  const pending=deferredHistoryTables().filter(name=>tables.includes(name));if(!pending.length)return dataset;
  if(historyLoadState){await historyLoadState.promise;return loadHistoryTables(tables);}
  const snapshot=dataset,context=labUserDirectoryContext(store.getCloudStatus());
- const request={snapshot,context,view:historyViewKey(),adopted:false,promise:null};historyLoadState=request;historyLoadFailure=null;
+ const request={snapshot,context,view:historyViewKey(),adopted:false,progress:null,promise:null};historyLoadState=request;historyLoadFailure=null;
  const check=()=>{if(context!==labUserDirectoryContext(store.getCloudStatus())){dataset=null;cloudReady=false;cloud=store.getCloudStatus();render();throw new Error('Account changed. Reopen history.');}if(dataset!==snapshot||historyDraftOpen())throw new Error('Records changed. Reopen history.');};
  request.promise=(async()=>{
-  try{const fresh=await store.ensureHistory(snapshot,{tables:pending});check();dataset=fresh;request.adopted=true;return fresh;}
+  try{const fresh=await store.ensureHistory(snapshot,{tables:pending,onProgress:value=>historyProgress(request,value)});check();dataset=fresh;request.adopted=true;return fresh;}
   catch(error){const status=store.getCloudStatus();if(context!==labUserDirectoryContext(status)||status.readyForEdits===false){dataset=null;cloudReady=false;cloud=status;route='settings';detail=null;render();}throw error;}
   finally{if(historyLoadState===request){historyLoadState=null;if(request.adopted&&historyViewKey()!==request.view&&route!=='settings'&&!historyDraftOpen())render();}}
  })();return request.promise;
 }
+function historyProgress(request,value){
+ if(historyLoadState!==request||historyViewKey()!==request.view||dataset!==request.snapshot||request.context!==labUserDirectoryContext(store.getCloudStatus())||historyDraftOpen())return;
+ const label=({access:'Checking history access…',archive:'Loading archived history…',verifying:'Verifying history…',saving:'Saving history on this device…'})[value?.phase];if(!label)return;
+ request.progress=value;const status=$('history-loading-status'),progress=$('history-loading-progress');
+ if(status)status.textContent=label;if(progress)progress.innerHTML=workspaceProgressBar(value,{label:'Loading history',describedBy:'history-loading-status'});
+}
 function historyRouteGate(tables){
  const pending=deferredHistoryTables().filter(name=>tables.includes(name));if(!pending.length)return false;
- if(cachedPreview||startupLoading||cloud.mode==='cloud'&&!cloudReady){$('main').innerHTML=panel('History','<p role="status">Synchronizing…</p>');return true;}
- const view=historyViewKey(),snapshot=dataset,blocked=historyDraftOpen(),failure=historyLoadFailure?.view===view?historyLoadFailure.message:'',reload=historyLoadFailure?.view===view&&historyLoadFailure.reloadRequired===true;
- $('main').innerHTML=panel('History',`<p role="status">${esc(blocked?'Save or discard changes before loading history.':failure||'Loading history…')}</p>${reload?button('Reload page','reload-workspace'):blocked||failure?button('Retry','history-retry'):''}`);
- if(!blocked&&!failure)void loadHistoryTables(pending).then(()=>{if(historyViewKey()===view)render();}).catch(error=>{if(historyViewKey()===view&&dataset===snapshot){historyLoadFailure={view,message:error.historyReloadRequired?'Source history changed. Reload page.':error.message||'History could not load.',reloadRequired:error.historyReloadRequired===true};render();}});
+ const view=historyViewKey(),snapshot=dataset,blocked=historyDraftOpen(),failure=historyLoadFailure?.view===view?historyLoadFailure.message:'',unready=cloud.mode==='cloud'&&!cloudReady&&!startupLoading&&!cachedPreview,syncing=cachedPreview||startupLoading||unready;
+ const message=blocked?'Save or discard changes before loading history.':failure||(!startupLoading&&!cachedPreview&&cloudLoadError)||(unready?'Shared data needs verification. Retry to reconnect.':syncing?'Synchronizing…':'Loading history…'),retry=blocked||failure||unready;
+ $('main').innerHTML=panel('History',`<p id="history-loading-status" role="${failure||unready?'alert':'status'}">${esc(message)}</p>${!blocked&&!failure&&!retry?`<div id="history-loading-progress">${workspaceProgressBar(historyLoadState?.view===view?historyLoadState.progress:null,{label:'Loading history',describedBy:'history-loading-status'})}</div>`:''}${retry?button('Retry','history-retry'):''}`);
+ if(!blocked&&!failure&&!syncing)void loadHistoryTables(pending).then(()=>{if(historyViewKey()===view)render();}).catch(error=>{if(historyViewKey()===view&&dataset===snapshot){historyLoadFailure={view,message:error.historyReloadRequired?'History verification changed. Retry to refresh shared data.':error.message||'History could not load.',reloadRequired:error.historyReloadRequired===true};render();}});
  return true;
+}
+async function retryHistory(){
+ if(historyDraftOpen()){showToast('Save or discard changes before loading history.',true);return;}
+ if(manualPullPending||startupLoading||cachedPreview||historyLoadState){showToast('History is already loading.');return;}
+ const view=historyViewKey(),reload=historyLoadFailure?.view===view&&historyLoadFailure.reloadRequired||cloud.mode==='cloud'&&!cloudReady;
+ if(!reload){historyLoadFailure=null;render();return;}
+ try{historyLoadFailure=null;await loadSharedColony({preserveView:true,confirm:false,throwOnError:true});}
+ catch(error){if(historyViewKey()===view&&dataset){historyLoadFailure={view,message:error.message||'Shared data could not reload. Try again.',reloadRequired:true};render();}}
 }
 
 const labUserDirectoryContext=status=>JSON.stringify([status.url,status.colonyId,status.email,status.mode,status.role,Boolean(status.signedIn),Boolean(status.passwordRecovery),status.exportLevel,status.permissions]);
@@ -312,12 +326,13 @@ function render() {
  if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;$('main').innerHTML=entrainmentReviewHTML()+'<div id="animal-review-content"></div>';$('main').onclick=event=>{const target=event.target.closest?.('[data-entrainment-position]');if(target){locoboxContextKey++;locoboxCage=null;locoboxSourceEvent=null;locoboxPosition=target.dataset.entrainmentPosition;navigate('locobox');}};renderMouseReview($('animal-review-content'),dataset,{canEdit:()=>canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
-function startupProgressBar(){
- const value=startupProgressValue,loaded=value?.archiveBlocksLoaded,total=value?.archiveBlocksTotal;
+function workspaceProgressBar(value,{label='Loading Braintime Mouse Data',describedBy='workspace-loading-status'}={}){
+ const loaded=value?.archiveBlocksLoaded,total=value?.archiveBlocksTotal;
  const known=value?.phase==='archive'&&Number.isSafeInteger(loaded)&&loaded>=0&&Number.isSafeInteger(total)&&total>0&&loaded<=total;
  const percent=known?Math.floor(loaded/total*100):null;
- return `<div class="workspace-progress" aria-busy="true"><progress max="100"${percent===null?'':` value="${percent}" aria-valuetext="${percent}%"`} aria-label="${esc(value?.phase==='archive'?'Loading archived history':'Loading Braintime Mouse Data')}" aria-describedby="workspace-loading-status">${percent===null?'Loading…':`${percent}%`}</progress>${percent===null?'':`<span class="small muted">${percent}%</span>`}</div>`;
+ return `<div class="workspace-progress" aria-busy="true"><progress max="100"${percent===null?'':` value="${percent}" aria-valuetext="${percent}%"`} aria-label="${esc(value?.phase==='archive'?'Loading archived history':label)}" aria-describedby="${esc(describedBy)}">${percent===null?'Loading…':`${percent}%`}</progress>${percent===null?'':`<span class="small muted">${percent}%</span>`}</div>`;
 }
+function startupProgressBar(){return workspaceProgressBar(startupProgressValue);}
 function renderStartupLoading(){
  $('navigation').innerHTML='';$('page-title').textContent='Opening workspace';$('add-button').hidden=true;$('export-button').disabled=true;
  $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p>${startupProgressBar()}<p class="subtle">Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}</div></section>`;
@@ -336,7 +351,7 @@ async function loadSharedColony({preserveView=false,confirm=true,throwOnError=fa
  if(historyLoadState)throw new Error('Wait for history loading to finish.');
  if(!fromCryoEditor&&isCryopreservationBusy($('main')))throw new Error('Wait for the current save to finish.');
  if(editor||busy||hasCageSheetDrafts())throw new Error('Save or cancel changes before reloading.');
- const view=route,selection=detail,keepCryoDraft=route==='cryo'&&hasCryopreservationDraft($('main'));
+ const view=route,selection=detail,viewKey=historyViewKey(),keepCryoDraft=route==='cryo'&&hasCryopreservationDraft($('main'));
  if(keepCryoDraft&&!preserveView)throw new Error('Save or cancel the cryopreservation draft first.');
  manualPullPending=true;let loading=false,openingContext=null;
  let failure=null;
@@ -354,7 +369,7 @@ async function loadSharedColony({preserveView=false,confirm=true,throwOnError=fa
   cloudLoadError=error.message||String(error);showToast(cloudLoadError,true);
  }finally{
   manualPullPending=false;
-  if(loading){startupLoading=false;if(preserveView&&dataset){route=view;detail=selection;render();}else navigate(cloudLoadError?'settings':'overview');if(!cloudLoadError)showToast('Shared data reloaded.');}
+  if(loading){startupLoading=false;if(preserveView&&dataset){if(historyViewKey()===viewKey){route=view;detail=selection;}render();}else navigate(cloudLoadError?'settings':'overview');if(!cloudLoadError)showToast('Shared data reloaded.');}
  }
  if(failure&&throwOnError)throw failure;
 }
@@ -882,7 +897,7 @@ async function action(name,target=null){
  if(brainbotReviewPending&&!['help','sign-out','toggle-sidebar-menu','close-sidebar-menu'].includes(name)){showToast('BB review is running.');return;}
  if(name==='toggle-sidebar-menu'){setSidebarMenuOpen(!sidebarMenuOpen);return;}
  if(name==='close-sidebar-menu'){setSidebarMenuOpen(false);return;}
- if(name==='history-retry'){historyLoadFailure=null;render();return;}
+ if(name==='history-retry'){await retryHistory();return;}
  if(name==='reload-workspace'){location.reload();return;}
  if(startupLoading&&name!=='settings'){showToast('The shared workspace is still loading. Please wait for verification.');return;}
  if((cachedPreview||historyLoadState)&&['retry-startup','cloud-pull','cloud-push','import','import-history','upload-history','download-history','clear-history','clear-workspace','demo','empty-workspace','export'].includes(name)){showToast('Synchronizing. Editing is paused.');return;}

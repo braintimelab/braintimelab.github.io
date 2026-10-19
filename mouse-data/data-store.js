@@ -663,6 +663,7 @@ async function cacheDigest(value){
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(value=>value.toString(16).padStart(2,'0')).join('');
 }
 const SUMMARY_COMPUTED_KEYS=new Set(['counts','mouse_state_counts','mice_without_recorded_genotype','mice_without_recorded_parents','mice_with_multiple_candidate_dams']);
+const DEFERRED_HISTORY_ERROR='Deferred history changed or is unverified. Reload shared data before saving.';
 function archiveProjection(data){
  const value={...data,tables:Object.fromEntries(Object.entries(data.tables||{}).filter(([type])=>!MANAGED.includes(type)))};
  for(const key of ['source_archive_deferred','_cloud_read_context','fee_visibility','source_archive_restricted'])delete value[key];
@@ -682,7 +683,7 @@ async function deferredStateOf(rows,data){
  return {head:clone(head),loadedTables:[...data.source_archive_deferred.loaded_tables],marker:clone(data.source_archive_deferred),projectionHash:await cacheDigest(archiveProjection(data)),managedHash:await cacheDigest(Object.fromEntries(MANAGED.map(type=>[type,data.tables[type]]))),records:new Map(rows.filter(row=>row.entity_type==='archive').map(row=>[recordKey(row),row])),identity:syncIdentity(),policy:clone(feeVisibility)};
 }
 async function assertDeferredData(data,state){
- if(data.source_archive_restricted||!state||state.identity!==syncIdentity()||!sameFeeVisibility(state.policy,feeVisibility)||stable(data.source_archive_deferred)!==stable(state.marker)||await cacheDigest(archiveProjection(data))!==state.projectionHash)throw new Error('Deferred history changed or is unverified. Reload shared data before saving.');
+ if(data.source_archive_restricted||!state||state.identity!==syncIdentity()||!sameFeeVisibility(state.policy,feeVisibility)||stable(data.source_archive_deferred)!==stable(state.marker)||await cacheDigest(archiveProjection(data))!==state.projectionHash)throw new Error(DEFERRED_HISTORY_ERROR);
 }
 async function restoreDeferredState(snapshot,envelope,check){
  const saved=envelope.deferred_archive;if(!saved||!Array.isArray(saved.loaded_tables)||new Set(saved.loaded_tables).size!==saved.loaded_tables.length||typeof saved.projection_sha256!=='string')throw new Error('The deferred cache descriptor is invalid.');
@@ -1063,12 +1064,14 @@ export async function ensureHistory(dataset,{tables=null,onProgress}={}){
  try{
   const state=deferredArchiveState,previousBaseline=baseline,previousVersions=versions,pull=pullGeneration,generation=authGeneration,identity=syncIdentity(),context=exportContext();
   const check=()=>{checkExportContext(context);if(!synced||!state||deferredArchiveState!==state||baseline!==previousBaseline||versions!==previousVersions||pull!==pullGeneration||generation!==authGeneration||identity!==syncIdentity())throw new Error('The shared data or account changed while loading history. Reload before continuing.');};
-  check();await assertDeferredData(normalizeDataset(dataset),state);check();
+  const progress=value=>{check();try{onProgress?.(Object.freeze(value));}catch{/* Presentation cannot interrupt a verified read. */}};
+  check();progress({phase:'access'});await assertDeferredData(normalizeDataset(dataset),state);check();
   if(await cacheDigest(Object.fromEntries(MANAGED.map(type=>[type,dataset.tables[type]])))!==state.managedHash)throw new Error('Save or discard record edits before loading history.');check();
   await membership();check();const policy=await refreshFeeVisibility({notify:false});check();if(!policy.source_archive_allowed||!sameFeeVisibility(policy,state.policy))throw new Error('History access changed. Reload shared data.');
   const requested=(tables===null?Object.keys(state.head.payload.archive_tables):[...new Set(tables)]).filter(table=>Object.hasOwn(state.head.payload.archive_tables,table)),needed=requested.filter(table=>!state.loadedTables.includes(table));
   if(!needed.length&&tables!==null)return clone(dataset);
-  const c=configuration(),archive=await selectedArchive(c,check,(count,details)=>{check();try{onProgress?.({phase:'archive',archiveBlocksLoaded:count,archiveBlocksTotal:details.total});}catch{}},{records:state.records,versions:previousVersions},needed);check();
+  let archiveBlocksLoaded=0;
+  const c=configuration(),archive=await selectedArchive(c,check,(count,details)=>{archiveBlocksLoaded+=count;progress({phase:'archive',archiveBlocksLoaded,archiveBlocksTotal:details.total});},{records:state.records,versions:previousVersions},needed);check();progress({phase:'verifying'});
   const head=archive.find(row=>row.entity_id==='reconstruction');if(head.version!==state.head.version||stable(head.payload)!==stable(state.head.payload))throw new Error('The reconstruction manifest changed. Reload shared data before loading history.');
   const combined=new Map(state.records);for(const row of archive)combined.set(recordKey(row),row);
   const loaded=[...new Set([...state.loadedTables,...requested])].sort(),complete=Object.keys(head.payload.archive_tables).every(table=>loaded.includes(table));
@@ -1077,11 +1080,15 @@ export async function ensureHistory(dataset,{tables=null,onProgress}={}){
   const data=await assemble(rows);check();const nextState=await deferredStateOf(rows,data);check();
   const finalPolicy=await refreshFeeVisibility({notify:false});check();if(!sameFeeVisibility(finalPolicy,policy))throw new Error('History access changed while loading. Reload shared data.');
   const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
-  try{const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,previousVersions,nextState);check();await local('put',data,{check,cacheWrite,syncBaseline});check();rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,nextState);return clone(data);}
+  try{progress({phase:'saving'});const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,previousVersions,nextState);check();await local('put',data,{check,cacheWrite,syncBaseline});check();rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,nextState);return clone(data);}
   catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}
  }catch(error){
-  if(/reconstruction manifest changed/i.test(error?.message||''))error.historyReloadRequired=true;
   const sameScope=scope===stable({generation:authGeneration,context:exportContext()});
+  // Retrying an unchanged unverified snapshot cannot repair it. Tell the read
+  // UI to obtain a fresh current-only baseline, never to relax save validation.
+  // A newer account, policy identity or concurrent pull owns its own workspace.
+  const sameRead=sameScope&&openingIdentity===syncIdentity()&&baseline===openingBaseline;
+  if(sameRead&&(error?.message===DEFERRED_HISTORY_ERROR||/reconstruction manifest changed|history access changed/i.test(error?.message||'')||(!synced||!deferredArchiveState)&&mode()==='cloud'&&hasLabSession())){error.historyReloadRequired=true;error.code='HISTORY_RELOAD_REQUIRED';}
   if(sameScope&&baseline===openingBaseline&&([401,403].includes(error?.status)||/not an active member/.test(error?.message||'')||openingIdentity!==syncIdentity()))invalidate();
   throw error;
  }finally{activeDatasetSaves.delete(scope);}
