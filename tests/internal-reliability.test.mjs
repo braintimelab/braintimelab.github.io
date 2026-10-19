@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createPortalController} from '../internal/portal.js';
+import {createAccessActivity} from '../mouse-data/access-activity.js';
 import {guestAllows} from '../mouse-data/guest-access.js?v=134';
 
 const config = {url: 'https://lab.example', colonyId: 'lab-colony', anonKey: 'public-key'};
@@ -179,7 +180,7 @@ async function mounted() {
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, guestAllows, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout, testConfig: config, testStore: store});
+  const context = vm.createContext({URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout, testConfig: config, testStore: store});
   vm.runInContext(source, context);
   const controller = await context.mountPortal(document, window);
   return {element, document, documentEvents, windowEvents, controller, setStatus: value => { status = value; }, setVerify: value => { verify = value; }};

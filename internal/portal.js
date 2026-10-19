@@ -1,4 +1,5 @@
-import {guestAllows} from '../mouse-data/guest-access.js?v=152';
+import {guestAllows} from '../mouse-data/guest-access.js?v=153';
+import {createAccessActivity} from '../mouse-data/access-activity.js?v=152';
 
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
 const MEMBER_LEVELS = new Set(['low', 'mid', 'mid1', 'mid2', 'high', 'max']);
@@ -14,14 +15,22 @@ export function togglePasswordVisibility(input, button, show = input.type === 'p
 }
 
 /** Small view controller. Authentication, refresh and membership stay in the shared store. */
-export function createPortalController({store, config, location, navigate, onState = () => {}, timers = globalThis, deadlineMs = 45000}) {
+export function createPortalController({store, config, location, navigate, onState = () => {}, timers = globalThis, deadlineMs = 45000, isVisible = () => true}) {
   let generation = 0, pendingCheck = null, pendingAction = null;
+  let verifiedIdentity = '';
   let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
+  const identityKey = current => JSON.stringify([current.url, current.colonyId, current.email, current.role, current.signedIn, current.passwordRecovery, current.setupRequired]);
+  const activity = createAccessActivity({app: 'lab-tools', sections: ['tools'], record: store.recordAppAccess,
+    // A data-free membership check verifies portal access even before Mouse Data
+    // has selected its dataset mode. Do not load animal records for activity.
+    getContext: () => { const current = store.getCloudStatus(); return verifiedIdentity && identityKey(current) === verifiedIdentity ? {...current, mode: 'cloud'} : null; },
+    isVisible, setTimer: (fn, delay) => timers.setTimeout(fn, delay), clearTimer: timer => timers.clearTimeout(timer)});
   const appURL = () => new URL('../mouse-data/', location.href).href;
   const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
     const next = {...state, ...update};
     if (next.phase !== 'member') { next.memberDocuments = false; next.shortcuts = NO_SHORTCUTS; }
+    if (!['member', 'checking'].includes(next.phase)) { verifiedIdentity = ''; activity.reset(); }
     state = Object.freeze(next);
     onState(state);
     return state;
@@ -46,10 +55,14 @@ export function createPortalController({store, config, location, navigate, onSta
     if (attempt !== generation) return state;
     if (!current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
       || current.url !== config.url || current.colonyId !== config.colonyId) throw new Error('Your lab access could not be verified. Sign in again.');
-    return publish({phase: 'member', busy: false, message: '', error: false, identity: current.email || current.username || 'Signed in', hasSession: true, notice: null,
+    verifiedIdentity = identityKey(current);
+    const verified = publish({phase: 'member', busy: false, message: '', error: false, identity: current.email || current.username || 'Signed in', hasSession: true, notice: null,
       memberDocuments: current.guestLevel === null && MEMBER_LEVELS.has(current.exportLevel),
       shortcuts: Object.freeze(Object.fromEntries([['mouse-data:cages', 'mouse.cages.read'], ['mouse-data:mice', 'mouse.mice.read'], ['reagents:orders', 'reagents.orders.read'], ['reagents:inventory', 'reagents.inventory.read']]
         .map(([key, permission]) => [key, (current.guestLevel === null || ['guest1', 'guest2', 'guest3'].includes(current.guestLevel)) && guestAllows(current, permission)])))});
+    // Record only a verified, visible member visit. This never delays sign-in.
+    activity.resume('tools');
+    return verified;
   }
 
   function failed(error, attempt) {
@@ -123,6 +136,7 @@ export function createPortalController({store, config, location, navigate, onSta
 
   async function signOut() {
     if (pendingAction?.kind === 'sign-out') return state;
+    activity.signOut('tools');
     const action = {attempt: ++generation, kind: 'sign-out'};
     pendingAction = action;
     pendingCheck = null;
@@ -178,6 +192,7 @@ export function createPortalController({store, config, location, navigate, onSta
 
   return Object.freeze({
     start, checkAccess, signIn, signOut, openMouseData, openReagents,
+    suspendActivity: () => activity.suspend(),
     requestReset: identifier => sendRequest('reset', () => store.requestPasswordReset(identifier)),
     sendEmailLink: email => sendRequest('email', () => store.requestEmailLink(email, appURL())),
     getState: () => state
@@ -191,9 +206,10 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=152');
+  const store = await import('../mouse-data/data-store.js?v=153');
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,
+    isVisible: () => !document.hidden,
     navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),
     onState(state) {
       element('sign-in-panel').hidden = state.phase !== 'signed-out';
@@ -254,7 +270,8 @@ export async function mountPortal(document, window) {
   };
   window.addEventListener('focus', recheck);
   window.addEventListener('pageshow', event => { concealPassword(); if (event.persisted) recheck(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) concealPassword(); recheck(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { concealPassword(); controller.suspendActivity(); } recheck(); });
+  window.addEventListener('online', recheck);
   window.addEventListener('storage', event => { if (event.key === 'mouse-colony.cloud.v1') recheck(); });
   await controller.start();
   return controller;

@@ -1,4 +1,4 @@
-import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=152';
+import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=153';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
@@ -1535,12 +1535,12 @@ export async function manageColonyUsers(action,payload={}) {
 export async function inviteLabMember(payload){return manageColonyUsers('invite_preregistered',payload);}
 export async function createLabMemberInvitationLink(payload){return manageColonyUsers('create_preregistered_link',payload);}
 
-const ACCESS_PAGES={mouse:['overview','mice','strains','review','matings','litters','cages','family','planner','experiments','iacuc','housing','locobox','cryo','fees','archive','brainbot','settings'],reagents:['inventory','safety','usage','orders','vendors','equipment','history','review','settings']};
+const ACCESS_PAGES={'lab-tools':['tools'],mouse:['overview','mice','strains','review','matings','litters','cages','family','planner','experiments','iacuc','housing','locobox','cryo','fees','archive','brainbot','settings'],reagents:['inventory','safety','usage','orders','vendors','equipment','history','review','settings']};
 // Authenticated app activity is best effort and contains only allowlisted labels.
 // Capture the current token before sign-out clears it; never delay sign-out for logging.
 export function recordAppAccess(payload){
  const c=configuration(),s=session(),generation=authGeneration,idPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
- if(!c||!hasLabSession(s)||!s.user?.id||s.passwordRecovery||s.setupRequired||!['owner','manager','editor','viewer'].includes(s.role)||!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!['app','event','page','sessionId','eventId'].includes(k))||!['mouse','reagents'].includes(payload.app)||!['session_start','page_view','sign_out'].includes(payload.event)||!ACCESS_PAGES[payload.app]?.includes(payload.page)||!idPattern.test(payload.sessionId||'')||!idPattern.test(payload.eventId||''))return Promise.resolve(null);
+ if(!c||!hasLabSession(s)||!s.user?.id||s.passwordRecovery||s.setupRequired||!['owner','manager','editor','viewer'].includes(s.role)||!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!['app','event','page','sessionId','eventId'].includes(k))||!['mouse','reagents','lab-tools'].includes(payload.app)||!['session_start','page_view','sign_out'].includes(payload.event)||!ACCESS_PAGES[payload.app]?.includes(payload.page)||!idPattern.test(payload.sessionId||'')||!idPattern.test(payload.eventId||''))return Promise.resolve(null);
  const body={p_colony_id:c.colonyId,p_app:payload.app,p_event:payload.event,p_page:payload.page,p_session_id:payload.sessionId,p_event_id:payload.eventId};
  const service=provider();if(service&&service.getState().active==='cloud2')return service.cloud2.activity(body).then(reply=>reply?.result&&typeof reply.result.recorded==='boolean'?reply.result:null).catch(()=>null);
  if(!s.access_token)return Promise.resolve(null);
@@ -1560,11 +1560,33 @@ export async function listAppAccess(filters={}){
  if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).some(k=>!['app','userId','excludeOwner','event','from','to','before','limit'].includes(k)))throw new Error('Unsupported access log filters.');
  const value={app:null,userId:null,excludeOwner:false,event:null,from:null,to:null,before:null,limit:50,...filters};
  const time=v=>v===null||typeof v==='string'&&v.length<=40&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(v)&&Number.isFinite(Date.parse(v));
- if(typeof value.excludeOwner!=='boolean'||value.excludeOwner&&value.userId!==null||value.app!==null&&!['mouse','reagents'].includes(value.app)||value.userId!==null&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.userId)||value.event!==null&&!['session_start','page_view','sign_out'].includes(value.event)||!time(value.from)||!time(value.to)||value.from&&value.to&&Date.parse(value.from)>=Date.parse(value.to)||value.before!==null&&!(typeof value.before==='string'&&/^[1-9]\d*$/.test(value.before)&&value.before.length<=19)||!Number.isInteger(value.limit)||value.limit<1||value.limit>50)throw new Error('Choose valid access log filters.');
+ if(typeof value.excludeOwner!=='boolean'||value.excludeOwner&&value.userId!==null||value.app!==null&&!['mouse','reagents','lab-tools'].includes(value.app)||value.userId!==null&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.userId)||value.event!==null&&!['session_start','page_view','sign_out'].includes(value.event)||!time(value.from)||!time(value.to)||value.from&&value.to&&Date.parse(value.from)>=Date.parse(value.to)||value.before!==null&&!(typeof value.before==='string'&&/^[1-9]\d*$/.test(value.before)&&value.before.length<=19)||!Number.isInteger(value.limit)||value.limit<1||value.limit>50)throw new Error('Choose valid access log filters.');
  const check=()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The account changed. Reopen Access logs.');if(session()?.role!=='owner')throw denied();};
  if(await membership({check})!=='owner')throw denied();check();
  const result=await request(value.excludeOwner?'rpc/list_app_access_filtered':'rpc/list_app_access',{method:'POST',body:{...(value.excludeOwner?{p_exclude_owner:true}:{}),p_colony_id:c.colonyId,p_app:value.app,p_user_id:value.userId,p_event:value.event,p_from:value.from,p_to:value.to,p_before:value.before,p_limit:value.limit}});
  check();if(!result||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Access logs could not be verified.');return result;
+}
+
+
+// Read only: the existing Cloud 1 owner session verifies access to NAS activity.
+// No NAS credentials, cookies, note contents or browser caches are involved.
+export async function listNasAppAccess(filters={}){
+ const c=configuration(),s=session(),generation=authGeneration;
+ const denied=()=>new Error('Sign in as the owner to view Lab Notes access logs.');
+ if(!c||!s?.user?.id||s.role!=='owner'||s.passwordRecovery||s.setupRequired)throw denied();
+ if(c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)throw new Error('Lab Notes access logs are unavailable for this workspace.');
+ if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).some(k=>!['app','userId','excludeOwner','event','from','to','before','limit'].includes(k)))throw new Error('Unsupported access log filters.');
+ const value={app:null,userId:null,excludeOwner:false,event:null,from:null,to:null,before:null,limit:50,...filters};
+ const time=v=>v===null||typeof v==='string'&&v.length<=40&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(v)&&Number.isFinite(Date.parse(v));
+ if(typeof value.excludeOwner!=='boolean'||value.excludeOwner&&value.userId!==null||value.app!==null&&!['notes','calculator'].includes(value.app)||value.userId!==null&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.userId)||value.event!==null&&!['sign_in','session_start','page_view','sign_out'].includes(value.event)||!time(value.from)||!time(value.to)||value.from&&value.to&&Date.parse(value.from)>=Date.parse(value.to)||value.before!==null&&!(typeof value.before==='string'&&/^[1-9]\d{0,11}$/.test(value.before))||!Number.isInteger(value.limit)||value.limit<1||value.limit>50)throw new Error('Choose valid access log filters.');
+ const check=()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The account changed. Reopen Access logs.');if(session()?.role!=='owner'||session()?.passwordRecovery||session()?.setupRequired)throw denied();};
+ const endpoint=new URL('/api/owner/access-logs',PUBLIC_CONFIG.cloud2Url),query=new URLSearchParams({limit:String(value.limit),exclude_owner:String(value.excludeOwner)});
+ for(const[key,v]of Object.entries({app:value.app,user_id:value.userId,event:value.event,from:value.from,to:value.to,before:value.before}))if(v!==null)query.set(key,v);
+ const token=await accessToken(8000);check();
+ const {response,result}=await cloudJSON(endpoint.href+'?'+query,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();
+ if(!response.ok)throw apiError(response,result);
+ if(result?.source!=='nas'||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Lab Notes access logs could not be verified.');
+ return result;
 }
 
 const HISTORY_BUCKET='colony-history';
