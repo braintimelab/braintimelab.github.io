@@ -1,4 +1,4 @@
-import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=156';
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=157';
 import {guestAllows} from '../mouse-data/guest-access.js?v=155';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=152';
 

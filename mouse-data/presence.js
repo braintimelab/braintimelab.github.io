@@ -47,7 +47,11 @@ export function renderPresence(container,users=[],{available=true}={}){
 
 export function createPresence({app,getContext,record,list,container,isVisible,documentTarget=globalThis.document,windowTarget=globalThis.window,now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,randomUUID=()=>globalThis.crypto.randomUUID(),render=(users,options)=>renderPresence(container,users,options)}={}){
  if(!Object.hasOwn(APPS,app)||typeof getContext!=='function'||typeof record!=='function')throw new Error('Choose a supported presence service.');
- const clientId=randomUUID();if(!UUID.test(clientId))throw new Error('Presence requires a unique client ID.');
+ let clientId;try{clientId=randomUUID();}catch{}
+ if(typeof clientId!=='string'||!UUID.test(clientId)){
+  const hide=()=>{if(container){container.replaceChildren?.();container.hidden=true;}};hide();
+  return {refresh:()=>Promise.resolve(),clear:hide,destroy:hide};
+ }
  const visible=isVisible||(()=>!documentTarget?.hidden);
  let identity=null,generation=0,pollTimer=null,expiryTimer=null,pending=null,users=[],destroyed=false,lastAttempt=-Infinity,available=true;
  const current=()=>{const context=getContext();return context&&UUID.test(context.userId||'')&&typeof context.key==='string'&&context.key?context:null;};
