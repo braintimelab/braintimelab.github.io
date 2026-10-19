@@ -1,4 +1,4 @@
-import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=155';
+import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=158';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';

@@ -1,4 +1,4 @@
-import {GUEST_LEVELS,GUEST_PERMISSION_KEYS,GUEST_LOCKED_FEATURES,GUEST_AVAILABILITY_MODES,guestPermissions,guestDefaults,guestAvailabilityDraft,guestAvailabilityInput,guestAvailabilityLabel} from './guest-access.js?v=155';
+import {GUEST_LEVELS,GUEST_PERMISSION_KEYS,GUEST_LOCKED_FEATURES,GUEST_AVAILABILITY_MODES,guestPermissions,guestDefaults,guestAvailabilityDraft,guestAvailabilityInput,guestAvailabilityLabel} from './guest-access.js?v=158';
 /* Owner edits; managers have a filtered read-only directory. Authorization is enforced by the server for every request. */
 import {MANAGER_PERMISSION_LABELS,defaultManagerPermissions,normalizeManagerPermissions} from './permissions.js?v=100';
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
