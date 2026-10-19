@@ -5,6 +5,7 @@ account-acronym.js
 account-setup.js
 animal-sheet-export.js
 animal-sheet-import.js
+app-access.js
 app.js
 archive-format.js
 brainbot-review-runner.js

@@ -96,7 +96,7 @@
 #export-print-dialog .dialog-actions{align-items:center;flex-wrap:wrap}
 #export-print-dialog .dialog-actions .small{margin-right:auto}
 #export-print-frame{display:block;width:100%;height:auto;min-height:0;flex:1;border:0;background:var(--print-paper)}
-.user-management td select{max-width:190px}
+.user-management td{vertical-align:top}.user-management td select{max-width:190px}
 @media(max-width:620px){
  #export-dialog .dialog-content{padding:15px;max-height:calc(100dvh - 250px)}
  #export-dialog .dialog-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:8px}

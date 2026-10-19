@@ -1,4 +1,4 @@
-import {itemName,itemClassification,esc,text} from './model.js?v=8';
+import {itemName,itemClassification,esc,text} from './model.js?v=9';
 
 export const USAGE_GROUPS=Object.freeze([
   Object.freeze({id:'frequent',label:'Frequent use'}),
