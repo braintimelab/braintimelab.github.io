@@ -22,8 +22,8 @@ import { summarizeBreeding } from './breeding-summary.js?v=146';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
 import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=146';
 import * as history from './history-index.js?v=100';
-import { renderUserManagement } from './user-management.js?v=153';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=153';
+import { renderUserManagement } from './user-management.js?v=154';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=154';
 import { renderAccessLogs } from './access-logs.js?v=153';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
@@ -50,7 +50,7 @@ import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126'
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=132';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=132';
 import { protocolsForEntity } from './iacuc-model.js?v=132';
-import { renderExportCenter } from './export-center.js?v=151';
+import { renderExportCenter } from './export-center.js?v=154';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -722,7 +722,7 @@ async function openCageLabel(cageSid,initialSide='front',positionId=''){if(!gues
  try{
   const grant=await store.getExportPermission();if(!current()){close();return;}
   if(grant.level==='max'&&grant.full_history===true){labelPermission=await store.assertFullExportPermission();allowFullLocoboxHistory=labelPermission.level==='max'&&labelPermission.full_history===true;locoboxHistoryNotice=labelPermission.local?'Local workspace · full history.':'Full history.';}
-  else {const report=await store.getExportRecords({scope:'history',entityTypes:['husbandry_events']});locoboxDataset=report.dataset;labelPermission={...report.metadata,level:report.metadata.export_level};locoboxHistoryNotice=`${['high','mid2'].includes(labelPermission.level)?'Past 6 years':'Past 3 years'} · ${labelPermission.cutoff_date} to ${labelPermission.as_of_date}. Source narratives outside this scope are omitted.`;}
+  else {const report=await store.getExportRecords({scope:'history',entityTypes:['husbandry_events']});locoboxDataset=report.dataset;labelPermission={...report.metadata,level:report.metadata.export_level};locoboxHistoryNotice=`${isGuest(cloud)?'Guest - Past 1 year':['high','mid2'].includes(labelPermission.level)?'Past 6 years':'Past 3 years'} · ${labelPermission.cutoff_date} to ${labelPermission.as_of_date}. Source narratives outside this scope are omitted.`;}
  }catch(error){if(current())showToast('Locobox history could not be loaded. Blank labels remain available.',true);}
  if(!current()){close();return;}
  renderCageLabelEditor($('cage-label-editor'),sourceDataset,{initialCage:String(cageSid||''),initialPosition:positionId,initialContextKey:token,initialSide,members,locoboxDataset,allowFullLocoboxHistory,locoboxHistoryNotice,onOriginalPreview:(id,options={})=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}close();if(options.positionId)printPositionCard(options.positionId,options.draft);else printCageCards([id]);},onClose:close,toast:showToast,onPreview:({documentHTML})=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}showExportPrintPreview(documentHTML,{title:'Cage label PDF',permission:labelPermission,validateContext:()=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}}});$('export-print-dialog').cageLabelToken=token;}});
@@ -880,7 +880,7 @@ async function openExportCenter(options={}){
  if(!dataset){showToast('Open a workspace before exporting.');return}
  let dialog=$('export-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='export-dialog';document.body.appendChild(dialog)}
  dialog.innerHTML='<div id="export-center"></div>';dialog.oncancel=event=>{event.preventDefault();dialog.querySelector('[data-export-action="close"]')?.click()};dialog.showModal();
- await renderExportCenter($('export-center'),dataset,{getPermission:store.getExportPermission,getRecords:store.getExportRecords,getBackup:store.getFullExportBackup,getLocalBackup:store.getLocalBackup,canViewSourceArchive,getSourceArchive:()=>store.getFullSourceExport(async()=>(await history.loadHistoryIndex())?.index),download:downloadExport,print:showExportPrintPreview,close:()=>dialog.close(),toast:showToast},options);
+ await renderExportCenter($('export-center'),dataset,{isGuest:()=>isGuest(cloud),getPermission:store.getExportPermission,getRecords:store.getExportRecords,getBackup:store.getFullExportBackup,getLocalBackup:store.getLocalBackup,canViewSourceArchive,getSourceArchive:()=>store.getFullSourceExport(async()=>(await history.loadHistoryIndex())?.index),download:downloadExport,print:showExportPrintPreview,close:()=>dialog.close(),toast:showToast},options);
 }
 async function exportDataset(){return openExportCenter({scope:'animal-sheet',...(selectedMice.size?{selectedMouseIds:[...selectedMice]}:{})})}
 async function archiveRecord(){if(!canArchiveRecords()){showToast('Archive permission is required.',true);return;}const r=findRecord(detail.type,detail.id),restore=archived(r);if(!await confirmAction(restore?'Restore record?':'Archive record?',`<p class="subtle">${esc(entity[detail.type].singular)} SID ${esc(detail.id)}. ${restore?'The record will return to normal lists.':'This hides the record from normal lists. Its biological state, dates and history stay unchanged. You can restore it later.'}</p>`,restore?'Restore':'Archive'))return;const next=clone(dataset),target=next.tables[detail.type].find(x=>String(x[entity[detail.type].id])===detail.id);target.app_archived_at=restore?null:now();target.app_modified_at=now();const check=model.validateRecord(detail.type,target,dataset,detail.id);if(check.errors?.length)throw new Error(check.errors.join('\n'));await store.saveDataset(next);dataset=await store.loadDataset();render();showToast(restore?'Record restored.':'Record archived.')}
