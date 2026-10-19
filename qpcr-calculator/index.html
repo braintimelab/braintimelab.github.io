@@ -3,59 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Braintime Lab qPCR analysis, standard curves, and reaction preparation. Calculations stay on your device.">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'">
-  <title>Braintime qPCR Calculator</title>
-  <link rel="stylesheet" href="./styles.css">
-  <script type="module" src="./app.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#f7f4e7">
+  <title>qPCR Calculator has moved · Braintime Lab</title>
+  <link rel="stylesheet" href="../internal/portal.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to calculator</a>
-  <aside class="sidebar" id="sidebar" aria-label="qPCR workspace">
-    <a class="brand" href="#ct" aria-label="Braintime qPCR calculator">
-      <svg class="brand-mark" viewBox="0 0 40 44" aria-hidden="true"><path d="M11 4c0 13 18 23 18 36M29 4C29 17 11 27 11 40M13 9h14M17 17h6m-6 10h6m-10 8h14"/></svg>
-      <span>Braintime<small>qPCR calculator</small></span>
-    </a>
-    <span class="eyebrow sidebar-label">WORKSPACE</span>
-    <nav class="navigation" aria-label="Calculators">
-      <a href="#ct" data-tab="ct" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h17M7 16c5 0 3-9 8-9h5"/><path d="M7 13h3m5-3h5"/></svg><span>Ct analysis</span></a>
-      <a href="#curve" data-tab="curve"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h17M7 7l12 10"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="11" r="1"/><circle cx="18" cy="16" r="1"/></svg><span>Standard curve</span></a>
-      <a href="#prep" data-tab="prep"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6L5 18a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 15h8"/></svg><span>Reaction prep</span></a>
-    </nav>
-    <footer class="sidebar-footer">
-      <nav class="app-links" aria-label="Lab apps"><a href="https://braintimelab.github.io/">Lab home</a><a href="https://braintimelab.github.io/internal/">Lab tools</a><a href="https://braintimelab.github.io/mouse-data/">Mouse Data</a><a href="https://braintimelab.github.io/reagents/">Reagents</a></nav>
-      <div class="local-account"><span class="local-avatar" aria-hidden="true">qP</span><div><strong>On this device</strong><span class="local-status"><span class="status-dot" aria-hidden="true"></span>Local calculations</span></div><button id="reload" class="icon-button reload" type="button" aria-label="Reload calculator" title="Reload calculator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8V3l-3 3a8 8 0 1 0 2.3 10M20 8h-5"/></svg></button></div>
-    </footer>
-  </aside>
-  <button type="button" id="menu-backdrop" class="menu-backdrop" aria-label="Close menu" hidden></button>
-  <main id="main" tabindex="-1">
-    <header class="topbar"><button type="button" id="menu-toggle" class="icon-button menu-toggle" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><div><span class="eyebrow">BRAINTIME LAB · CALCULATORS</span><h1 id="view-title">Ct analysis</h1></div><span class="privacy-badge">Calculated locally</span></header>
-    <div class="workspace">
-      <p class="intro" id="view-intro">Summarize technical wells and normalize expression to reference genes.</p>
-      <p class="privacy-note">Your input is not uploaded or stored. Export results before reloading or closing this page.</p>
-      <section id="panel-ct" data-panel="ct" aria-label="Ct analysis">
-        <div class="input-layout">
-          <section class="panel"><div class="panel-heading"><h2>1. Ct table</h2><button type="button" class="text-button" id="ct-example">Load synthetic example</button></div><form id="ct-read"><label for="ct-data">Paste CSV or tab-separated data</label><textarea id="ct-data" rows="9" spellcheck="false" placeholder="Sample,Gene,Ct" aria-describedby="ct-format"></textarea><p class="hint" id="ct-format">Columns: Sample, Gene, Ct. One row per technical well. Blank and Undetermined Ct values are listed as excluded.</p><div class="actions"><button class="primary" type="submit">Read table</button><span class="status" id="ct-read-status" role="status" aria-live="polite">No table loaded.</span></div></form></section>
-          <section class="panel"><div class="panel-heading"><h2>2. Normalization</h2></div><form id="ct-analyze"><fieldset><legend>Reference genes</legend><div id="reference-options" class="choices"><span class="hint">Read a table to choose reference genes.</span></div></fieldset><fieldset><legend>Calibrator samples <span class="muted">(optional)</span></legend><div id="calibrator-options" class="choices"><span class="hint">Choose one or more samples for relative expression.</span></div></fieldset><p class="hint">Without a calibrator, calculate ΔCt only. Multiple reference genes receive equal weight.</p><div class="actions"><button class="primary" type="submit" id="ct-calculate" disabled>Analyze</button></div><p class="error" id="ct-error" role="alert" hidden></p></form></section>
-        </div>
-        <section class="panel result-panel" id="ct-results" hidden><div class="panel-heading"><div><h2>Expression results</h2><p class="hint">n and SD describe technical wells, not biological replicates. No confidence interval is inferred.</p></div><button type="button" class="secondary" id="ct-download">Export CSV</button></div><div id="ct-summary" class="summary-line"></div><div id="ct-warnings" class="warnings"></div><div class="table-scroll" id="ct-table"></div></section>
-        <details class="panel excluded-panel" id="ct-excluded" hidden><summary id="ct-excluded-title">Excluded wells</summary><div class="table-scroll" id="ct-excluded-table"></div></details>
-        <details class="panel method"><summary>How expression is calculated</summary><p>Ct values are averaged within each sample and gene. ΔCt is the gene’s mean Ct minus the equal-weight mean of its reference-gene means. ΔΔCt compares this value with the mean ΔCt of the selected calibrators. Relative expression is 2<sup>−ΔΔCt</sup>, which assumes equal amplification efficiency near 100%.</p><p>A missing selected reference excludes that sample from normalization. Missing calibrator data are reported explicitly. Use the standard-curve tool to inspect assay efficiency.</p></details>
-      </section>
-      <section id="panel-curve" data-panel="curve" aria-label="Standard curve" hidden>
-        <div class="input-layout curve-layout"><section class="panel"><div class="panel-heading"><h2>Known quantity and Ct</h2><button type="button" class="text-button" id="curve-example">Load synthetic example</button></div><form id="curve-fit"><label for="curve-data">Paste CSV or tab-separated data</label><textarea id="curve-data" rows="9" spellcheck="false" placeholder="Quantity,Ct" aria-describedby="curve-format"></textarea><p class="hint" id="curve-format">Columns: Quantity, Ct. Use positive quantities in the same unit. Enter replicate wells as separate rows.</p><div class="actions"><button class="primary" type="submit">Fit standard curve</button></div><p class="error" id="curve-error" role="alert" hidden></p></form></section><section class="panel graph-panel"><div class="panel-heading"><h2>Ct against log₁₀ quantity</h2></div><div id="curve-plot" class="plot-empty">Fit a table to show the standard curve.</div></section></div>
-        <section id="curve-results" class="panel result-panel" hidden><div class="panel-heading"><h2>Curve fit</h2><button class="secondary" type="button" id="curve-download">Export CSV</button></div><div class="metrics" id="curve-metrics"></div><p class="equation" id="curve-equation"></p><div class="warnings" id="curve-warnings"></div><div class="inverse-layout"><form id="curve-inverse" class="inline-form"><label for="inverse-ct">Ct to estimate quantity<input type="number" id="inverse-ct" min="0" step="any" required inputmode="decimal" placeholder="Enter Ct"></label><button class="secondary" type="submit">Estimate quantity</button></form><div class="inverse-answer" id="inverse-answer" role="status" aria-live="polite"></div></div><p class="hint">Quantity retains your input unit. This is an inverse regression estimate; no confidence interval is shown.</p></section>
-        <details class="panel excluded-panel" id="curve-excluded" hidden><summary id="curve-excluded-title">Excluded wells</summary><div class="table-scroll" id="curve-excluded-table"></div></details>
-      </section>
-      <section id="panel-prep" data-panel="prep" aria-label="Reaction preparation" hidden>
-        <div class="prep-layout"><section class="panel"><div class="panel-heading"><h2>Reaction recipe</h2><button type="button" class="text-button" id="prep-example">Load synthetic example</button></div><form id="prep-calculate"><div class="form-grid"><label>Reactions<input id="reaction-count" type="number" min="1" step="1" value="1" inputmode="numeric" required></label><label>Overage (%)<input id="reaction-overage" type="number" min="0" step="any" value="10" inputmode="decimal" required></label><label>Total per reaction (µL)<input id="reaction-volume" type="number" min="0" step="any" value="20" inputmode="decimal" required></label></div><div class="table-scroll recipe-wrap"><table class="recipe-table"><thead><tr><th scope="col">Component</th><th scope="col">µL / reaction</th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead><tbody id="recipe-rows"></tbody></table></div><button class="text-button add-component" type="button" id="add-component">＋ Add component</button><p class="hint">Enter your assay’s component volumes. Water fills the remainder. Totals are per-component budgets with overage; dispense template separately when your protocol requires it.</p><div class="actions"><button class="primary" type="submit">Calculate volumes</button></div><p class="error" id="prep-error" role="alert" hidden></p></form></section><section class="panel" id="prep-results"><div class="panel-heading"><h2>Volumes to prepare</h2><button class="secondary" type="button" id="prep-download" disabled>Export CSV</button></div><div id="prep-summary" class="summary-line"></div><div id="prep-table" class="empty">Calculate a recipe to show the volumes.</div></section></div>
-        <section class="panel dilution-panel"><div class="panel-heading"><h2>Template dilution</h2></div><form id="dilution-calculate"><div class="form-grid dilution-grid"><label>Stock concentration<input type="number" id="dilution-stock" min="0" step="any" inputmode="decimal" required></label><label>Target concentration<input type="number" id="dilution-target" min="0" step="any" inputmode="decimal" required></label><label>Final volume (µL)<input type="number" id="dilution-volume" min="0" step="any" inputmode="decimal" required></label><label>Concentration unit<input id="dilution-unit" type="text" value="ng/µL" maxlength="40"></label></div><div class="actions"><button class="secondary" type="submit">Calculate dilution</button><span class="hint">Use the same concentration unit for stock and target.</span></div><p class="error" id="dilution-error" role="alert" hidden></p><div id="dilution-answer" class="dilution-answer" role="status" aria-live="polite"></div></form></section>
-      </section>
-      <details class="panel method"><summary>Methods &amp; references</summary><p>Relative expression uses 2<sup>−ΔΔCt</sup> under the equal, near-100% efficiency assumption. Equal weighting of reference-gene mean Ct values corresponds to geometric averaging on the expression scale. Standard curves fit Ct = slope × log₁₀(quantity) + intercept; estimated efficiency is (10<sup>−1/slope</sup> − 1) × 100%. Replicate wells describe technical variation.</p><p><a href="https://www.thermofisher.com/us/en/home/life-science/pcr/real-time-pcr/real-time-pcr-learning-center/real-time-pcr-basics/efficiency-real-time-pcr-qpcr.html" target="_blank" rel="noopener noreferrer">Thermo Fisher: PCR efficiency and quantification</a> · <a href="https://www.bio-rad.com/webroot/web/pdf/lsr/literature/10004394B.pdf" target="_blank" rel="noopener noreferrer">Bio-Rad: Real-Time PCR Applications Guide (PDF)</a></p></details>
-      <noscript>Enable JavaScript to calculate on this device. No data are submitted.</noscript>
-    </div>
+  <main class="portal" id="main">
+    <section class="sign-in-card" aria-labelledby="moved-heading">
+      <p class="eyebrow">BraintimeDisk</p>
+      <h1 id="moved-heading">qPCR Calculator has moved</h1>
+      <p>The current calculator includes Ct analysis, reaction preparation, and the printable 96-well plate designer.</p>
+      <p><a class="button primary" href="https://braintimedisk.tail933238.ts.net:10000/qpcr/">Open qPCR Calculator</a></p>
+      <p class="small"><a href="../internal/">Back to Lab tools</a></p>
+    </section>
   </main>
 </body>
 </html>

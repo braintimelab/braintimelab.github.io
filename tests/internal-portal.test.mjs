@@ -1,3 +1,4 @@
+import {guestAllows} from '../mouse-data/guest-access.js?v=134';
 import {backupViewerLinkHTML} from '../../colony-app/web/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -122,10 +123,10 @@ test('mounted portal hides all document groups for Guests and reveals them only 
   let status = member({role: 'viewer', guestLevel: 'guest1'});
   const store = {getCloudStatus: () => status, verifyCloudMembership: async () => status};
   const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
-    .replace(/^export /gm, '')
+    .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+  const context = vm.createContext({URL, URLSearchParams, guestAllows, setTimeout, clearTimeout, testStore: store, testConfig: config});
   vm.runInContext(source, context);
   const controller = await context.mountPortal(document, window);
   for (const guestLevel of ['guest1', 'guest2', 'guest3']) {
@@ -280,7 +281,10 @@ test('Cloud 2 app entries are available in initial HTML before any shared sign-i
   assert.match(entry, /aria-label="Cloud 2 apps"/);
   assert.deepEqual([...entry.matchAll(/href="([^"]+)"/g)].map(match => match[1]), [
     'https://braintimedisk.tail933238.ts.net:10000/mouse-data/#settings',
-    'https://braintimedisk.tail933238.ts.net:10000/reagents/#settings'
+    'https://braintimedisk.tail933238.ts.net:10000/reagents/#settings',
+    'https://braintimedisk.tail933238.ts.net:10000/',
+    'https://braintimedisk.tail933238.ts.net:10000/calculator/',
+    'https://braintimedisk.tail933238.ts.net:10000/qpcr/'
   ]);
   assert(html.indexOf(entry) < html.indexOf('id="portal-status"'));
   assert(html.indexOf(entry) < html.indexOf('id="sign-in-panel"'));
@@ -309,10 +313,10 @@ test('a hanging or failed Cloud 1 verification leaves native Cloud 2 navigation 
   const window = {location: new URL('https://braintime.example/internal/'), addEventListener() {}};
   const store = {getCloudStatus: () => member(), verifyCloudMembership: () => waiting.promise};
   const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
-    .replace(/^export /gm, '')
+    .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+  const context = vm.createContext({URL, URLSearchParams, guestAllows, setTimeout, clearTimeout, testStore: store, testConfig: config});
   vm.runInContext(source, context);
   const mounted = context.mountPortal(document, window);
   await Promise.resolve();
@@ -395,10 +399,10 @@ test('submitting a visible password clears and conceals it before authentication
   const window = {location: new URL('https://braintime.example/internal/'), addEventListener() {}};
   const store = {getCloudStatus: signedOut, async signIn(identifier, password) { calls.push({identifier, password}); await waiting.promise; }};
   const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
-    .replace(/^export /gm, '')
+    .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = globalThis.testBackupLink;')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
+  const context = vm.createContext({URL, URLSearchParams, guestAllows, setTimeout, clearTimeout, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
   vm.runInContext(source, context);
   await context.mountPortal(document, window);
   assert.equal(element('backup-viewer').hidden,true);assert.equal(element('backup-viewer').innerHTML,'');assert.equal(calls.length,0);

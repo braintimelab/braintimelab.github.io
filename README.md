@@ -31,7 +31,7 @@ node scripts/sync-reagents-app.mjs /absolute/path/to/reagents-app
 node --test tests/*.test.mjs
 ```
 
-The script copies exactly `web/index.html`, `web/styles.css`, `web/app.js`, `web/model.js` and `web/manifest.webmanifest` into `reagents/`, then writes `reagents-files.txt`. It rejects unexpected destination files, symlinks and private credential markers. It does not deploy, copy the source workspace recursively, or copy database migrations, import bundles, raw exports or tests.
+The script copies the nine explicitly allowed public files (`index.html`, `styles.css`, `app.js`, `model.js`, `orders.js`, `usage.js`, `inventory-export.js`, `table-sort.js` and `manifest.webmanifest`) into `reagents/`, then writes `reagents-files.txt`. It rejects unexpected destination files, symlinks and private credential markers. It does not deploy, copy the source workspace recursively, or copy database migrations, import bundles, raw exports or tests.
 
 The database migration and RPC contract are maintained separately in `reagents-app/supabase/`. The offline `reagents-app/scripts/build-import.py` prepares source packages outside this public repository; a reviewed schema-version-1 JSON package can then be imported through Reagents Settings by the owner. Imports preserve source snapshots and report conflicts rather than silently replacing edited records. Static packaging, database deployment and successful source import are distinct steps; this README does not certify that an import has completed.
 
@@ -48,3 +48,9 @@ python3 -m http.server 8790 --bind 127.0.0.1
 ```
 
 Local previews can verify presentation and mocked authorization tests; username sign-in/reset use the configured production origin. Authenticate on the deployed HTTPS site for live use. Sending real invitations or reset emails requires a verified transactional mail sender in Supabase; ordinary member delivery is not enabled merely by publishing this website.
+
+## Lab tools portal
+
+`internal/` provides compact app descriptions and supported daily shortcuts. Sign-in checks and link requests have a 45-second UI deadline; timeouts never automatically resend an email or repeat a login. Retry checks the existing session. Visible passwords are concealed when the page is hidden or restored. Cloud 2 native app links stay usable during a Cloud 1 portal outage, with each destination enforcing its own access. Guest shortcuts follow the shared Guest policy; Google documents stay hidden from Guest accounts.
+
+The old `qpcr-calculator/` entry is a static moved notice for the current NAS `/qpcr/` app; it does not forward inputs or execute an old calculator. Run `node --test tests/internal-*.test.mjs tests/qpcr-moved.test.mjs tests/public-site.test.mjs tests/navigation.test.mjs` before publishing portal changes.
