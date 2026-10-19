@@ -415,10 +415,24 @@ async function establishMembershipOrSetup(action){
   // can read only its own membership/profile, without selecting a data source.
   const rows=await cloud1Request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,notes_permissions,mouse_permissions,reagents_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   action?.check();if(!Array.isArray(rows))throw new Error('Unable to verify colony access.');
-  if(rows.length){if(rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');await membership(action);return;}
+  if(rows.length){if(rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');await membership(action);await checkRegisteredUsernameSetup(action);return;}
   const profile=await cloud1Request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId}});
   action?.check();if(!setupProfileAllowed(profile))throw new Error('This account is not an active member of the configured colony.');
   saveSession({...session(),role:'pending',setupRequired:true});
+}
+// Check only during an explicit new sign-in, never during cached startup or
+// ordinary membership refresh. Existing approved access is unchanged: a real
+// unfinished roster claim opens its own setup form, while legacy accounts with
+// no roster and temporary profile-read failures keep their verified membership.
+async function checkRegisteredUsernameSetup(action){
+ const c=configuration(),s=session();if(!s?.user?.id||s.role==='owner')return;
+ let profile;try{profile=await cloud1Request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId},timeoutMs:5000});}
+ catch{action?.check();return;}
+ action?.check();
+ const person=profile?.member;
+ if(profile?.eligible===true&&profile.setup_required===true&&typeof person?.person_id==='string'&&person.person_id&&person.email===s.user.email?.trim().toLowerCase()&&!person.username){
+  saveSession({...session(),role:'pending',setupRequired:true});
+ }
 }
 // This deployment's resolver exposes no directory. Ordinary emails pass through;
 // a configured owner alias supplies the exact identity to verify after Auth.
@@ -545,8 +559,9 @@ export async function consumeAuthCallback(){
     // A local JWT decode only checks scope; the current project's Auth endpoint
     // authenticates the token. Persist only after that and membership both pass.
     saveSession({access_token:access,refresh_token:refresh,token_type:'bearer',expires_at:claims.exp,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},guestAccessStartsOn:member.guest_access_starts_on??null,guestAccessEndsOn:member.guest_access_ends_on??null,passwordRecovery:type==='recovery',permissions:type==='recovery'?{}:member.permissions||{},...appPermissionFields(member,true),setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
+    if(!pendingSetup&&type!=='recovery')await checkRegisteredUsernameSetup(action);
     pendingEmail=null;statusMessage=type==='recovery'?'Set a new password to finish account recovery.':'Signed in. Pull the shared colony to continue.';
-    return {...getCloudStatus(),needsPasswordSetup:pendingSetup||type==='invite'||type==='recovery'};
+    return {...getCloudStatus(),needsPasswordSetup:session()?.setupRequired===true||type==='invite'||type==='recovery'};
   }catch(error){
     if(!action.current())throw new Error('The account or cloud configuration changed. Start sign-in again.');
     saveSession(null);invalidate();

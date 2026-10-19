@@ -1,5 +1,5 @@
 import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=157';
-import * as store from '../mouse-data/data-store.js?v=160';
+import * as store from '../mouse-data/data-store.js?v=161';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
