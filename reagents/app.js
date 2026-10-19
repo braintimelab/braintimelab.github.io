@@ -3,13 +3,13 @@ import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137'
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
-import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';
+import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=6';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
 import {renderAccessLogs} from '../mouse-data/access-logs.js?v=137';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=113';
-import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=5';
-import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=2';
-import {SECTIONS,canReviewHistory,canViewHistory,canViewSection,visibleSections,canWriteKind,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=7';
+import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=7';
+import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=3';
+import {SECTIONS,canReviewHistory,canViewHistory,canViewSection,visibleSections,canWriteKind,STATUSES,labels,text,esc,safeURL,hazardous,quantity,itemName,itemClassification,usageSummary,usageInPeriod,filterItems,stockStats,numeric,usageEvent,validateBundle,importChunks,batchID,exportTable,mergeRecordFields,mergeSafety,collectPages,executeImport} from './model.js?v=8';
 
 const $=id=>document.getElementById(id), main=$('main'),PAGE=50;
 const CLASSIFICATIONS=['Antibody','Chemicals','Equipment','Optics / chamber','Plastic / Mol. bio','Surgical / animal','Consumable','Unclassified'];
@@ -20,6 +20,7 @@ const importControls=new Map();
 const tableSorts=new Map(),recordSortCache=new Map();
 let memberRows=[],memberAccessBaseline=new Map();
 let connectionState='checking',reloadPending=false,pendingWrites=0,cloudConnectionBusy=false,startupLoad=null;
+let inventoryLoaded=false,inventoryLoad=null;
 const readActions=new Set(['access','list','sources','observations','history','order_search','order_list','order_locations']);
 const inventoryScope=()=>section()==='safety'?'dangerous':'inventory';
 const inventorySort=()=>tableSorts.get(inventoryScope());
@@ -125,7 +126,7 @@ function showIdentity(account){
  $('identity').hidden=false;$('sidebar-account').hidden=false;$('sidebar-reload').hidden=false;
 }
 function resetPrivate(){
- connectionState='checking';usagePeople=null;
+ connectionState='checking';usagePeople=null;inventoryLoaded=false;inventoryLoad=null;
  closeExportPreview();$('sheet-import').hidden=true;$('sheet-import-dialog').close();$('import-preview').innerHTML='';
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();
  tableSorts.clear();recordSortCache.clear();memberRows=[];memberAccessBaseline.clear();
@@ -204,8 +205,7 @@ async function startOnce({force=false,resumeActivity=false}={}){
   showLoading('Checking Reagents access…',attempt);
   const access=await rpc('access');if(attempt!==generation)return;permissions=access.permissions;if(permissions.guest_level&&!canViewSection(permissions,section()))location.hash=visibleSections(permissions)[0]?.[0]||'settings';observeAccess(resumeActivity);
   showIdentity(checked);
-  showLoading('Loading inventory…',attempt);
-  const loaded=await loadInventory();if(attempt!==generation)return;items=loaded;items.forEach(r=>records.set(r.id,r));status();await render();
+  status();await render();
  }catch(err){if(attempt!==generation)return;accessActivity.reset();resetPrivate();signInView(err.message);}
 }
 // Returning to the tab must not advance the shared Auth generation while an
@@ -225,11 +225,25 @@ async function revalidateOrdersAccess(){const g=generation,refresh=refreshOrders
 async function revalidateDraftAccess(){const g=generation;try{await rpc('access');if(g===generation)observeAccess(true);}catch(error){if(g===generation&&member){if([401,403].includes(error.status)||error.reagentsAccessChanged)accessFailure(error);else status(error.message||'Access check unavailable. Your draft is retained.',true);}}}
 function returnToApp(){if(document.hidden){accessActivity.suspend();return;}if(startupLoad?.generation===generation)return startupLoad.promise;return importing?revalidateImportAccess():pendingWrites||hasUnsavedChanges()||$('editor').open?revalidateDraftAccess():disposeOrders?revalidateOrdersAccess():start({resumeActivity:true});}
 async function render(){if(!member)return;closeExportPreview();closeOrders();closeAccessLogs();clearTimeout(searchTimer);listKind=null;nav();observeAccess();const v=++viewGeneration;selected=null;showLoading('Opening '+(SECTIONS.find(s=>s[0]===section())?.[2]||'Reagents')+'…');try{
- const s=section();if(!canViewSection(permissions,s)){main.innerHTML='<div class="empty">This section is not available to your account.</div>';return;}if(s==='history'&&!ownerHistoryAccess()){main.innerHTML='<div class="empty">History is available only to the owner.</div>';return;}if(s==='review'&&!canReviewHistory(permissions)){main.innerHTML='<div class="empty">Review is available to the owner and managers.</div>';return;}if(s==='orders'){await ordersView(v);return;}if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
+ const s=section();if(!canViewSection(permissions,s)){main.innerHTML='<div class="empty">This section is not available to your account.</div>';return;}if(s==='history'&&!ownerHistoryAccess()){main.innerHTML='<div class="empty">History is available only to the owner.</div>';return;}if(s==='review'&&!canReviewHistory(permissions)){main.innerHTML='<div class="empty">Review is available to the owner and managers.</div>';return;}if(s==='orders'){await ordersView(v);return;}if(['inventory','safety','usage'].includes(s)){if(!inventoryLoaded)showLoading('Loading inventory…');await ensureInventory();if(v!==viewGeneration)return;}if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
  if(s==='history'){await historyView(v);return;}if(s==='settings'){await settingsView(v);return;}await recordList(v,s);
  }catch(err){if(v===viewGeneration){main.innerHTML='<section class="reagents-loading"><p role="alert">This view could not load.</p><button type="button" data-action="reload-reagents">Retry</button></section>';status(err.message,true);}}}
-async function loadInventory(){const kinds=['item','equipment'].filter(kind=>!permissions.guest_level||(kind==='equipment'?canViewSection(permissions,'equipment'):canViewSection(permissions,'inventory')||canViewSection(permissions,'safety')));if(!kinds.length)return [];const rows=await Promise.all(kinds.map(p_kind=>collect('list',{p_kind})));return [...new Map(rows.flat().map(row=>[row.id,row])).values()];}
-async function ordersView(v){const controller=createOrdersUI({main,rpc,getPermissions:()=>permissions,isCurrent:()=>member&&v===viewGeneration&&section()==='orders',notify:status,refreshInventory:async()=>{const loaded=await loadInventory();if(v!==viewGeneration)return;items=loaded;items.forEach(r=>records.set(r.id,r));},openHistory:async()=>{closeOrders();await recordList(++viewGeneration,'orders','order');}});disposeOrders=controller.dispose;refreshOrders=controller.refresh;await controller.mount();}
+async function loadInventory(){
+ const kinds=['item','equipment'].filter(kind=>!permissions.guest_level||(kind==='equipment'?canViewSection(permissions,'equipment'):canViewSection(permissions,'inventory')||canViewSection(permissions,'safety')));if(!kinds.length)return [];
+ const check=fence(),before=(await rpc('access')).permissions;check();
+ const rows=await Promise.all(kinds.map(p_kind=>collectPages(page=>rpc('list',page),{p_kind},check)));check();
+ const after=(await rpc('access')).permissions;check();
+ if(JSON.stringify(before)!==JSON.stringify(after)){const error=Error('Your access changed while loading. Refresh Reagents.');accessFailure(error);throw error;}
+ permissions=after;return [...new Map(rows.flat().map(row=>[row.id,row])).values()];
+}
+async function ensureInventory(){
+ if(inventoryLoaded)return items;
+ if(inventoryLoad?.generation===generation)return inventoryLoad.promise;
+ const check=fence(),request={generation,promise:null};inventoryLoad=request;
+ request.promise=(async()=>{const loaded=await loadInventory();check();items=loaded;items.forEach(row=>records.set(row.id,row));inventoryLoaded=true;return items;})();
+ try{return await request.promise;}finally{if(inventoryLoad===request)inventoryLoad=null;}
+}
+async function ordersView(v){const controller=createOrdersUI({main,rpc,getPermissions:()=>permissions,isCurrent:()=>member&&v===viewGeneration&&section()==='orders',notify:status,refreshInventory:async()=>{if(!inventoryLoaded)return;const loaded=await loadInventory();if(v!==viewGeneration)return;items=loaded;items.forEach(r=>records.set(r.id,r));},openHistory:async()=>{closeOrders();await recordList(++viewGeneration,'orders','order');}});disposeOrders=controller.dispose;refreshOrders=controller.refresh;await controller.mount();}
 function inventoryView(dangerous=false){
  const visible=sortRows(filterInventory(items,filters,dangerous),inventorySort(),inventoryValue);if(offset>=visible.length)offset=0;
  const cats=[...new Set(items.map(itemClassification).filter(Boolean))].sort(),locations=[...new Set(items.map(r=>r.payload.location).filter(Boolean))].sort();
@@ -371,7 +385,7 @@ async function runImport(bundle){
  try{
   report=await executeImport(bundle,{call:args=>rpc('import',args),check,onProgress:(i,n)=>status(`Importing ${i} of ${n} batches…`)});check();
   download(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}),'Braintime-Reagents-import-report.json');
-  const loaded=await loadInventory();check();items=loaded;recordSortCache.clear();records.clear();items.forEach(r=>records.set(r.id,r));
+  const loaded=await loadInventory();check();items=loaded;inventoryLoaded=true;recordSortCache.clear();records.clear();items.forEach(r=>records.set(r.id,r));
   if(v===viewGeneration&&$('import-preview'))$('import-preview').textContent=`Import complete: ${report.sources} new sources, ${report.records} new records, ${report.observations.toLocaleString()} new source rows; ${report.replayed_batches} batches already applied. ${report.conflicts.length} conflicts retained in the report.`;
   status(report.conflicts.length?'Import complete with conflicts. Review the downloaded report.':'Import complete.');
  }catch(error){
@@ -405,5 +419,5 @@ window.addEventListener('focus',()=>{if(document.hidden)return;if(startupLoad?.g
 window.addEventListener('pageshow',e=>{if(e.persisted)return returnToApp();});
 store.subscribeCloudConnections?.(()=>renderCloudConnections());
 function canMonitorClouds(){const account=store.getCloudStatus(),nasOnly=account.signedIn&&store.getCloudConnections?.()?.preferred==='cloud2';return !startupLoad&&!cloudConnectionBusy&&account.cloud2Configured&&(member||nasOnly)&&account.signedIn&&!account.setupRequired&&!account.passwordRecovery&&['owner','manager','editor','viewer'].includes(account.role)&&!document.hidden&&!importing&&!pendingWrites&&!reloadPending&&!hasUnsavedChanges()&&!document.querySelector('dialog[open]');}
-createCloudMonitor({getState:()=>store.getCloudConnections?.(),refresh:()=>store.refreshCloudConnections(),verifyPolicy:()=>store.verifyCloudMembership(),verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:canMonitorClouds,onDataChange:async()=>{if(!member){if(canMonitorClouds()&&store.getCloudConnections?.()?.active)await start();return;}const g=generation;const loaded=await loadInventory();if(cloudConnectionBusy||g!==generation||hasUnsavedChanges()||document.querySelector('dialog[open]'))return;items=loaded;records.clear();items.forEach(row=>records.set(row.id,row));recordSortCache.clear();await render();},onError:error=>{const state=store.getCloudConnections?.();if(error.reagentsAccessChanged||[401,403].includes(error.status)||!state?.active&&Object.values(state?.sources||{}).some(value=>value.state==='denied'))accessFailure(error);else updateConnectionIndicator('unavailable');}});
+createCloudMonitor({getState:()=>store.getCloudConnections?.(),refresh:()=>store.refreshCloudConnections(),verifyPolicy:()=>store.verifyCloudMembership(),verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:canMonitorClouds,onDataChange:async()=>{if(!member){if(canMonitorClouds()&&store.getCloudConnections?.()?.active)await start();return;}const g=generation;if(inventoryLoaded){const loaded=await loadInventory();if(cloudConnectionBusy||g!==generation||hasUnsavedChanges()||document.querySelector('dialog[open]'))return;items=loaded;records.clear();items.forEach(row=>records.set(row.id,row));}recordSortCache.clear();await render();},onError:error=>{const state=store.getCloudConnections?.();if(error.reagentsAccessChanged||[401,403].includes(error.status)||!state?.active&&Object.values(state?.sources||{}).some(value=>value.state==='denied'))accessFailure(error);else updateConnectionIndicator('unavailable');}});
 await start();

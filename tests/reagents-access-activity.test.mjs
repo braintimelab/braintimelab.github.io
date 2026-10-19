@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import * as model from '../reagents/model.js';
 import * as sorting from '../reagents/table-sort.js';
 import * as inventoryExports from '../reagents/inventory-export.js';
+import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js';
 import * as usage from '../reagents/usage.js';
 
 // Execute the published Reagents auth/lifecycle handlers with synthetic accounts.
@@ -19,7 +20,7 @@ function fixture({role='editor',route='orders',hidden=false,access,guestLevel=nu
  const store={getCloudStatus:()=>({...status}),verifyCloudMembership:async()=>{calls.push('verify');return {...status};},callReagents:async(action,args)=>{calls.push(action);if(action==='access')return access?access({permissions,status}):{permissions:{...permissions},members:[]};return {rows:[],total:0,next_offset:null};}};
  const document={hidden,getElementById:element,querySelector:()=>null,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentEvents.set(name,fn)};
  const location=new URL('https://synthetic.invalid/reagents/#'+route);
- const context=vm.createContext({...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,document,window:{addEventListener:(name,fn)=>windowEvents.set(name,fn)},location,console,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createOrdersUI:()=>({mount:async()=>calls.push('orders-mount'),refresh:async()=>calls.push('orders-refresh'),dispose(){}}),createAccessActivity:options=>({observe:page=>{if(options.getContext())activity.push({event:'observe',page});},resume:page=>{if(options.getContext())activity.push({event:'resume',page});},touch:page=>{if(options.getContext())activity.push({event:'touch',page});},suspend:()=>activity.push({event:'suspend'}),reset:()=>{},signOut:()=>{}})});
+ const context=vm.createContext({cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,document,window:{addEventListener:(name,fn)=>windowEvents.set(name,fn)},location,console,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createOrdersUI:()=>({mount:async()=>calls.push('orders-mount'),refresh:async()=>calls.push('orders-refresh'),dispose(){}}),createAccessActivity:options=>({observe:page=>{if(options.getContext())activity.push({event:'observe',page});},resume:page=>{if(options.getContext())activity.push({event:'resume',page});},touch:page=>{if(options.getContext())activity.push({event:'touch',page});},suspend:()=>activity.push({event:'suspend'}),reset:()=>{},signOut:()=>{}})});
  vm.runInContext(source.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+'\nglobalThis.app={start,render,returnToApp,setImporting,accessFailure,state:()=>({member,generation,importing}),invalidate:()=>{generation++;resetPrivate();}};',context);
  return {app:context.app,element,calls,activity,status,permissions,document,location,documentEvents,windowEvents};
 }

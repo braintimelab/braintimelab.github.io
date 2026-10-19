@@ -37,11 +37,11 @@ export function itemClassification(row) {
 }
 export function filterItems(rows,{query='',category='',classification='',status='',location='',dangerous=false}={}) {
   const q=query.trim().toLocaleLowerCase();
-  return rows.filter(r=>!r.archived&&(!category||itemClassification(r)===category)&&(!classification||itemClassification(r)===classification)&&(!status||r.payload.status===status)&&(!location||r.payload.location===location)&&(!dangerous||(r.kind!=='equipment'&&hazardous(r.payload)))&&(!q||text(r.payload).toLocaleLowerCase().includes(q))).sort((a,b)=>itemName(a).localeCompare(itemName(b))||a.id.localeCompare(b.id));
+  return rows.filter(r=>!r.archived&&(!category||itemClassification(r)===category)&&(!classification||itemClassification(r)===classification)&&(!status||r.payload.status===status)&&(!location||r.payload.location===location)&&(!dangerous||(itemClassification(r)!=='Equipment'&&hazardous(r.payload)))&&(!q||text(r.payload).toLocaleLowerCase().includes(q))).sort((a,b)=>itemName(a).localeCompare(itemName(b))||a.id.localeCompare(b.id));
 }
 export function stockStats(rows,today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'})) {
   const p=rows.filter(r=>!r.archived).map(r=>r.payload);
-  return {listed:p.length,needsCheck:p.filter(x=>!x.status||['listed_current','unverified'].includes(x.status)).length,dangerous:p.filter(hazardous).length,expired:p.filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x.expiry_date||'')&&x.expiry_date<today&&!['depleted','disposed','out_of_stock'].includes(x.status)).length};
+  return {listed:p.length,needsCheck:p.filter(x=>!x.status||['listed_current','unverified'].includes(x.status)).length,dangerous:rows.filter(r=>!r.archived&&itemClassification(r)!=='Equipment'&&hazardous(r.payload)).length,expired:p.filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x.expiry_date||'')&&x.expiry_date<today&&!['depleted','disposed','out_of_stock'].includes(x.status)).length};
 }
 export function numeric(value,label,{optional=true,min=0}={}) {
   if(text(value).trim()===''){if(optional)return null;throw Error(`${label} is required.`);}

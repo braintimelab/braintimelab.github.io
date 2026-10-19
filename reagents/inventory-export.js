@@ -1,4 +1,4 @@
-import {esc,hazardous,labels,quantity,safeURL,text} from './model.js';
+import {esc,hazardous,itemClassification,labels,quantity,safeURL,text} from './model.js?v=8';
 
 // The caller supplies only records already authorized by the server. This module
 // never fetches data, expands a filter, or includes raw source/history payloads.
@@ -19,7 +19,7 @@ function metadata(options={}) {
 
 function scopedRows(rows,dangerous) {
   if(!Array.isArray(rows))throw Error('Choose inventory records to export.');
-  const selected=rows.filter(row=>row?.kind==='item'&&!row.archived&&row.payload&&typeof row.payload==='object'&&!Array.isArray(row.payload)&&(!dangerous||hazardous(row.payload)));
+  const selected=rows.filter(row=>['item','equipment'].includes(row?.kind)&&!row.archived&&row.payload&&typeof row.payload==='object'&&!Array.isArray(row.payload)&&(!dangerous||(itemClassification(row)!=='Equipment'&&hazardous(row.payload))));
   if(!selected.length)throw Error('There are no matching items to export.');
   return selected;
 }

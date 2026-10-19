@@ -7,6 +7,7 @@ import * as model from '../reagents/model.js';
 import * as usage from '../reagents/usage.js';
 import * as sorting from '../reagents/table-sort.js';
 import * as inventoryExports from '../reagents/inventory-export.js';
+import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js';
 
 // Execute the deployed frontend, with its real models and synthetic DOM/RPCs.
 // No private lab data, browser storage, network or account credentials are used.
@@ -42,8 +43,8 @@ function fixture(overrides={}){
  const window={addEventListener:(event,fn)=>windowListeners.set(event,fn),print(){}};
  const location=new URL('https://synthetic.invalid/reagents/#usage');
  class TestURL extends URL{}TestURL.createObjectURL=()=> 'blob:synthetic';TestURL.revokeObjectURL=()=>{};
- const context=vm.createContext({...model,...usage,...sorting,...inventoryExports,store,PUBLIC_CONFIG:config,document,window,location,console,crypto:webcrypto,TextEncoder,TextDecoder,Blob,URL:TestURL,structuredClone,FormData,setTimeout,clearTimeout,createWorkbookXlsx:workbook=>{workbooks.push(clone(workbook));return new Blob(['synthetic']);},backupViewerLinkHTML:()=>'',createAccessActivity:()=>({observe(){},reset(){},signOut(){}}),createOrdersUI:()=>({mount:async()=>{},dispose(){}}),renderAccessLogs:()=>()=>{}});
- const expose=`\nglobalThis.app={editRecord,useRecord,selectUsageItem,loadUsagePeople,recordList,exportRows,resetPrivate,render,usageLogger,setFilters:value=>{filters={...filters,...value};},seed:rows=>{member=true;permissions=globalThis.fixturePermissions;items=rows;records=new Map(rows.map(row=>[row.id,row]));},submit:values=>editAction(values),invalidate:()=>{generation++;resetPrivate();},state:()=>({generation,viewGeneration,member,usagePeople:usagePeople?{key:usagePeople.key,directory:usagePeople.directory,mine:usagePeople.mine}:null,records:[...records.values()]})};`;
+ const context=vm.createContext({cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),...model,...usage,...sorting,...inventoryExports,store,PUBLIC_CONFIG:config,document,window,location,console,crypto:webcrypto,TextEncoder,TextDecoder,Blob,URL:TestURL,structuredClone,FormData,setTimeout,clearTimeout,createWorkbookXlsx:workbook=>{workbooks.push(clone(workbook));return new Blob(['synthetic']);},backupViewerLinkHTML:()=>'',createAccessActivity:()=>({observe(){},resume(){},touch(){},suspend(){},reset(){},signOut(){}}),createOrdersUI:()=>({mount:async()=>{},dispose(){}}),renderAccessLogs:()=>()=>{}});
+ const expose=`\nglobalThis.app={editRecord,useRecord,selectUsageItem,loadUsagePeople,recordList,exportRows,resetPrivate,render,usageLogger,setFilters:value=>{filters={...filters,...value};},seed:rows=>{member=true;permissions=globalThis.fixturePermissions;items=rows;inventoryLoaded=true;records=new Map(rows.map(row=>[row.id,row]));},submit:values=>editAction(values),invalidate:()=>{generation++;resetPrivate();},state:()=>({generation,viewGeneration,member,usagePeople:usagePeople?{key:usagePeople.key,directory:usagePeople.directory,mine:usagePeople.mine}:null,records:[...records.values()]})};`;
  context.fixturePermissions=permissions;vm.runInContext(appSource.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+expose,context);context.app.seed(structuredClone(overrides.inventory||inventory));
  const change=(name,value)=>{const fields=element('edit-fields'),input=fields.querySelector(`[name=${name}]`);assert.ok(input,`${name} must be present`);input.value=value;fields.onchange?.({target:input});};
  const search=value=>{const fields=element('edit-fields'),input=fields.querySelector('[name=usage_query]');input.value=value;input.selectionStart=value.length;fields.oninput({target:input});};
