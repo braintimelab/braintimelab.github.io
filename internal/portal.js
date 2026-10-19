@@ -1,4 +1,4 @@
-import {guestAllows} from '../mouse-data/guest-access.js?v=134';
+import {guestAllows} from '../mouse-data/guest-access.js?v=152';
 
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
 const MEMBER_LEVELS = new Set(['low', 'mid', 'mid1', 'mid2', 'high', 'max']);
@@ -191,7 +191,7 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=151');
+  const store = await import('../mouse-data/data-store.js?v=152');
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,
     navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),

@@ -1,4 +1,4 @@
-import {GUEST_LEVELS,GUEST_PERMISSION_KEYS,GUEST_LOCKED_FEATURES,guestPermissions,guestDefaults} from './guest-access.js?v=134';
+import {GUEST_LEVELS,GUEST_PERMISSION_KEYS,GUEST_LOCKED_FEATURES,GUEST_AVAILABILITY_MODES,guestPermissions,guestDefaults,guestAvailabilityDraft,guestAvailabilityInput,guestAvailabilityLabel} from './guest-access.js?v=152';
 /* Owner edits; managers have a filtered read-only directory. Authorization is enforced by the server for every request. */
 import {MANAGER_PERMISSION_LABELS,defaultManagerPermissions,normalizeManagerPermissions} from './permissions.js?v=100';
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -15,15 +15,17 @@ const statusName=status=>({active:'Active',invited:'Invited',disabled:'Inactive'
 const errorMessage=error=>error?.message||'The request could not be completed. Try again.';
 
 export async function renderUserManagement(container,hooks) {
-  const state={users:[],email:'',inviteRole:'viewer',inviteExportLevel:'low',roles:new Map(),levels:new Map(),permissions:new Map(),guestLevels:new Map(),guestOverrides:new Map(),invitePermissions:defaultManagerPermissions(),loading:true,busy:false,authorized:false,readOnly:false,error:'',notice:''};
+  const state={users:[],email:'',inviteRole:'viewer',inviteExportLevel:'low',roles:new Map(),levels:new Map(),permissions:new Map(),guestLevels:new Map(),guestOverrides:new Map(),guestAvailability:new Map(),invitePermissions:defaultManagerPermissions(),loading:true,busy:false,authorized:false,readOnly:false,error:'',notice:''};
   mounts.set(container,state);
   const current=()=>mounts.get(container)===state;
   const protectedUser=user=>state.readOnly||user.role==='owner'||!editableRoles.has(user.role)||user.status==='unavailable';
   const request=(action,payload={})=>hooks.manageColonyUsers(action,payload);
   const guestLevel=user=>state.guestLevels.has(user.user_id)?state.guestLevels.get(user.user_id):user.guest_level||null;
   const guestOverrides=user=>state.guestOverrides.get(user.user_id)||user.guest_permissions||{};
-  const guestChanged=user=>guestLevel(user)!==(user.guest_level||null)||JSON.stringify(guestOverrides(user))!==JSON.stringify(user.guest_permissions||{});
-  function guestFields(user){const id=escapeHTML(user.user_id),level=guestLevel(user),resolved=guestPermissions(level,guestOverrides(user));return `<details><summary>${escapeHTML(GUEST_LEVELS[user.guest_level]||'Guest access')}</summary><label>Guest level<select data-user-guest-level="${id}"${disabled()}><option value="">Not a guest</option>${Object.entries(GUEST_LEVELS).map(([key,label])=>`<option value="${key}"${key===level?' selected':''}>${label}</option>`).join('')}</select></label>${level?['notes','mouse','reagents'].map(app=>`<details><summary>${app==='notes'?'Lab Notes':app==='mouse'?'Mouse Data':'Reagents'}</summary>${GUEST_PERMISSION_KEYS.filter(k=>k.startsWith(app+'.')).map(key=>`<label style="display:block"><input type="checkbox" data-user-guest-permission="${key}" data-user-id="${id}"${resolved[key]?' checked':''}${disabled()||(GUEST_LOCKED_FEATURES.includes(key)?' disabled':'')}> ${escapeHTML(key.slice(app.length+1).replaceAll('_',' ').replaceAll('.',' · '))}</label>`).join('')}</details>`).join(''):''}<button type="button" class="button secondary" data-user-action="save-guest" data-user-id="${id}"${disabled()||(!guestChanged(user)?' disabled':'')}>Save guest access</button></details>`;}
+  const availabilityDraft=user=>state.guestAvailability.get(user.user_id)||guestAvailabilityDraft(user);
+  const guestChanged=user=>guestLevel(user)!==(user.guest_level||null)||JSON.stringify(guestOverrides(user))!==JSON.stringify(user.guest_permissions||{})||Boolean(guestLevel(user)&&state.guestAvailability.has(user.user_id));
+  function availabilityFields(user){const id=escapeHTML(user.user_id),draft=availabilityDraft(user);return `<fieldset class="compact-details"><legend>Availability</legend><div class="form-grid"><label>Availability<select data-user-guest-availability="mode" data-user-id="${id}"${disabled()}>${Object.entries(GUEST_AVAILABILITY_MODES).map(([key,label])=>`<option value="${key}"${draft.mode===key?' selected':''}>${label}</option>`).join('')}</select></label>${draft.mode==='range'?`<label>From<input type="date" min="1900-01-01" max="9999-12-31" data-user-guest-availability="startsOn" data-user-id="${id}" value="${escapeHTML(draft.startsOn)}" required${disabled()}></label>`:''}${draft.mode!=='unspecified'?`<label>Until${draft.mode==='range'?' (optional)':''}<input type="date" min="1900-01-01" max="9999-12-31" data-user-guest-availability="endsOn" data-user-id="${id}" value="${escapeHTML(draft.endsOn)}"${draft.mode==='until'?' required':''}${disabled()}></label>`:''}</div><p class="small muted">${escapeHTML(guestAvailabilityLabel(user))}. Dates use Taipei time, including the end date. On expiry, access is disabled and the account moves to Historical. Changing dates does not reactivate it.</p></fieldset>`;}
+  function guestFields(user){const id=escapeHTML(user.user_id),level=guestLevel(user),resolved=guestPermissions(level,guestOverrides(user));return `<details${guestChanged(user)?' open':''}><summary>${escapeHTML(GUEST_LEVELS[user.guest_level]||'Guest access')}</summary><label>Guest level<select data-user-guest-level="${id}"${disabled()}><option value="">Not a guest</option>${Object.entries(GUEST_LEVELS).map(([key,label])=>`<option value="${key}"${key===level?' selected':''}>${label}</option>`).join('')}</select></label>${level?availabilityFields(user)+['notes','mouse','reagents'].map(app=>`<details><summary>${app==='notes'?'Lab Notes':app==='mouse'?'Mouse Data':'Reagents'}</summary>${GUEST_PERMISSION_KEYS.filter(k=>k.startsWith(app+'.')).map(key=>`<label style="display:block"><input type="checkbox" data-user-guest-permission="${key}" data-user-id="${id}"${resolved[key]?' checked':''}${disabled()||(GUEST_LOCKED_FEATURES.includes(key)?' disabled':'')}> ${escapeHTML(key.slice(app.length+1).replaceAll('_',' ').replaceAll('.',' · '))}</label>`).join('')}</details>`).join(''):''}<button type="button" class="button secondary" data-user-action="save-guest" data-user-id="${id}"${disabled()||(!guestChanged(user)?' disabled':'')}>Save guest access</button></details>`;}
   const disabled=()=>state.loading||state.busy?' disabled':'';
 
   const savedPermissions=user=>user.role==='manager'?normalizeManagerPermissions(user.permissions):defaultManagerPermissions();
@@ -52,7 +54,7 @@ export async function renderUserManagement(container,hooks) {
     state.readOnly=result.viewer.role==='manager';state.users=result.users.filter(user=>!state.readOnly||user.role!=='owner'&&user.user_id!==result.viewer.user_id);state.authorized=!state.readOnly;
     state.roles.clear();
     state.levels.clear();
-    state.permissions.clear();state.guestLevels.clear();state.guestOverrides.clear();
+    state.permissions.clear();state.guestLevels.clear();state.guestOverrides.clear();state.guestAvailability.clear();
   }
 
   async function refresh() {
@@ -79,9 +81,11 @@ export async function renderUserManagement(container,hooks) {
     } finally {state.busy=false;paint()}
   }
 
-  container.oninput=event=>{if(event.target.id==='user-admin-email')state.email=event.target.value};
+  function captureAvailability(target){const key=target.dataset?.userGuestAvailability;if(!['mode','startsOn','endsOn'].includes(key)||!current()||!state.authorized||state.busy||state.loading)return false;const user=state.users.find(row=>row.user_id===target.dataset.userId);if(!user||protectedUser(user)||!guestLevel(user)||key==='mode'&&!Object.hasOwn(GUEST_AVAILABILITY_MODES,target.value))return false;state.guestAvailability.set(user.user_id,{...availabilityDraft(user),[key]:target.value});return true;}
+  container.oninput=event=>{if(captureAvailability(event.target))return;if(event.target.id==='user-admin-email')state.email=event.target.value};
   container.onchange=event=>{
     const target=event.target;
+    if(captureAvailability(target)){paint();return;}
     if(target.dataset?.userGuestLevel){const user=state.users.find(u=>u.user_id===target.dataset.userGuestLevel);if(user&&!protectedUser(user)){state.guestLevels.set(user.user_id,target.value||null);state.guestOverrides.set(user.user_id,{});paint();}return;}
     if(target.dataset?.userGuestPermission){const user=state.users.find(u=>u.user_id===target.dataset.userId),key=target.dataset.userGuestPermission;if(user&&!protectedUser(user)&&GUEST_PERMISSION_KEYS.includes(key)){state.guestOverrides.set(user.user_id,{...guestOverrides(user),[key]:target.checked===true});paint();}return;}
     if(target.id==='user-admin-email')state.email=target.value;
@@ -119,7 +123,7 @@ export async function renderUserManagement(container,hooks) {
     if(!current()||!state.authorized)return;
     const user=state.users.find(row=>row.user_id===target.dataset.userId);
     if(!user||protectedUser(user))return;
-    if(action==='save-guest'){state.busy=true;state.error='';paint();try{await hooks.setGuestAccess({user_id:user.user_id,guest_level:guestLevel(user),guest_permissions:guestOverrides(user),expected_updated_at:user.updated_at});state.notice='Guest access saved.';await reload();}catch(error){state.error=errorMessage(error);}finally{state.busy=false;paint();}return;}
+    if(action==='save-guest'){const availability=guestLevel(user)&&state.guestAvailability.has(user.user_id)?guestAvailabilityInput(availabilityDraft(user)):null;if(availability?.errors.length){state.error=availability.errors.join(' ');paint();return;}state.busy=true;state.error='';paint();try{await hooks.setGuestAccess({user_id:user.user_id,guest_level:guestLevel(user),guest_permissions:guestOverrides(user),expected_updated_at:user.updated_at,...(availability?.dates||{})});if(!current())return;state.notice='Guest access saved.';await reload();}catch(error){state.error=errorMessage(error);}finally{state.busy=false;paint();}return;}
     if(action==='save-access'){
       const role=state.roles.get(user.user_id)||user.role,level=state.levels.get(user.user_id)||savedExportLevel(user);
       if((role!==user.role||level!==savedExportLevel(user)||(role==='manager'&&permissionChanged(user)))&&editableRoles.has(role)&&validUserLevel(user,level))await change('update_access',{user_id:user.user_id,role,export_level:level,active:Boolean(user.active),...(role==='manager'?{permissions:{...selectedPermissions(user)}}:{})});

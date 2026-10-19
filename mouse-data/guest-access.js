@@ -12,6 +12,45 @@ export function guestDefaults(level){
 export const GUEST_LOCKED_FEATURES=Object.freeze(['notes.resources.read','notes.resources.write','notes.boards.create','notes.boards.member','notes.boards.images','notes.personal.images',...GUEST_PERMISSION_KEYS.filter(key=>key.startsWith('mouse.')&&key.endsWith('.write')&&key!=='mouse.cages.write')]);
 export function guestPermissions(level,overrides={}){const result=guestDefaults(level);for(const [key,value] of Object.entries(overrides||{}))if(Object.hasOwn(result,key)&&typeof value==='boolean')result[key]=value;for(const key of GUEST_LOCKED_FEATURES)result[key]=false;return result;}
 export function isGuest(context){return Object.hasOwn(GUEST_LEVELS,context?.guestLevel??context?.guest_level);}
-export function guestAllows(context,key){return !isGuest(context)||guestPermissions(context.guestLevel??context.guest_level,context.guestPermissions??context.guest_permissions)[key]===true;}
+export function guestAllows(context,key){return !isGuest(context)||guestAvailabilityStatus(context)==='active'&&guestPermissions(context.guestLevel??context.guest_level,context.guestPermissions??context.guest_permissions)[key]===true;}
 export function validateGuestPermissions(value){if(!value||typeof value!=='object'||Array.isArray(value))return ['Guest permissions must be an object.'];return Object.entries(value).filter(([k,v])=>!GUEST_PERMISSION_KEYS.includes(k)||typeof v!=='boolean').map(([k])=>'Unsupported guest permission: '+k);}
 export function mouseGuestMenu(section){return ({matings:'breeding',locobox:'housing'})[section]||section;}
+
+export const GUEST_AVAILABILITY_MODES=Object.freeze({unspecified:'Unspecified',until:'Until a date',range:'Date range'});
+const availabilityValue=(context,camel,snake)=>Object.hasOwn(context||{},camel)?context[camel]:context?.[snake];
+const availabilityBounds=context=>({guest_access_starts_on:availabilityValue(context,'guestAccessStartsOn','guest_access_starts_on'),guest_access_ends_on:availabilityValue(context,'guestAccessEndsOn','guest_access_ends_on')});
+const validAvailabilityDate=value=>{if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)||value<'1900-01-01')return false;const date=new Date(value+'T00:00:00.000Z');return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value;};
+export function validateGuestAvailability({guest_access_starts_on:start,guest_access_ends_on:end}={}){
+ const errors=[];
+ if(start!=null&&!validAvailabilityDate(start))errors.push('Enter a valid guest start date (YYYY-MM-DD).');
+ if(end!=null&&!validAvailabilityDate(end))errors.push('Enter a valid guest end date (YYYY-MM-DD).');
+ if(!errors.length&&start!=null&&end!=null&&start>end)errors.push('Guest end date must be on or after the start date.');
+ return errors;
+}
+export function guestAvailabilityStatus(context,now=Date.now()){
+ if(!isGuest(context))return 'active';
+ const bounds=availabilityBounds(context);if(validateGuestAvailability(bounds).length)return 'invalid';
+ let today;try{const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(now));const part=key=>parts.find(p=>p.type===key)?.value;today=`${part('year')}-${part('month')}-${part('day')}`;}catch{return 'invalid';}
+ if(bounds.guest_access_starts_on&&today<bounds.guest_access_starts_on)return 'not_started';
+ if(bounds.guest_access_ends_on&&today>bounds.guest_access_ends_on)return 'expired';
+ return 'active';
+}
+export function guestAvailabilityExpiresAt(context){
+ if(!isGuest(context))return null;
+ const bounds=availabilityBounds(context);if(validateGuestAvailability(bounds).length)return NaN;
+ return bounds.guest_access_ends_on==null?null:Date.parse(bounds.guest_access_ends_on+'T00:00:00+08:00')+86400000;
+}
+export function guestAvailabilityDraft(context){const bounds=availabilityBounds(context);return {mode:bounds.guest_access_starts_on!=null?'range':bounds.guest_access_ends_on!=null?'until':'unspecified',startsOn:bounds.guest_access_starts_on??'',endsOn:bounds.guest_access_ends_on??''};}
+export function guestAvailabilityInput(draft={}){
+ if(!Object.hasOwn(GUEST_AVAILABILITY_MODES,draft.mode))return {errors:['Choose guest availability.']};
+ const dates={guest_access_starts_on:draft.mode==='range'?draft.startsOn:null,guest_access_ends_on:draft.mode==='unspecified'?null:draft.endsOn||null};
+ const errors=validateGuestAvailability(dates);
+ if(draft.mode==='range'&&!draft.startsOn)errors.push('Choose the guest start date.');
+ if(draft.mode==='until'&&!draft.endsOn)errors.push('Choose the guest end date.');
+ return {dates,errors};
+}
+export function guestAvailabilityLabel(context,now=Date.now()){
+ const bounds=availabilityBounds(context),status=guestAvailabilityStatus(context,now);if(status==='invalid')return 'Availability needs review';
+ const start=bounds.guest_access_starts_on,end=bounds.guest_access_ends_on,label=start&&end?`${start} to ${end}`:start?`From ${start}, no expiry`:end?`Until ${end}`:'No expiry';
+ return (status==='not_started'?'Not started · ':status==='expired'?'Expired · ':'')+label;
+}

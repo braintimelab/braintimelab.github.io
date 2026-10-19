@@ -1,4 +1,4 @@
-import {isGuest,guestAllows,validateGuestPermissions} from './guest-access.js?v=134';
+import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=152';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
@@ -38,6 +38,20 @@ const configuration=()=>readJSON('localStorage',CONFIG_KEY);
 const session=()=>readJSON('sessionStorage',SESSION_KEY);
 const hasLabSession=(s=session())=>!!s?.access_token||!!(s?.user?.id&&cloud2Identity?.userId===s.user.id&&Date.parse(cloud2Identity.session_expires_at)>Date.now());
 const pendingAccount=s=>s?.role==='pending'||s?.setupRequired===true;
+function assertGuestAvailability(member){
+ const state=guestAvailabilityStatus(member);
+ if(state==='active')return;
+ const message=state==='expired'?'Your guest access has expired. Contact the lab manager.':state==='not_started'?'Your guest access has not started yet. Contact the lab manager.':'Guest availability could not be verified. Contact the lab manager.';
+ throw Object.assign(new Error(message),{code:'GUEST_ACCESS_'+state.toUpperCase(),guestAccessUnavailable:true});
+}
+function guestAvailabilityFields(payload){
+ const keys=['guest_access_starts_on','guest_access_ends_on'],changed=keys.some(key=>Object.hasOwn(payload,key));
+ if(!changed)return null;
+ if(!keys.every(key=>Object.hasOwn(payload,key)&&payload[key]!==undefined))throw new Error('Set both guest availability fields explicitly, using null for no expiry.');
+ const errors=validateGuestAvailability(payload);if(errors.length)throw new Error(errors.join(' '));
+ return {p_guest_access_starts_on:payload.guest_access_starts_on??null,p_guest_access_ends_on:payload.guest_access_ends_on??null};
+}
+
 const setupProfileAllowed=p=>!!p?.member&&(p.eligible===true&&p.setup_required===true||p.eligible!==true&&p.registration_allowed===true);
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
@@ -177,7 +191,7 @@ export function getCloudStatus(){
   const c=configuration(),s=session(),connections=operationalProvider?.getState()||null,activeCloud=connections?connections.active:synced?'cloud1':null;
   const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
   const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
-  return {configured:Boolean(c),signedIn:hasLabSession(s),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),readyForEdits:s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
+  return {configured:Boolean(c),signedIn:hasLabSession(s),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -222,7 +236,7 @@ async function accessToken(timeoutMs=30000){
   let s=session();if(!s?.access_token)throw new Error('Sign in before using cloud data.');
   if(s.expires_at<=Date.now()/1000+60){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{
+    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{
       if(current()){
         // An independent, verified NAS session does not depend on renewing
         // Supabase credentials. This failure still rejects the Cloud 1 action.
@@ -258,8 +272,8 @@ function provider(){
  const cloud1={idempotentWrites:true,
   async status(){
    const s=session(),c=configuration();if(!s?.access_token)return {state:'signed_out'};
-   for(let attempt=0;attempt<2;attempt++)try{const rows=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{timeoutMs:10000});
-    if(!Array.isArray(rows)||rows.length!==1||!rows[0].active)return {state:'denied'};
+   for(let attempt=0;attempt<2;attempt++)try{const rows=await cloud1Request(`memberships?select=role,active,guest_level,guest_access_starts_on,guest_access_ends_on&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{timeoutMs:10000});
+    if(!Array.isArray(rows)||rows.length!==1||!rows[0].active||guestAvailabilityStatus(rows[0])!=='active')return {state:'denied'};
     return {state:'online',userId:s.user.id,colonyId:c.colonyId,enrolled:true,ready:true,canRead:true,canWrite:true,pending:0,conflicts:0};
    }catch(error){const failure=providerFailure(error);if(attempt===0&&failure.code==='UNAVAILABLE')continue;throw failure;}
   },
@@ -285,12 +299,16 @@ function provider(){
 // Mouse Data opts in before bootstrap. Other apps keep their existing choices.
 export function setPrimaryCloudPolicy(){primaryCloudPolicy=true;return operationalProvider?.setPrimaryCloudPolicy()||null;}
 async function request(route,options={}){
- const service=provider();if(!service)return cloud1Request(route,options);
- if(!isCloudRead(route,options.method||'GET')&&!CLOUD_COMMAND_KINDS[route]){
+ const availabilityCheck=!route.startsWith('memberships?'),read=isCloudRead(route,options.method||'GET');
+ if(availabilityCheck)assertGuestAvailability(session());
+ const service=provider();let result;
+ if(!service)result=await cloud1Request(route,options);
+ else if(!read&&!CLOUD_COMMAND_KINDS[route]){
   if(service.getState().active==='cloud2'||!session()?.access_token)throw new Error('This action requires Cloud 1. Current records and purchases remain available on Cloud 2.');
-  return cloud1Request(route,options);
- }
- return service.request(route,options);
+  result=await cloud1Request(route,options);
+ }else result=await service.request(route,options);
+ if(availabilityCheck&&read)assertGuestAvailability(session());
+ return result;
 }
 const conflictBinding=()=>stable({user:session()?.user?.id,colony:configuration()?.colonyId,epoch:providerSessionEpoch,policy:verifiedIntentPolicy?.policyKey});
 export function getCloudConnections(){const state=provider()?.getState(),s=session();return state?{...state,canResetPassword:!!s?.access_token&&!s.passwordRecovery&&!pendingAccount(s)&&state.sources.cloud1.state==='online',conflictRows:cloud2ConflictPage.binding===conflictBinding()?clone(cloud2ConflictPage.rows):[],conflictNextAfter:cloud2ConflictPage.binding===conflictBinding()?cloud2ConflictPage.nextAfter:null}:null;}
@@ -313,8 +331,9 @@ export async function verifyCloudOperation(id){if(!verifiedIntentPolicy)await me
 export async function retryCloudOperation(id){await membership();return provider()?.retry(id);}
 export async function syncCloud2(){const service=provider();if(!service)throw new Error('Cloud 2 is not configured.');await service.cloud2.sync();return service.refresh();}
 function adoptCloud2Identity(identity){
+ assertGuestAvailability(identity);
  if(identity.colonyId!==configuration()?.colonyId||session()?.user?.id&&session().user.id!==identity.userId)throw new Error('Cloud 2 must use the same lab account.');
- if(!session()?.access_token)saveSession({user:{id:identity.userId,email:identity.email,user_metadata:{full_name:identity.name}},role:identity.role,exportLevel:identity.exportLevel,guestLevel:identity.guestLevel||null,guestPermissions:identity.guestPermissions||{},permissions:identity.permissions||{},username:identity.username,setupRequired:false,cloud2Only:true});
+ if(!session()?.access_token)saveSession({user:{id:identity.userId,email:identity.email,user_metadata:{full_name:identity.name}},role:identity.role,exportLevel:identity.exportLevel,guestLevel:identity.guestLevel||null,guestPermissions:identity.guestPermissions||{},guestAccessStartsOn:identity.guestAccessStartsOn??null,guestAccessEndsOn:identity.guestAccessEndsOn??null,permissions:identity.permissions||{},username:identity.username,setupRequired:false,cloud2Only:true});
 }
 export async function resumeCloud2Session(){
  const service=provider();if(!service)return false;
@@ -328,7 +347,7 @@ export async function connectCloud2({reset=false}={}){
  const check=()=>{if(epoch!==providerSessionEpoch||config!==stable(configuration()))throw new Error('The account changed. Connect Cloud 2 again.');};
  return openCloud2SignIn({url:cloud2URL(),check,reset,getEnrollmentToken:async()=>{
   if(!session()?.access_token)return null;
-  try{const rows=await cloud1Request(`memberships?select=active&user_id=eq.${encodeURIComponent(initialUser)}&colony_id=eq.${encodeURIComponent(configuration().colonyId)}`);check();if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true)throw new Error('Current lab membership is required to connect Cloud 2.');return accessToken();}
+  try{const rows=await cloud1Request(`memberships?select=active,guest_level,guest_access_starts_on,guest_access_ends_on&user_id=eq.${encodeURIComponent(initialUser)}&colony_id=eq.${encodeURIComponent(configuration().colonyId)}`);check();if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true)throw new Error('Current lab membership is required to connect Cloud 2.');assertGuestAvailability(rows[0]);return accessToken();}
   catch(error){check();if(!reset&&providerFailure(error).code==='UNAVAILABLE')return null;throw error;}
  },acceptSession:async token=>{
   check();service.cloud2.setBearer(token);const identity=await service.cloud2.status({});check();
@@ -342,13 +361,13 @@ export async function connectCloud2({reset=false}={}){
 async function membership(action){
   const c=configuration(),s=session();
   if(!s?.user?.id)throw new Error('The signed-in user is unavailable. Sign in again.');
-  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
   if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The cloud account or colony changed. Sign in again.');
-  action?.check();
-  if(stable({level:s.guestLevel||null,permissions:s.guestPermissions||{}})!==stable({level:rows[0].guest_level||null,permissions:rows[0].guest_permissions||{}})){invalidate();feeVisibility=null;feeVisibilityContext=null;await local('delete');}
-  saveSession({...session(),role:rows[0].role,guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},permissions:rows[0].permissions||{},setupRequired:false,exportLevel:rows[0].role==='owner'?'max':rows[0].export_level||'low'});
-  verifiedIntentPolicy={policyKey:stable({role:rows[0].role,exportLevel:rows[0].export_level||'low',permissions:rows[0].permissions||{},guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},updatedAt:rows[0].updated_at||null})};
+  action?.check();assertGuestAvailability(rows[0]);
+  if(stable({level:s.guestLevel||null,permissions:s.guestPermissions||{},starts:s.guestAccessStartsOn??null,ends:s.guestAccessEndsOn??null})!==stable({level:rows[0].guest_level||null,permissions:rows[0].guest_permissions||{},starts:rows[0].guest_access_starts_on??null,ends:rows[0].guest_access_ends_on??null})){invalidate();feeVisibility=null;feeVisibilityContext=null;await local('delete');}
+  saveSession({...session(),role:rows[0].role,guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},guestAccessStartsOn:rows[0].guest_access_starts_on??null,guestAccessEndsOn:rows[0].guest_access_ends_on??null,permissions:rows[0].permissions||{},setupRequired:false,exportLevel:rows[0].role==='owner'?'max':rows[0].export_level||'low'});
+  verifiedIntentPolicy={policyKey:stable({role:rows[0].role,exportLevel:rows[0].export_level||'low',permissions:rows[0].permissions||{},guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},guestAccessStartsOn:rows[0].guest_access_starts_on??null,guestAccessEndsOn:rows[0].guest_access_ends_on??null,updatedAt:rows[0].updated_at||null})};
   await provider()?.restore();return rows[0].role;
 }
 // A live, data-free access check for the internal tools portal. Cached roles
@@ -384,7 +403,7 @@ async function establishMembershipOrSetup(action){
   const c=configuration(),s=session();
   // Account setup precedes scientific access. Its verified Cloud 1 identity
   // can read only its own membership/profile, without selecting a data source.
-  const rows=await cloud1Request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const rows=await cloud1Request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   action?.check();if(!Array.isArray(rows))throw new Error('Unable to verify colony access.');
   if(rows.length){if(rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');await membership(action);return;}
   const profile=await cloud1Request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId}});
@@ -436,11 +455,11 @@ export async function connectCloud1(email,password,{signal}={}){
  const headers={apikey:publicKey(c?.anonKey),Authorization:`Bearer ${candidate.access_token}`};
  const {response:verified,result:user}=await cloudJSON(`${c.url}/auth/v1/user`,{headers,cache:'no-store',redirect:'error'});check();
  if(!verified.ok||user?.id!==candidate.user?.id||user.is_anonymous||!user.email_confirmed_at)throw new Error('Your Cloud 1 sign-in could not be verified.');
- const {response,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});check();
+ const {response,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});check();
  if(!response.ok)throw apiError(response,rows);
  if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
- const member=rows[0];if(identity?.alias&&member.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');
- check();saveSession({...candidate,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},permissions:member.permissions||{},setupRequired:false,exportLevel:member.role==='owner'?'max':member.export_level||'low'});invalidate();
+ const member=rows[0];assertGuestAvailability(member);if(identity?.alias&&member.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');
+ check();saveSession({...candidate,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},guestAccessStartsOn:member.guest_access_starts_on??null,guestAccessEndsOn:member.guest_access_ends_on??null,permissions:member.permissions||{},setupRequired:false,exportLevel:member.role==='owner'?'max':member.export_level||'low'});invalidate();
  // Keep the NAS adapter and its bearer. Changing Cloud 1 credentials is not a
  // request to move an existing workspace to a different data source.
  if(service){if(preferred)service.choose(preferred);await service.refresh();}
@@ -501,7 +520,7 @@ export async function consumeAuthCallback(){
     action.check();if(!verified.ok)throw new Error('The cloud project rejected this sign-in link. Request a new link.');
     action.check();
     if(user?.id!==claims.sub||user.is_anonymous)throw new Error('The cloud project could not verify this account.');
-    const {response:membershipResponse,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store'});
+    const {response:membershipResponse,result:rows}=await cloudJSON(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,updated_at&user_id=eq.${encodeURIComponent(user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store'});
     action.check();if(!membershipResponse.ok)throw new Error('Unable to verify colony membership. Sign in again or contact the colony owner.');
     action.check();
     let pendingSetup=false;
@@ -510,12 +529,12 @@ export async function consumeAuthCallback(){
       action.check();pendingSetup=profileResponse.ok&&setupProfileAllowed(profile);
     }
     if(!pendingSetup&&(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role)))throw new Error('This account is not an active member of the configured colony.');
-    const member=rows[0]||{role:'pending',permissions:{},export_level:null};
+    const member=rows[0]||{role:'pending',permissions:{},export_level:null};assertGuestAvailability(member);
     action.check();
     if(type==='recovery'){await local('delete');await clearHistoryIndex();action.check();setStorage('localStorage',CLOUD_CACHE_KEY,null);}
     // A local JWT decode only checks scope; the current project's Auth endpoint
     // authenticates the token. Persist only after that and membership both pass.
-    saveSession({access_token:access,refresh_token:refresh,token_type:'bearer',expires_at:claims.exp,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},passwordRecovery:type==='recovery',permissions:type==='recovery'?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
+    saveSession({access_token:access,refresh_token:refresh,token_type:'bearer',expires_at:claims.exp,user,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},guestAccessStartsOn:member.guest_access_starts_on??null,guestAccessEndsOn:member.guest_access_ends_on??null,passwordRecovery:type==='recovery',permissions:type==='recovery'?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
     pendingEmail=null;statusMessage=type==='recovery'?'Set a new password to finish account recovery.':'Signed in. Pull the shared colony to continue.';
     return {...getCloudStatus(),needsPasswordSetup:pendingSetup||type==='invite'||type==='recovery'};
   }catch(error){
@@ -1227,7 +1246,7 @@ function checkedExportPermission(value){
   if(!value||!['low','mid','mid1','mid2','high','max'].includes(value.level)||!exportDate(value.as_of_date)||value.full_history!==(value.level==='max')||(value.level==='max'?value.cutoff_date!==null:!exportDate(value.cutoff_date)))throw new Error('Export permission could not be verified. Reload and try again.');
   return value;
 }
-function exportContext(){const c=configuration();return stable({url:c?.url,colony:c?.colonyId,user:session()?.user?.id,guestLevel:session()?.guestLevel,guestPermissions:session()?.guestPermissions,mode:mode(),demo:getStorage('localStorage',DEMO_KEY),source:providerSource||'cloud1'});}
+function exportContext(){const c=configuration();return stable({url:c?.url,colony:c?.colonyId,user:session()?.user?.id,guestLevel:session()?.guestLevel,guestPermissions:session()?.guestPermissions,guestAccessStartsOn:session()?.guestAccessStartsOn??null,guestAccessEndsOn:session()?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(session()),mode:mode(),demo:getStorage('localStorage',DEMO_KEY),source:providerSource||'cloud1'});}
 function checkExportContext(context){if(exportContext()!==context)throw new Error('Your account or colony changed. Reopen Export.');}
 async function localExportDataset(){
   // A configured real colony always rechecks server permission, including after
@@ -1471,7 +1490,7 @@ export async function manageColonyUsers(action,payload={}) {
   // Account administration belongs to Cloud 1 even while scientific records
   // use Cloud 2. Prove its live membership without replacing the active NAS
   // session, provider choice or pending-edit policy with another source.
-  const members=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const members=await cloud1Request(`memberships?select=role,active,guest_level,guest_access_starts_on,guest_access_ends_on&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
   if(!Array.isArray(members)||members.length!==1||members[0].active!==true||!['owner','manager','editor','viewer'].includes(members[0].role))throw new Error('This account is not an active member of the configured colony.');
   const verifiedRole=members[0].role;
   if(action==='list'?!['owner','manager'].includes(verifiedRole):verifiedRole!=='owner')throw new Error(action==='list'?'Only an active colony owner or manager can view users.':'Only an active colony owner can manage users.');
@@ -1643,9 +1662,10 @@ export async function listCageNoteHints(){
 }
 export async function saveLabMember(person){
  if(await membership()!=='owner')throw new Error('Only the owner can edit lab-member records.');
- const {guest_level,guest_permissions,...profile}=person;
- const hasGuest=Object.hasOwn(person,'guest_level');
- return request(hasGuest?'rpc/save_guest_lab_member':'rpc/save_lab_member',{method:'POST',body:hasGuest?{p_colony_id:configuration().colonyId,p_person:profile,p_guest_level:guest_level||null,p_guest_permissions:guest_permissions||{}}:{p_colony_id:configuration().colonyId,p_person:profile}});
+ const {guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,...profile}=person;
+ const hasGuest=Object.hasOwn(person,'guest_level'),availability=guestAvailabilityFields(person);
+ if(availability&&!hasGuest)throw new Error('Choose the guest profile before changing guest availability.');
+ return request(availability?'rpc/save_guest_lab_member_window':hasGuest?'rpc/save_guest_lab_member':'rpc/save_lab_member',{method:'POST',body:hasGuest?{p_colony_id:configuration().colonyId,p_person:profile,p_guest_level:guest_level||null,p_guest_permissions:guest_permissions||{},...availability}:{p_colony_id:configuration().colonyId,p_person:profile}});
 }
 export async function approveLabMemberEmail(payload){
  const keys=['request_person_id','request_version','target_person_id','target_version'];
@@ -1837,7 +1857,7 @@ export async function completePasswordRecovery(password){
   const result=await responseJSON(response);check();
   if(!response.ok||result?.user?.id!==signedIn.user.id||result.user.is_anonymous||!result.user.email_confirmed_at)throw new Error('verification');
   const next=normalizeSession(result),headers={apikey:publicKey(c.anonKey),Authorization:`Bearer ${next.access_token}`};
-  const memberResponse=await fetch(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,updated_at&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});
+  const memberResponse=await fetch(`${c.url}/rest/v1/memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,updated_at&user_id=eq.${encodeURIComponent(signedIn.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{headers,cache:'no-store',redirect:'error'});
   const rows=await responseJSON(memberResponse);check();
   if(!memberResponse.ok||!Array.isArray(rows))throw new Error('membership');
   let pendingSetup=false;
@@ -1846,8 +1866,8 @@ export async function completePasswordRecovery(password){
    const profile=await responseJSON(profileResponse);check();pendingSetup=profileResponse.ok&&setupProfileAllowed(profile);
   }
   if(!pendingSetup&&(rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role)))throw new Error('membership');
-  const member=rows[0]||{role:'pending',permissions:{},export_level:null};check();
-  saveSession({...next,passwordRecovery:false,passwordRecoveryUpdated:false,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},permissions:pendingSetup?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
+  const member=rows[0]||{role:'pending',permissions:{},export_level:null};assertGuestAvailability(member);check();
+  saveSession({...next,passwordRecovery:false,passwordRecoveryUpdated:false,role:member.role,guestLevel:member.guest_level||null,guestPermissions:member.guest_permissions||{},guestAccessStartsOn:member.guest_access_starts_on??null,guestAccessEndsOn:member.guest_access_ends_on??null,permissions:pendingSetup?{}:member.permissions||{},setupRequired:pendingSetup,exportLevel:pendingSetup?null:member.role==='owner'?'max':member.export_level||'low'});
   pendingEmail=null;invalidate();statusMessage='Password saved and sign-in verified.';
   // Do not call global logout here: it would revoke the newly verified session.
   return {updated:true,signedIn:true,message:statusMessage};
@@ -1878,13 +1898,15 @@ async function saveGuestDataset(dataset,{readDependencies=[]}={}){
  if(!pending.length)return;if(pending.length>500||utf8Size(pending)>MAX_RPC_BYTES)throw new Error('Split this cage edit into smaller changes.');
  await request('rpc/save_guest_mouse_records',{method:'POST',body:{p_colony_id:configuration().colonyId,p_changes:pending}});check();await pullFromCloud({deferHistory:true});
 }
-export async function setGuestAccess({user_id,guest_level,guest_permissions={},expected_updated_at}={}){
+export async function setGuestAccess(payload={}){
+ const {user_id,guest_level,guest_permissions={},expected_updated_at}=payload,availability=guestAvailabilityFields(payload);
  if(await membership()!=='owner')throw new Error('Only the owner can change guest access.');
  if(guest_level!==null&&!['guest1','guest2','guest3'].includes(guest_level)||validateGuestPermissions(guest_permissions).length)throw new Error('Choose a valid guest level and permissions.');
- return request('rpc/set_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_user_id:user_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_updated_at:expected_updated_at}});
+ return request(availability?'rpc/set_guest_access_window':'rpc/set_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_user_id:user_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_updated_at:expected_updated_at,...availability}});
 }
-export async function setPreregisteredGuestAccess({person_id,guest_level,guest_permissions={},expected_version}={}){
+export async function setPreregisteredGuestAccess(payload={}){
+ const {person_id,guest_level,guest_permissions={},expected_version}=payload,availability=guestAvailabilityFields(payload);
  if(await membership()!=='owner')throw new Error('Only the owner can change guest access.');
  if(guest_level!==null&&!['guest1','guest2','guest3'].includes(guest_level)||validateGuestPermissions(guest_permissions).length)throw new Error('Choose a valid guest level and permissions.');
- return request('rpc/set_preregistered_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_person_id:person_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_version:expected_version}});
+ return request(availability?'rpc/set_preregistered_guest_access_window':'rpc/set_preregistered_guest_access',{method:'POST',body:{p_colony_id:configuration().colonyId,p_person_id:person_id,p_guest_level:guest_level,p_guest_permissions:guest_permissions,p_expected_version:expected_version,...availability}});
 }
