@@ -1,6 +1,6 @@
-import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=118';
+import {explicitCreName,legacyVgatCreName} from './strain-registry.js?v=146';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { mouseLineAssignments } from './mouse-summary.js?v=118';
+import { mouseLineAssignments } from './mouse-summary.js?v=146';
 import { validateGeneticProfile } from './genotype-schema.js?v=100';
 
 const text=value=>typeof value==='string'?value:'';

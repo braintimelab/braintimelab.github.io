@@ -1,3 +1,4 @@
+import {canonicalCombinedGenotype} from './strain-registry.js?v=146';
 import {predictCross} from './genetics.js?v=100';
 import {getBreedingGuidance} from './breeding-guidance.js?v=121';
 
@@ -34,7 +35,7 @@ export function popularBreedingPresets(catalogue=[]){
    if(!source||source.reviewRequired||source.name!==definition.name||source.kind!==definition.kind||!Array.isArray(source.alleles)||source.alleles.length!==2||!definition.alleles.every(allele=>source.alleles.includes(allele))){missing.push(definition.name);return null;}
    return {id,name:source.name,kind:source.kind,chromosome:source.chromosome,alleles:[...definition.alleles]};
   });
-  return {...clone(family),loci:loci.filter(Boolean),missing};
+  return {...clone(family),label:canonicalCombinedGenotype(family.label)||family.label,loci:loci.filter(Boolean),missing};
  });
 }
 export function presetScenario(preset){

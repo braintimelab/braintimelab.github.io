@@ -1,10 +1,10 @@
 /* Current-month forecasts from physical cage cards. No source label creates a
  * Mouse identity, historical occupancy interval, or SPF arrival date. */
-import {projectAnimalSheet} from './animal-sheet-export.js?v=132';
+import {projectAnimalSheet} from './animal-sheet-export.js?v=146';
 import {cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=100';
-import {resolveCageStart,validCageStartDate,isCageLitterPlaceholder} from './cage-start.js?v=118';
-import {classifyAnimalSheetBreedingBlock,sourceChangeBlocks} from './breeding-summary.js?v=118';
-import {mouseLineAssignments} from './mouse-summary.js?v=118';
+import {resolveCageStart,validCageStartDate,isCageLitterPlaceholder} from './cage-start.js?v=146';
+import {classifyAnimalSheetBreedingBlock,sourceChangeBlocks} from './breeding-summary.js?v=146';
+import {mouseLineAssignments} from './mouse-summary.js?v=146';
 
 const defs={clean_room:'cage',rat_locobox:'cage',spf_room:'mouse'};
 const list=v=>Array.isArray(v)?v.filter(r=>r&&typeof r==='object'&&!Array.isArray(r)):[];

@@ -1,7 +1,7 @@
 import { buildCryoActivity, cryoSourceLotId } from './cryopreservation-model.js?v=132';
 import { discoverCryoSources } from './cryo-sources.js?v=100';
 import { strainCodesForCryo } from './strain-cryo-links.js?v=118';
-import { STRAIN_ACRONYMS } from './strain-registry.js?v=118';
+import { STRAIN_ACRONYMS } from './strain-registry.js?v=146';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

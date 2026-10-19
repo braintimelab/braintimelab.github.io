@@ -1,7 +1,7 @@
 /* Desired offspring targets only. This bridge never supplies parental calls. */
 import { rankPairs } from './genetics.js?v=100';
-import { discoverGenotypes } from './genotype-catalog.js?v=118';
-import {canonicalLocusName,explicitCreName,FOXJ1_STRAIN_NAME,FOXJ1_STRAIN_ALIASES} from './strain-registry.js?v=118';
+import { discoverGenotypes } from './genotype-catalog.js?v=146';
+import {canonicalLocusName,explicitCreName,FOXJ1_STRAIN_NAME,FOXJ1_STRAIN_ALIASES} from './strain-registry.js?v=146';
 
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const clone=value=>structuredClone(value);

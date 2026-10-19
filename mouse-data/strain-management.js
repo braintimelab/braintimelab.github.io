@@ -1,4 +1,4 @@
-import { getStrainRegistry, buildStrainDefinition, INSERTION_TYPES, STRAIN_DETAIL_FIELDS, strainNamingHelpHTML } from './strain-registry.js?v=118';
+import { getStrainRegistry, buildStrainDefinition, INSERTION_TYPES, STRAIN_DETAIL_FIELDS, strainNamingHelpHTML } from './strain-registry.js?v=146';
 import { getStrainCryoLinks } from './strain-cryo-links.js?v=118';
 
 const mounts=new WeakMap();
@@ -62,7 +62,7 @@ export function renderStrainManagement(container,dataset,hooks) {
     const selected=rows.find(row=>row.key===state.selected)||rows[0];
     const draft=state.drafts.get(selected.key),value=draft?.values||values(selected);
     container.innerHTML=`<section class="panel strain-management" aria-labelledby="strain-management-title"${state.busy?' aria-busy="true"':''}>
-      <div class="panel-head"><h2 id="strain-management-title">Strain registry</h2>${editable?'':'<span class="badge">Read only</span>'}</div>
+      <div class="panel-head"><h2 id="strain-management-title">Strain registry</h2><span class="small muted" title="Combined genotype order">AD → Cre → flox → reporter</span>${editable?'':'<span class="badge">Read only</span>'}</div>
       ${state.error?`<p class="alert error" role="alert">${esc(state.error)}</p>`:''}${state.notice?`<p class="banner" role="status">${esc(state.notice)}</p>`:''}
       <div class="strain-library">
         <div class="strain-directory"><label class="sr-only" for="strain-search">Search strains</label><input id="strain-search" type="search" data-strain-search value="${esc(state.query)}" placeholder="Search strains"${disabled}>

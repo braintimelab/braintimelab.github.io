@@ -46,7 +46,7 @@ export function strainNamingWarning(locus){
   if(legacyVgatCreName(name))return 'Vgat-CRE is a legacy lab name for Vgat-flox. Explicit floxed-allele evidence is required; old Cre +/- notation does not establish flox zygosity.';
   return /^Vgat-CreERT?2?$/i.test(name||'')?'This Vgat Cre variant is not covered by the lab’s Vgat-CRE alias. Review the original stock or allele.':'';
 }
-export function strainNamingHelpHTML(){return '<p class="subtle">Laboratory names: Bmal1 = Bmal1-flox; Meis1 = Meis1-flox; Vgat = Vgat-flox (Vg). Meis1-flox has no confirmed shorthand. Bmal1-ELuc (E) is separate. F = FoxJ1-CreERT2 (JAX 027012); FoxJ1-Cre and FoxJ-Cre are legacy names. Vgat-CRE is a legacy lab name for Vgat-flox; old Cre +/- notation does not establish flox zygosity. Saved Cre models require review before conversion. Original source text is preserved.</p>';}
+export function strainNamingHelpHTML(){return '<p class="subtle">Combined genotypes: AD → Cre → flox → reporter. Within these groups: AD; A, F, V, Gt (other driver); B, Vg; P, E, 32, 96. A prime marks homozygosity, parentheses mark pending confirmation. Example: Avp-Cre/+ and Bmal1 fl/fl = AB\'. Bare source acronyms do not establish zygosity.</p><p class="subtle">Laboratory names: Bmal1 = Bmal1-flox; Meis1 = Meis1-flox; Vgat = Vgat-flox (Vg). Meis1-flox has no confirmed shorthand. Bmal1-ELuc (E) is separate. F = FoxJ1-CreERT2 (JAX 027012); FoxJ1-Cre and FoxJ-Cre are legacy names. Vgat-CRE is a legacy lab name for Vgat-flox; old Cre +/- notation does not establish flox zygosity. Saved Cre models require review before conversion. Original source text is preserved.</p>';}
 
 const definition=(key,name,insertionType='unknown',notes='',origin='Animal Sheet legend',stockReference='')=>Object.freeze({key,name,insertionType,notes,origin,stockReference});
 export const STRAIN_ACRONYMS=Object.freeze([
@@ -62,6 +62,102 @@ export const STRAIN_ACRONYMS=Object.freeze([
   definition('Gt','GAD67-tTA'),
   definition('96','Ai96')
 ]);
+// A display convention, independent of registry presentation and saved locus IDs.
+// Gt is a tTA driver, grouped after the Cre drivers; it is not a Cre allele.
+export const LAB_STRAIN_CODE_ORDER=Object.freeze(['AD','A','F','V','Gt','B','Vg','P','E','32','96']);
+const codeRank=new Map(LAB_STRAIN_CODE_ORDER.map((code,index)=>[code,index]));
+const compactToken=/AD|Vg|Gt|WT|32|96|[PEBFVA]/y;
+const normGenotype=value=>typeof value==='string'?value.toLowerCase().replace(/[^a-z0-9]/g,''):'';
+const wildAllele=value=>typeof value==='string'&&/^(?:\+|wt|wild[- ]?type)$/i.test(value.trim());
+
+function compactEntries(value){
+  const input=value.trim().replace(/[‘’′]/g,"'");let at=0,valid=true;
+  function sequence(group=false){
+    const entries=[];
+    while(at<input.length){
+      if(/\s/.test(input[at])){at++;continue;}
+      if(input[at]===')'){if(!group){valid=false;return entries;}at++;return entries;}
+      if(input[at]==='('){at++;entries.push(...sequence(true).map(entry=>({...entry,presence:'uncertain'})));continue;}
+      compactToken.lastIndex=at;const match=compactToken.exec(input);
+      if(!match){valid=false;return entries;}
+      at+=match[0].length;const entry={code:match[0],presence:'present',dosage:'unknown'};
+      const pending=input.slice(at).match(/^\(\s*'+\s*\)/);
+      if(pending){entry.dosageUncertain=true;at+=pending[0].length;}
+      else if(input[at]==="'"){entry.dosage='homozygous';while(input[at]==="'")at++;}
+      if(input[at]==='?'){entry.presence='uncertain';at++;}
+      entries.push(entry);
+    }
+    if(group)valid=false;
+    return entries;
+  }
+  const result=sequence();return valid&&at===input.length?result:null;
+}
+
+/** Canonical display only. Unknown codes or contradictory duplicate calls fail
+ * closed; pending presence/dosage remains pending. Source records are untouched. */
+export function canonicalCombinedGenotype(value){
+  if(typeof value==='string'&&value.length>512||Array.isArray(value)&&value.length>32)return null;
+  const entries=typeof value==='string'?compactEntries(value):Array.isArray(value)?value:null;
+  if(!entries?.length)return null;
+  const calls=new Map();
+  for(const entry of entries){
+    if(!entry||!codeRank.has(entry.code)&&entry.code!=='WT')return null;
+    if(entry.presence!==undefined&&!['present','uncertain'].includes(entry.presence))return null;
+    if(entry.dosage!==undefined&&!['unknown','heterozygous','homozygous'].includes(entry.dosage))return null;
+    if(entry.dosageUncertain!==undefined&&typeof entry.dosageUncertain!=='boolean'||entry.dosageUncertain&&entry.dosage==='homozygous')return null;
+    const marker=entry.dosageUncertain?"(')":entry.dosage==='homozygous'?"'":'';
+    const token=entry.presence==='uncertain'?`(${entry.code}${marker})`:`${entry.code}${marker}`;
+    if(calls.has(entry.code)&&calls.get(entry.code)!==token)return null;
+    calls.set(entry.code,token);
+  }
+  if(calls.has('WT'))return calls.size===1&&calls.get('WT')==='WT'?'WT':null;
+  return [...calls].sort(([a],[b])=>codeRank.get(a)-codeRank.get(b)).map(([,token])=>token).join('');
+}
+
+const targetDefinitions=Object.freeze([
+  {code:'AD',kind:'other',names:['app-ps1','APP/PS1','Tg(APPswe,PSEN1dE9)85Dbo'],variants:['APP/PS1','Tg(APPswe,PSEN1dE9)85Dbo']},
+  {code:'A',kind:'cre',names:['avp-cre','AvpCre'],variants:['Avp-Cre','AvpCre']},
+  {code:'F',kind:'cre',names:['foxj1-cre',...FOXJ1_STRAIN_ALIASES],variants:[...FOXJ1_STRAIN_ALIASES]},
+  {code:'V',kind:'cre',names:['vip-cre','VipCre'],variants:['Vip-Cre','VipCre']},
+  {code:'Gt',kind:'other',names:['gad67-tta','GAD67-tTA2'],variants:['GAD67-tTA','GAD67-tTA2']},
+  {code:'B',kind:'flox',names:['bmal1','Bmal1-flox'],variants:['fl','f','flox','floxed']},
+  {code:'Vg',kind:'flox',names:['vgat','Vgat-flox'],variants:['fl','f','flox','floxed']},
+  {code:'P',kind:'reporter',names:['per2-luc','PER2::LUC'],variants:['PER2::LUC']},
+  {code:'E',kind:'reporter',names:['bmal1-eluc'],variants:['Bmal1-ELuc']},
+  {code:'32',kind:'reporter',names:['rosa26','Gt(ROSA)26Sor','Ai32'],variants:['Ai32']},
+  {code:'96',kind:'reporter',names:['rosa26','Gt(ROSA)26Sor','Ai96'],variants:['Ai96']}
+].map(def=>Object.freeze({...def,names:Object.freeze(def.names.map(normGenotype)),variants:Object.freeze(def.variants.map(normGenotype))})));
+
+/** Exact requested offspring only, never parental calls. Return no abbreviation
+ * for unspecified/carrier targets, unrecognized alleles or compound Rosa alleles:
+ * the UI retains their full genotype description rather than implying zygosity. */
+export function targetGenotypeLabel(scenario){
+  if(!Array.isArray(scenario?.loci)||!scenario.loci.length||scenario.loci.length>6||!scenario.targets||typeof scenario.targets!=='object'||Array.isArray(scenario.targets))return '';
+  const entries=[],seen=new Set();
+  for(const locus of scenario.loci){
+    if(!locus||typeof locus.id!=='string'||seen.has(locus.id)||!Object.hasOwn(scenario.targets,locus.id))return '';
+    seen.add(locus.id);const target=scenario.targets[locus.id];
+    if(target?.mode!=='exact'||!Array.isArray(target.alleles)||target.alleles.length!==2||!Array.isArray(locus.alleles)||target.alleles.some(allele=>typeof allele!=='string'||!locus.alleles.includes(allele)))return '';
+    const variants=target.alleles.filter(allele=>!wildAllele(allele));
+    const name=normGenotype(canonicalLocusName(locus)),id=normGenotype(locus.id);
+    // A legacy Vgat-Cre label does not establish a floxed allele model.
+    if(explicitCreName(locus.name)&&locus.kind==='flox')return '';
+    const named=targetDefinitions.filter(def=>def.names.includes(name)),identified=targetDefinitions.filter(def=>def.names.includes(id));
+    // A renamed locus retains its stable ID. Require a recognized current name
+    // and, when the ID is also recognized, the same strain identity. Opaque
+    // custom IDs remain valid when the current name and exact allele agree.
+    const definitions=named.filter(def=>def.kind===locus.kind&&(!identified.length||identified.some(other=>other.code===def.code)));
+    if(!definitions.length)return '';
+    if(!variants.length)continue;
+    if(new Set(variants.map(normGenotype)).size!==1)return '';
+    const matches=definitions.filter(def=>def.variants.includes(normGenotype(variants[0])));
+    if(matches.length!==1)return '';
+    entries.push({code:matches[0].code,dosage:variants.length===2?'homozygous':'heterozygous',presence:'present'});
+  }
+  if(Object.keys(scenario.targets).some(id=>!seen.has(id)))return '';
+  if(new Set(entries.map(entry=>entry.code)).size!==entries.length)return '';
+  return entries.length?canonicalCombinedGenotype(entries)||'':'WT';
+}
 const defaults=new Map(STRAIN_ACRONYMS.map(row=>[row.key,row]));
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const eventId=code=>'STRAIN-'+code;

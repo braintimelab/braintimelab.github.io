@@ -2,9 +2,9 @@
  * confirmed; source notation and tag primes never establish assay verification.
  * Omitted loci are unrecorded, never wild type. No archive prose is attributed
  * to a mouse. Ai32/Ai96 retain their shared Rosa26 locus. */
-import {mouseLineAssignments,parseCompactStrainNotation} from './mouse-summary.js?v=118';
-import {getStrainRegistry,canonicalLocusName,canonicalStrainName,explicitCreName,strainNameAliases,strainNamingWarning,legacyVgatCreName,FOXJ1_STRAIN_ALIASES} from './strain-registry.js?v=118';
-import {discoverGenotypes,sourceProfile} from './genotype-catalog.js?v=118';
+import {mouseLineAssignments,parseCompactStrainNotation} from './mouse-summary.js?v=146';
+import {getStrainRegistry,canonicalLocusName,canonicalStrainName,explicitCreName,strainNameAliases,strainNamingWarning,legacyVgatCreName,FOXJ1_STRAIN_ALIASES,LAB_STRAIN_CODE_ORDER} from './strain-registry.js?v=146';
+import {discoverGenotypes,sourceProfile} from './genotype-catalog.js?v=146';
 import {validateGeneticProfile} from './genotype-schema.js?v=100';
 const str=value=>typeof value==='string'?value:'';
 const archived=row=>Boolean(row?.app_archived_at)||row?.archived===true;
@@ -132,7 +132,7 @@ function classify(mouse,genes,loci,registry) {
   if(values.some(value=>/^\s*WT\s*\(\s*\+\s*\/\s*\+\s*\)\s*$/i.test(value)))traits.set('WT',{code:'WT',name:'Wild type (recorded)',presence:'present',dosage:'unknown',evidence:'recorded'});
   if(traits.has('WT')&&[...traits.values()].some(trait=>trait.code!=='WT'&&trait.presence==='present')) {traits.set('WT',{...traits.get('WT'),presence:'uncertain',evidence:'uncertain'});warnings.push('The broad WT label conflicts with a recorded variant; review its intended scope.');}
   for(const warning of parsed.warnings)if(!/no explicit source genotype|Source-parsed calls/.test(warning)&&loci.some(locus=>values.some(value=>[...strainNameAliases(locus.name),...(locus.sourceLabels||[])].some(label=>value.toLowerCase().includes(label.toLowerCase())))))warnings.push(warning);
-  const order=new Map(registry.map((item,index)=>[item.key,index])),list=[...traits.values()].sort((a,b)=>(order.get(a.code)??100)-(order.get(b.code)??100)||a.name.localeCompare(b.name)).map(trait=>({...trait,shorthand:shorthand(trait)}));
+  const order=new Map(LAB_STRAIN_CODE_ORDER.map((code,index)=>[code,index])),list=[...traits.values()].sort((a,b)=>(order.get(a.code)??100)-(order.get(b.code)??100)||a.name.localeCompare(b.name)).map(trait=>({...trait,shorthand:shorthand(trait)}));
   const confirmed=list.length>0&&list.every(trait=>trait.evidence==='confirmed'&&trait.presence!=='uncertain'),unresolved=!list.length||list.some(trait=>trait.evidence==='uncertain'||trait.presence==='uncertain'||trait.presence==='present'&&trait.dosage==='unknown'&&trait.code!=='WT');
   const evidenceLabel=confirmed?'Confirmed':unresolved?'Needs review':list.some(trait=>trait.evidence==='inferred')?'Inferred':'Recorded';
   const combinationKey=JSON.stringify(list.map(trait=>[trait.code,trait.presence,trait.dosage,Boolean(trait.dosageUncertain),trait.code.startsWith('locus:')&&trait.alleles?sorted(trait.alleles):rosa(trait.locus)&&trait.alleles?sorted(trait.alleles.map(allele=>codeFor(allele)||'+')):null,trait.code.startsWith('locus:')?trait.locus?.id||null:null]));

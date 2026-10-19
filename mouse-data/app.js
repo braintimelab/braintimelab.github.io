@@ -1,37 +1,37 @@
 import {isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=134';
 import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=118';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=146';
 import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=132';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=132';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=146';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { renderMouseReview } from './mouse-review-view.js?v=100';
-import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=132';
+import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=143';
-import * as model from './model.js?v=132';
-import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=118';
-import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=118';
-import { renderStrainManagement, hasStrainDrafts, clearStrainManagement } from './strain-management.js?v=118';
+import * as store from './data-store.js?v=146';
+import * as model from './model.js?v=146';
+import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
+import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
+import { renderStrainManagement, hasStrainDrafts, clearStrainManagement } from './strain-management.js?v=146';
 import { summarizeLitters } from './litter-summary.js?v=100';
-import { summarizeOverview } from './overview-summary.js?v=118';
-import { summarizeCages } from './cage-summary.js?v=118';
+import { summarizeOverview } from './overview-summary.js?v=146';
+import { summarizeCages } from './cage-summary.js?v=146';
 import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=100';
-import { summarizeBreeding } from './breeding-summary.js?v=118';
+import { summarizeBreeding } from './breeding-summary.js?v=146';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=132';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=146';
 import * as history from './history-index.js?v=100';
 import { renderUserManagement } from './user-management.js?v=141';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=141';
 import { renderAccessLogs } from './access-logs.js?v=137';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=132';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=145';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=146';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
-import { renderCageLabelEditor } from './cage-label.js?v=132';
+import { renderCageLabelEditor } from './cage-label.js?v=146';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
 import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
@@ -39,18 +39,18 @@ import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=137';
 import {createCloudMonitor} from './cloud-monitor.js?v=139';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from './cloud-status.js?v=139';
-import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=118';
-import { buildFamilyGenotypes } from './family-genotypes.js?v=118';
-import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=132';
+import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=146';
+import { buildFamilyGenotypes } from './family-genotypes.js?v=146';
+import { renderCryopreservation, hasCryopreservationDraft, isCryopreservationBusy } from './cryopreservation.js?v=146';
 import { renderExperiments, experimentHelpHTML, hasExperimentDrafts, resetExperimentSourceView } from './experiments.js?v=132';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=132';
-import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=132';
+import { renderLacFees, lacFeeHelpHTML } from './lac-fees.js?v=146';
 import { renderAnimalSheetImport, refreshAnimalSheetImportAccess, animalSheetImportHelpHTML } from './animal-sheet-import.js?v=143';
 import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126';
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=132';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=132';
 import { protocolsForEntity } from './iacuc-model.js?v=132';
-import { renderExportCenter } from './export-center.js?v=141';
+import { renderExportCenter } from './export-center.js?v=146';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -363,7 +363,7 @@ async function renderPlanner(){
  const hooks={reloadPage:()=>location.reload(),initialMouseId:plannerMouseId,initialTargetDraft:plannerTargetDraft,openMouse:id=>navigate('mice',id),toast:showToast,canEdit:canEditRecords,isCloud:()=>cloud.mode==='cloud',validate:model.validateRecord,historyDeferred:deferredHistoryTables().includes('historical_observations'),genotypeHistoryDeferred:deferredHistoryTables().includes('mouse_genes'),loadGenotypeHistory:async()=>loadHistoryTables(['mouse_genes']),isCurrent:()=>route==='planner'&&token===plannerRenderToken,
  loadSourceHistory:async()=>loadHistoryTables(['historical_observations']),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render()}};
  try{
-  if(!plannerModule){$('main').innerHTML=panel('Planning','<p role="status">Loading Planning…</p>');plannerModulePending??=import('./breeding-planner.js?v=130').then(module=>{plannerModule=module;return module;}).catch(error=>{plannerModulePending=null;throw error;});await plannerModulePending;}
+  if(!plannerModule){$('main').innerHTML=panel('Planning','<p role="status">Loading Planning…</p>');plannerModulePending??=import('./breeding-planner.js?v=146').then(module=>{plannerModule=module;return module;}).catch(error=>{plannerModulePending=null;throw error;});await plannerModulePending;}
   if(!hooks.isCurrent())return;
   plannerModule.renderBreedingPlanner($('main'),snapshot,hooks);plannerMouseId=null;plannerTargetDraft=null;
  }catch(error){if(hooks.isCurrent())$('main').innerHTML=panel('Planning','<p role="alert">Planning could not load.</p>'+button('Reload page','reload-workspace'));}
