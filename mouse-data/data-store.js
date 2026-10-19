@@ -58,6 +58,7 @@ function guestAvailabilityFields(payload){
 }
 
 const setupProfileAllowed=p=>!!p?.member&&(p.eligible===true&&p.setup_required===true||p.eligible!==true&&p.registration_allowed===true);
+const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==false;
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
 function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;}
@@ -426,11 +427,11 @@ async function establishMembershipOrSetup(action){
 // no roster and temporary profile-read failures keep their verified membership.
 async function checkRegisteredUsernameSetup(action){
  const c=configuration(),s=session();if(!s?.user?.id||s.role==='owner')return;
- let profile;try{profile=await cloud1Request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId},timeoutMs:5000});}
+ let profile;try{profile=await cloud1Request('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId},timeoutMs:5000});profile=await registrationSetupAccess(profile,()=>action?.check());}
  catch{action?.check();return;}
  action?.check();
  const person=profile?.member;
- if(profile?.eligible===true&&profile.setup_required===true&&typeof person?.person_id==='string'&&person.person_id&&person.email===s.user.email?.trim().toLowerCase()&&!person.username){
+ if(profile?.eligible===true&&profile.setup_required===true&&setupBlocksAccess(profile)&&typeof person?.person_id==='string'&&person.person_id&&person.email===s.user.email?.trim().toLowerCase()&&!person.username){
   saveSession({...session(),role:'pending',setupRequired:true});
  }
 }
@@ -1825,13 +1826,26 @@ export async function approveLabMemberEmail(payload){
  return result;
 }
 function applyMyLabProfile(result){
- const active=session();if(active)saveSession({...active,username:result?.member?.username||null,setupRequired:setupProfileAllowed(result)});
+ const active=session();if(active)saveSession({...active,username:result?.member?.username||null,setupRequired:setupBlocksAccess(result)});
+}
+async function registrationSetupAccess(profile,check=()=>{}){
+ if(profile?.eligible!==true||profile.setup_required!==true)return profile;
+ // Only this fresh own-user result can make username setup optional. Missing,
+ // unsupported or failed verification preserves the existing setup gate.
+ const result={...profile};delete result.setup_blocks_access;
+ try{
+  const access=await cloud1Request('rpc/get_my_registration_setup_access',{method:'POST',body:{p_colony_id:configuration().colonyId},timeoutMs:3000});check();
+  if(access&&typeof access==='object'&&!Array.isArray(access)&&Object.keys(access).length===1&&access.setup_blocks_access===false)result.setup_blocks_access=false;
+ }catch{check();}
+ return result;
 }
 export async function getMyLabMember(){
  const c=configuration(),actor=session()?.user?.id,generation=authGeneration;
  if(!c||!actor)throw new Error('Sign in before loading your registered profile.');
- const result=await (pendingAccount(session())?cloud1Request:request)('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId}});
- if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==actor)throw new Error('The account changed. Sign in again.');
+ const check=()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==actor)throw new Error('The account changed. Sign in again.');};
+ let result=await (pendingAccount(session())?cloud1Request:request)('rpc/get_my_lab_member',{method:'POST',body:{p_colony_id:c.colonyId}});check();
+ result=await registrationSetupAccess(result,check);check();
+ if(result?.setup_blocks_access===false&&pendingAccount(session())){await membership({check});check();}
  applyMyLabProfile(result);return result;
 }
 export async function saveMyLabProfile(fields,version){
@@ -1848,9 +1862,10 @@ export async function saveMyLabProfile(fields,version){
  if(profile.phone!=null&&profile.phone.length>80)throw new Error('Use a phone number up to 80 characters.');
  if(profile.acronym){profile.acronym=profile.acronym.toUpperCase();if(!/^[A-Z][A-Z0-9_-]{0,11}$/.test(profile.acronym))throw new Error('Use an acronym beginning with a letter, up to 12 letters, numbers, underscores or hyphens.');}
  if(profile.category!==undefined&&!['undergraduate','masters','phd','postdoc','visiting_student','visiting_faculty','principal_investigator','other','unknown'].includes(profile.category))throw new Error('Choose a valid member category.');
- const result=await request('rpc/submit_my_lab_profile',{method:'POST',body:{p_colony_id:c.colonyId,p_profile:profile,p_expected_version:version}});
+ let result=await request('rpc/submit_my_lab_profile',{method:'POST',body:{p_colony_id:c.colonyId,p_profile:profile,p_expected_version:version}});
  if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==actor)throw new Error('The account changed. Reload your profile.');
  if(!result?.member||result.member.name!==profile.name||!Number.isSafeInteger(result.member.version)||result.member.version<1||result.member.version<version)throw new Error('Your profile save was not confirmed. Reload your profile.');
+ result=await registrationSetupAccess(result,()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==actor)throw new Error('The account changed. Reload your profile.');});
  applyMyLabProfile(result);return result;
 }
 export async function getLabUserDirectory(){if(isGuest(session()))return {users:[]};return request('rpc/get_lab_user_directory',{method:'POST',body:{p_colony_id:configuration().colonyId}});}

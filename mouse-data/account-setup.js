@@ -26,7 +26,7 @@ export async function renderAccountSetup(container,hooks){
  }
  async function load(){
   const sequence=++mount.load;mount.busy=true;clearPasswords(container);container.innerHTML='<p class="small muted" role="status">Loading your profile…</p>';
-  try{const profile=await hooks.getProfile();if(!current()||sequence!==mount.load)return;mount.profile=profile;mount.savedProfile=false;mount.resume=null;paint();}
+  try{const profile=await hooks.getProfile();if(!current()||sequence!==mount.load)return;mount.profile=profile;mount.savedProfile=false;mount.resume=null;paint();if(profile?.eligible===true&&profile.setup_required===true&&profile.setup_blocks_access===false)await hooks.onAccessAvailable?.(profile);}
   catch(error){if(current()&&sequence===mount.load)container.innerHTML=`<p class="small" role="status">${esc(error.message||'Profile unavailable.')}</p><button type="button" class="button secondary" data-account-retry="true">Retry profile</button>`;}
   finally{if(current()&&sequence===mount.load)mount.busy=false;}
  }
