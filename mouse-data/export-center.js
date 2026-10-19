@@ -8,7 +8,7 @@ const active=row=>!row.app_archived_at&&row.archived!==true;
 const scopeNames={'animal-sheet':'Current Animal Sheet',records:'Records and history',backup:'Local backup','source-archive':'Full source archive'};
 const typeNames={mice:'Mice',matings:'Matings',litters:'Litters',cages:'Cages',rooms:'Rooms',racks:'Racks',locations:'Positions',light_events:'Light history',husbandry_events:'Experiments, fees & husbandry'};
 const idFields={mice:'mouse_sid',matings:'mating_sid',litters:'litter_sid',cages:'cage_sid',rooms:'room_id',racks:'rack_id',locations:'location_id',light_events:'event_id',husbandry_events:'event_id'};
-const levelNames={low:'Past 3 years',mid:'Past 3 years',high:'Past 6 years',max:'Full history'};
+const levelNames={low:'Past 3 years',mid:'Past 3 years',mid1:'Past 3 years',mid2:'Past 6 years',high:'Past 6 years',max:'Full history'};
 const formatNames={xlsx:'Excel workbook (.xlsx)',csv:'CSV (.csv)',json:'JSON (.json)',pdf:'PDF (print / save)'};
 const formats=scope=>scope==='animal-sheet'?['xlsx','pdf']:scope==='records'?['xlsx','csv','json']:['json'];
 const option=(value,label,selected,disabled=false)=>`<option value="${esc(value)}"${value===selected?' selected':''}${disabled?' disabled':''}>${esc(label)}</option>`;

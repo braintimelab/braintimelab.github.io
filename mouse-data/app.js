@@ -9,7 +9,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=150';
+import * as store from './data-store.js?v=151';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -22,8 +22,8 @@ import { summarizeBreeding } from './breeding-summary.js?v=146';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
 import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=146';
 import * as history from './history-index.js?v=100';
-import { renderUserManagement } from './user-management.js?v=141';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=141';
+import { renderUserManagement } from './user-management.js?v=151';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=151';
 import { renderAccessLogs } from './access-logs.js?v=137';
 import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
@@ -50,7 +50,7 @@ import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126'
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=132';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=132';
 import { protocolsForEntity } from './iacuc-model.js?v=132';
-import { renderExportCenter } from './export-center.js?v=146';
+import { renderExportCenter } from './export-center.js?v=151';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -722,7 +722,7 @@ async function openCageLabel(cageSid,initialSide='front',positionId=''){if(!gues
  try{
   const grant=await store.getExportPermission();if(!current()){close();return;}
   if(grant.level==='max'&&grant.full_history===true){labelPermission=await store.assertFullExportPermission();allowFullLocoboxHistory=labelPermission.level==='max'&&labelPermission.full_history===true;locoboxHistoryNotice=labelPermission.local?'Local workspace · full history.':'Full history.';}
-  else {const report=await store.getExportRecords({scope:'history',entityTypes:['husbandry_events']});locoboxDataset=report.dataset;labelPermission={...report.metadata,level:report.metadata.export_level};locoboxHistoryNotice=`${labelPermission.level==='high'?'Past 6 years':'Past 3 years'} · ${labelPermission.cutoff_date} to ${labelPermission.as_of_date}. Source narratives outside this scope are omitted.`;}
+  else {const report=await store.getExportRecords({scope:'history',entityTypes:['husbandry_events']});locoboxDataset=report.dataset;labelPermission={...report.metadata,level:report.metadata.export_level};locoboxHistoryNotice=`${['high','mid2'].includes(labelPermission.level)?'Past 6 years':'Past 3 years'} · ${labelPermission.cutoff_date} to ${labelPermission.as_of_date}. Source narratives outside this scope are omitted.`;}
  }catch(error){if(current())showToast('Locobox history could not be loaded. Blank labels remain available.',true);}
  if(!current()){close();return;}
  renderCageLabelEditor($('cage-label-editor'),sourceDataset,{initialCage:String(cageSid||''),initialPosition:positionId,initialContextKey:token,initialSide,members,locoboxDataset,allowFullLocoboxHistory,locoboxHistoryNotice,onOriginalPreview:(id,options={})=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}close();if(options.positionId)printPositionCard(options.positionId,options.draft);else printCageCards([id]);},onClose:close,toast:showToast,onPreview:({documentHTML})=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}showExportPrintPreview(documentHTML,{title:'Cage label PDF',permission:labelPermission,validateContext:()=>{if(!current()){close();throw new Error('Workspace or account changed. Reopen the cage label.');}}});$('export-print-dialog').cageLabelToken=token;}});

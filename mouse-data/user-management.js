@@ -4,10 +4,12 @@ import {MANAGER_PERMISSION_LABELS,defaultManagerPermissions,normalizeManagerPerm
 const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const mounts=new WeakMap();
 const editableRoles=new Set(['viewer','editor','manager']);
-const exportLevels=new Set(['low','mid','high','max']);
-const exportName=level=>({low:'Low (past 3 years)',mid:'Mid (past 3 years, 5 GB personal space)',high:'High (past 6 years)',max:'Max (full history)'}[level]||'Low (past 3 years)');
-const savedExportLevel=user=>user.role==='owner'?'max':exportLevels.has(user.export_level)?user.export_level:'low';
-const exportOptions=selected=>[...exportLevels].map(level=>`<option value="${level}"${level===selected?' selected':''}>${exportName(level)}</option>`).join('');
+const exportLevels=new Set(['low','mid1','mid2','high','max']);
+const savedLevels=new Set([...exportLevels,'mid']);
+const exportName=level=>({low:'Low (past 3 years)',mid:'Mid (legacy, past 3 years)',mid1:'Mid1 (past 3 years, 3 GB personal space)',mid2:'Mid2 (past 6 years, 1 GB personal space)',high:'High (past 6 years)',max:'Max (full history)'}[level]||'Low (past 3 years)');
+const savedExportLevel=user=>user.role==='owner'?'max':savedLevels.has(user.export_level)?user.export_level:'low';
+const exportOptions=(selected,legacy=false)=>[...exportLevels,...(legacy?['mid']:[])].map(level=>`<option value="${level}"${level===selected?' selected':''}>${exportName(level)}</option>`).join('');
+const validUserLevel=(user,level)=>exportLevels.has(level)||level==='mid'&&savedExportLevel(user)==='mid';
 const accessName=role=>({owner:'Owner',viewer:'Read only',editor:'Read & write',manager:'Manager'}[role]||'Unavailable');
 const statusName=status=>({active:'Active',invited:'Invited',disabled:'Inactive',unavailable:'Unavailable'}[status]||'Unknown');
 const errorMessage=error=>error?.message||'The request could not be completed. Try again.';
@@ -33,7 +35,7 @@ export async function renderUserManagement(container,hooks) {
     const id=escapeHTML(user.user_id),role=state.roles.get(user.user_id)||user.role,level=state.levels.get(user.user_id)||savedExportLevel(user),locked=protectedUser(user),pending=role!==user.role||level!==savedExportLevel(user)||(role==='manager'&&permissionChanged(user));
     const access=locked?`<span class="badge">${escapeHTML(accessName(user.role))}</span>`:`<select aria-label="Access for ${escapeHTML(user.email||user.name||'user')}" data-user-role="${id}"${disabled()||(user.guest_level?' disabled':'')}><option value="viewer"${role==='viewer'?' selected':''}>Read only</option><option value="editor"${role==='editor'?' selected':''}>Read &amp; write</option><option value="manager"${role==='manager'?' selected':''}>Manager</option></select>${role==='manager'?permissionFields(selectedPermissions(user),user.user_id):''}`;
     const guest=locked?'':guestFields(user);
-    const exportAccess=locked||user.guest_level?`<span class="badge">${user.role==='owner'?'Max':exportName(level)}</span>`:`<select aria-label="Export level for ${escapeHTML(user.email||user.name||'user')}" data-user-export-level="${id}"${disabled()}>${exportOptions(level)}</select>`;
+    const exportAccess=locked||user.guest_level?`<span class="badge">${user.role==='owner'?'Max':exportName(level)}</span>`:`<select aria-label="Export level for ${escapeHTML(user.email||user.name||'user')}" data-user-export-level="${id}"${disabled()}>${exportOptions(level,savedExportLevel(user)==='mid')}</select>`;
     const actions=locked?`<span class="small muted">${state.readOnly?'Read only':user.role==='owner'?'Protected owner':'Unavailable'}</span>`:`<div class="settings-actions"><button class="button secondary" data-user-action="save-access" data-user-id="${id}"${disabled()||(!pending?' disabled':'')}>Save access</button><button class="button secondary" data-user-action="${user.active?'deactivate':'reactivate'}" data-user-id="${id}"${disabled()}>${user.active?'Deactivate':'Reactivate'}</button></div>`;
     return `<tr><td>${escapeHTML(user.name||'Not set')}</td><td>${escapeHTML(user.email||'Unavailable')}</td><td>${access}${guest}</td><td>${exportAccess}</td><td><span class="badge${user.active?'':' amber'}">${escapeHTML(statusName(user.status))}</span></td>${state.readOnly?'':`<td>${actions}</td>`}</tr>`;
   }
@@ -91,9 +93,9 @@ export async function renderUserManagement(container,hooks) {
       const user=state.users.find(row=>row.user_id===target.dataset.userRole);
       if(user&&!protectedUser(user)){state.roles.set(user.user_id,target.value);paint()}
     }
-    if(target.dataset?.userExportLevel&&exportLevels.has(target.value)){
+    if(target.dataset?.userExportLevel){
       const user=state.users.find(row=>row.user_id===target.dataset.userExportLevel);
-      if(user&&!protectedUser(user)){state.levels.set(user.user_id,target.value);paint()}
+      if(user&&!protectedUser(user)&&validUserLevel(user,target.value)){state.levels.set(user.user_id,target.value);paint()}
     }
   };
   container.onsubmit=async event=>{
@@ -104,7 +106,7 @@ export async function renderUserManagement(container,hooks) {
     const level=event.target.elements?.namedItem('invite-export-level')?.value??state.inviteExportLevel;
     if(!/^[^\s@]+@[^\s@]+$/.test(state.email)||state.email.length>254){state.error='Enter a valid email address.';paint();return}
     if(!editableRoles.has(role)){state.error='Choose Read only, Read & write or Manager access.';paint();return}
-    if(!exportLevels.has(level)){state.error='Choose Low, Mid, High or Max access.';paint();return}
+    if(!exportLevels.has(level)){state.error='Choose Low, Mid1, Mid2, High or Max access.';paint();return}
     state.inviteRole=role;
     state.inviteExportLevel=level;
     await change('invite',{email:state.email,role,export_level:level,...(role==='manager'?{permissions:{...state.invitePermissions}}:{})});
@@ -120,7 +122,7 @@ export async function renderUserManagement(container,hooks) {
     if(action==='save-guest'){state.busy=true;state.error='';paint();try{await hooks.setGuestAccess({user_id:user.user_id,guest_level:guestLevel(user),guest_permissions:guestOverrides(user),expected_updated_at:user.updated_at});state.notice='Guest access saved.';await reload();}catch(error){state.error=errorMessage(error);}finally{state.busy=false;paint();}return;}
     if(action==='save-access'){
       const role=state.roles.get(user.user_id)||user.role,level=state.levels.get(user.user_id)||savedExportLevel(user);
-      if((role!==user.role||level!==savedExportLevel(user)||(role==='manager'&&permissionChanged(user)))&&editableRoles.has(role)&&exportLevels.has(level))await change('update_access',{user_id:user.user_id,role,export_level:level,active:Boolean(user.active),...(role==='manager'?{permissions:{...selectedPermissions(user)}}:{})});
+      if((role!==user.role||level!==savedExportLevel(user)||(role==='manager'&&permissionChanged(user)))&&editableRoles.has(role)&&validUserLevel(user,level))await change('update_access',{user_id:user.user_id,role,export_level:level,active:Boolean(user.active),...(role==='manager'?{permissions:{...selectedPermissions(user)}}:{})});
     } else if(action==='deactivate'||action==='reactivate') {
       await change('update_access',{user_id:user.user_id,role:user.role,export_level:savedExportLevel(user),active:action==='reactivate',...(user.role==='manager'?{permissions:savedPermissions(user)}:{})});
     }

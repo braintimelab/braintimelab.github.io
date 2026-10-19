@@ -1,5 +1,5 @@
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
-const MEMBER_LEVELS = new Set(['low', 'mid', 'high', 'max']);
+const MEMBER_LEVELS = new Set(['low', 'mid', 'mid1', 'mid2', 'high', 'max']);
 const CALLBACK_KEYS = ['access_token', 'refresh_token', 'error', 'error_description', 'error_code'];
 
 export function togglePasswordVisibility(input, button, show = input.type === 'password') {
@@ -137,7 +137,7 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=150');
+  const store = await import('../mouse-data/data-store.js?v=151');
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,
     navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),

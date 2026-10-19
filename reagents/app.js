@@ -1,4 +1,4 @@
-import * as store from '../mouse-data/data-store.js?v=150';
+import * as store from '../mouse-data/data-store.js?v=151';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
@@ -80,7 +80,7 @@ function observeAccess(resume=false,touch=false){if(!member||document.hidden)ret
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
 const date=v=>v?text(v).slice(0,10):'Date unknown';
 function status(message='',error=false){if(!error&&/saved|recorded|updated/i.test(message)&&store.getCloudConnections?.()?.operations?.at(-1)?.outcome==='queued')message+=' Cloud 2 saved; sync pending.';$('status').textContent=message;$('status').dataset.error=String(error);if($('sheet-import-dialog').open){$('sheet-import-status').textContent=message;$('sheet-import-status').dataset.error=String(error);}}
-function historyAccessLabel(level){return ({low:'Past 3 years',mid:'Past 3 years',high:'Past 6 years',max:'Full history'})[level]||'Unavailable';}
+function historyAccessLabel(level){return ({low:'Past 3 years',mid:'Past 3 years',mid1:'Past 3 years',mid2:'Past 6 years',high:'Past 6 years',max:'Full history'})[level]||'Unavailable';}
 function badge(value){if(value==='listed_current')value='in_stock';return `<span class="badge ${['depleted','disposed','out_of_stock','historical'].includes(value)?'gray':['unverified','listed_current','low_stock','open'].includes(value)?'warn':''}">${esc(label(value||'unverified'))}</span>`;}
 function link(url,title){const safe=safeURL(url);return safe?`<a href="${esc(safe)}" target="_blank" rel="noopener noreferrer">${esc(title)}</a>`:esc(title);}
 function raw(value){if(value==null)return '<span class="muted">Not recorded</span>';if(typeof value!=='object')return esc(value);return `<dl class="raw-values">${Object.entries(value).filter(([,v])=>v!==''&&v!=null).map(([k,v])=>`<dt>${esc(k.replaceAll('_',' '))}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`;}

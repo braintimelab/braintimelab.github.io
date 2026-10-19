@@ -55,14 +55,14 @@ test('a saved role never reveals tools until the live verification succeeds', as
   assert.equal(f.calls.filter(([action]) => action === 'verify').length, 1);
 });
 
-test('document links require a verified non-guest Low, Mid, High or Max membership', async () => {
+test('document links require a verified non-guest regular member tier', async () => {
   for (const guestLevel of ['guest1', 'guest2', 'guest3', 'unknown', '', false]) {
     const f = fixture({status: member({role: 'viewer', guestLevel, exportLevel: 'high'})});
     await f.controller.start();
     assert.equal(f.controller.getState().phase, 'member');
     assert.equal(f.controller.getState().memberDocuments, false, String(guestLevel));
   }
-  for (const exportLevel of ['low', 'mid', 'high', 'max']) {
+  for (const exportLevel of ['low', 'mid', 'mid1', 'mid2', 'high', 'max']) {
     for (const role of ['owner', 'manager', 'editor', 'viewer']) {
       const f = fixture({status: member({role, exportLevel})});
       await f.controller.start();
