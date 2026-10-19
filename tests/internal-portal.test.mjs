@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const config = {url: 'https://lab.example', colonyId: 'lab-colony', anonKey: 'public-key'};
 const signedOut = () => ({...config, configured: true, signedIn: false, role: null});
-const member = overrides => ({...signedOut(), signedIn: true, role: 'editor', email: 'member@example.org', ...overrides});
+const member = overrides => ({...signedOut(), signedIn: true, role: 'editor', email: 'member@example.org', guestLevel: null, exportLevel: 'low', ...overrides});
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -53,6 +53,93 @@ test('a saved role never reveals tools until the live verification succeeds', as
   await check;
   assert.equal(f.controller.getState().phase, 'member');
   assert.equal(f.calls.filter(([action]) => action === 'verify').length, 1);
+});
+
+test('document links require a verified non-guest Low, Mid, High or Max membership', async () => {
+  for (const guestLevel of ['guest1', 'guest2', 'guest3', 'unknown', '', false]) {
+    const f = fixture({status: member({role: 'viewer', guestLevel, exportLevel: 'high'})});
+    await f.controller.start();
+    assert.equal(f.controller.getState().phase, 'member');
+    assert.equal(f.controller.getState().memberDocuments, false, String(guestLevel));
+  }
+  for (const exportLevel of ['low', 'mid', 'high', 'max']) {
+    for (const role of ['owner', 'manager', 'editor', 'viewer']) {
+      const f = fixture({status: member({role, exportLevel})});
+      await f.controller.start();
+      assert.equal(f.controller.getState().memberDocuments, true, role + ':' + exportLevel);
+    }
+  }
+  for (const status of [member({guestLevel: undefined}), member({exportLevel: null}), member({exportLevel: 'unknown'})]) {
+    const f = fixture({status});
+    await f.controller.start();
+    assert.equal(f.controller.getState().memberDocuments, false);
+  }
+});
+
+test('rechecking and a later Guest membership remove document visibility before stale access can return', async () => {
+  const waiting = deferred();
+  let verify = async () => member();
+  const f = fixture({status: member(), verification: () => verify()});
+  await f.controller.start();
+  assert.equal(f.controller.getState().memberDocuments, true);
+  verify = () => waiting.promise;
+  const checking = f.controller.checkAccess();
+  assert.equal(f.controller.getState().memberDocuments, false);
+  waiting.resolve(member({role: 'viewer', guestLevel: 'guest3'}));
+  await checking;
+  assert.equal(f.controller.getState().phase, 'member');
+  assert.equal(f.controller.getState().memberDocuments, false);
+  await f.controller.signOut();
+  assert.equal(f.controller.getState().memberDocuments, false);
+});
+
+test('every standalone Google sheet link and the full Protocols card start hidden', async () => {
+  const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
+  const cards = [...html.matchAll(/<article\b[^>]*>[\s\S]*?<\/article>/g)].map(match => match[0]);
+  const protocols = cards.find(card => card.includes('<h3>Protocols &amp; lab notes</h3>'));
+  assert.match(protocols, /^<article[^>]*data-member-document[^>]*\bhidden\b/);
+  let standalone = 0;
+  for (const card of cards) {
+    if (card === protocols) continue;
+    for (const [link] of card.matchAll(/<a\b[^>]*href="https:\/\/docs\.google\.com\/[^>]*>/g)) {
+      assert.match(link, /data-member-document\s+hidden/);
+      standalone++;
+    }
+  }
+  assert.equal(standalone, 3);
+  assert.equal((html.match(/data-member-document/g) || []).length, 4);
+});
+
+test('mounted portal hides all document groups for Guests and reveals them only after member verification', async () => {
+  const elements = new Map(), resources = Array.from({length: 4}, () => ({hidden: true}));
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, {hidden: true, textContent: '', innerHTML: '', dataset: {}, attributes: new Map(),
+      setAttribute(name, value) { this.attributes.set(name, value); }, addEventListener() {}});
+    return elements.get(id);
+  };
+  const document = {hidden: false, getElementById: element, querySelectorAll: selector => selector === '[data-member-document]' ? resources : [], addEventListener() {}};
+  const window = {location: new URL('https://braintime.example/internal/'), addEventListener() {}};
+  let status = member({role: 'viewer', guestLevel: 'guest1'});
+  const store = {getCloudStatus: () => status, verifyCloudMembership: async () => status};
+  const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
+    .replace(/^export /gm, '')
+    .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
+    .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
+  const context = vm.createContext({URL, URLSearchParams, testStore: store, testConfig: config});
+  vm.runInContext(source, context);
+  const controller = await context.mountPortal(document, window);
+  for (const guestLevel of ['guest1', 'guest2', 'guest3']) {
+    status = member({role: 'viewer', guestLevel});
+    await controller.checkAccess();
+    assert.equal(element('tools-panel').hidden, false);
+    assert(resources.every(resource => resource.hidden));
+  }
+  status = member({exportLevel: 'low'});
+  await controller.checkAccess();
+  assert(resources.every(resource => !resource.hidden));
+  status = signedOut();
+  await controller.checkAccess();
+  assert(resources.every(resource => resource.hidden));
 });
 
 test('expired, revoked and unreachable sessions fail closed without trusting cached role', async () => {

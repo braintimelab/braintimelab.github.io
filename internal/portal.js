@@ -1,4 +1,5 @@
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
+const MEMBER_LEVELS = new Set(['low', 'mid', 'high', 'max']);
 const CALLBACK_KEYS = ['access_token', 'refresh_token', 'error', 'error_description', 'error_code'];
 
 export function togglePasswordVisibility(input, button, show = input.type === 'password') {
@@ -10,11 +11,13 @@ export function togglePasswordVisibility(input, button, show = input.type === 'p
 /** Small view controller. Authentication, refresh and membership stay in the shared store. */
 export function createPortalController({store, config, location, navigate, onState = () => {}}) {
   let generation = 0;
-  let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null});
+  let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false});
   const appURL = () => new URL('../mouse-data/', location.href).href;
   const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
-    state = Object.freeze({...state, ...update});
+    const next = {...state, ...update};
+    if (next.phase !== 'member') next.memberDocuments = false;
+    state = Object.freeze(next);
     onState(state);
     return state;
   };
@@ -38,7 +41,8 @@ export function createPortalController({store, config, location, navigate, onSta
     if (attempt !== generation) return state;
     if (!current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
       || current.url !== config.url || current.colonyId !== config.colonyId) throw new Error('Your lab access could not be verified. Sign in again.');
-    return publish({phase: 'member', busy: false, message: '', error: false, identity: current.email || current.username || 'Signed in', hasSession: true, notice: null});
+    return publish({phase: 'member', busy: false, message: '', error: false, identity: current.email || current.username || 'Signed in', hasSession: true, notice: null,
+      memberDocuments: current.guestLevel === null && MEMBER_LEVELS.has(current.exportLevel)});
   }
 
   function failed(error, attempt) {
@@ -140,6 +144,7 @@ export async function mountPortal(document, window) {
     onState(state) {
       element('sign-in-panel').hidden = state.phase !== 'signed-out';
       element('tools-panel').hidden = state.phase !== 'member';
+      for (const resource of document.querySelectorAll('[data-member-document]')) resource.hidden = state.phase !== 'member' || state.busy || !state.memberDocuments;
       element('member-account').hidden = state.phase !== 'member';
       element('account-panel').hidden = !['setup', 'recovery'].includes(state.phase);
       element('discard-session').hidden = !state.hasSession;
