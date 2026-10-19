@@ -1,10 +1,26 @@
-import {createCloudBridge} from './cloud-bridge.js?v=137';
+import {createCloudBridge} from './cloud-bridge.js?v=149';
 
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const READ_RPCS=new Set(['get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
 export const CLOUD_COMMAND_KINDS=Object.freeze(Object.fromEntries(['save_records','save_guest_mouse_records'].map(name=>['rpc/'+name,'mouse.'+name]).concat(['save','record_usage','order_submit','order_transition','order_set_location'].map(name=>['rpc/reagents_'+name,'reagents.'+name]))));
 const clone=value=>structuredClone(value);
 const problem=(code,message,details={})=>Object.assign(new Error(message),{code,...details});
+const CURRENT_TYPES=new Set(['mice','matings','litters','cages','rooms','racks','locations','light_events','husbandry_events']);
+const RECOVERY_RPCS=new Set(['get_lac_fee_visibility','get_export_permission','get_local_backup_permission','get_my_lab_member']);
+
+/** Recovery never replays an export or loads archive payloads on a status poll. */
+export function cloud1RecoveryQuery(query,colonyId){
+ if(!UUID.test(colonyId||''))return null;
+ if(query===null)return {route:'entity_records?'+new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${colonyId}`,entity_type:'eq.mice',limit:'1'}),method:'GET'};
+ if(query?.method==='POST'&&RECOVERY_RPCS.has(query.route?.slice(4))&&query.route.startsWith('rpc/')&&query.body?.p_colony_id===colonyId)return clone(query);
+ if(query?.method!=='GET'||!query.route?.startsWith('entity_records?'))return null;
+ const params=new URLSearchParams(query.route.slice('entity_records?'.length)),type=params.get('entity_type')?.slice(3);
+ if(params.get('colony_id')!==`eq.${colonyId}`||params.get('entity_type')!==`eq.${type}`||!CURRENT_TYPES.has(type))return null;
+ // Use the same record endpoint and filters, but a single metadata row. The
+ // normal current-record pull still verifies and adopts the actual payload.
+ params.set('select','colony_id,entity_type,entity_id,version,archived');params.set('limit','1');
+ return {route:'entity_records?'+params,method:'GET'};
+}
 
 /** POST is also used for read RPCs. Unknown RPCs are always treated as writes. */
 export function isCloudRead(route,method='GET'){
@@ -89,8 +105,8 @@ export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=g
   async signOut(){const currentEpoch=epoch;try{if(verified||bearer)await transport('session/logout',{method:'POST',body:{}});}finally{if(currentEpoch===epoch){epoch++;bearer=null;csrf=null;verified=null;refreshing=null;onSession(null);}}}};
 }
 
-export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},journal=null,uuid=()=>crypto.randomUUID()}={}){
- const bridge=createCloudBridge({adapters:{cloud1,cloud2},getContext,onChange,journal});
+export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},journal=null,uuid=()=>crypto.randomUUID(),primaryPolicy=false}={}){
+ const bridge=createCloudBridge({adapters:{cloud1,cloud2},getContext,onChange,journal,primaryPolicy});
  async function request(route,{method='GET',body}={}){
   const query={route,method,...(body===undefined?{}:{body:clone(body)})};
   if(isCloudRead(route,method))return (await bridge.read(query)).data;

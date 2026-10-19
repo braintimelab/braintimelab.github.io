@@ -6,7 +6,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn} from './cloud-provider.js?v=138';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=149';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -23,6 +23,7 @@ const guardedCacheWrites=new Set(),CACHE_WRITE_KEY='current-cloud-write',BASELIN
 const BASELINE_CACHE_VERSION=1,MAX_BASELINE_RECORDS=250000,MAX_BASELINE_BYTES=32*1024*1024;
 let deferredArchiveState=null;
 let operationalProvider=null,operationalConfig=null,cloud2Identity=null,providerSource=null,providerRevision=0,providerSessionEpoch=0;
+let primaryCloudPolicy=false;
 let verifiedIntentPolicy=null;
 let cloud2ConflictPage={rows:[],nextAfter:null,binding:null};
 const cloudConnectionListeners=new Set();
@@ -169,8 +170,10 @@ export function configureCloud({url,anonKey,colonyId}){
   setStorage('localStorage',DEMO_KEY,null);setStorage('localStorage',CONFIG_KEY,JSON.stringify(config));saveSession(null);pendingEmail=null;setMode('local');invalidate();statusMessage='Cloud configured. Sign in to connect.';
 }
 export function getCloudStatus(){
-  const c=configuration(),s=session();
-  return {configured:Boolean(c),signedIn:hasLabSession(s),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:statusMessage||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?'Cloud connected.':'Changes are saved on this device.'),mode:mode(),readyForEdits:s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud:providerSource||'cloud1',cloud2Configured:!!cloud2URL(),cloudConnections:operationalProvider?.getState()||null};
+  const c=configuration(),s=session(),connections=operationalProvider?.getState()||null,activeCloud=connections?connections.active:synced?'cloud1':null;
+  const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
+  const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
+  return {configured:Boolean(c),signedIn:hasLabSession(s),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),readyForEdits:s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -257,6 +260,14 @@ function provider(){
    }catch(error){const failure=providerFailure(error);if(attempt===0&&failure.code==='UNAVAILABLE')continue;throw failure;}
   },
   async read({query}){try{return await cloud1Request(query.route,query);}catch(error){throw providerFailure(error);}},
+  async recover({query}){
+   const c=configuration(),probe=cloud1RecoveryQuery(query,c?.colonyId);if(!probe)return {verified:false};
+   try{const result=await cloud1Request(probe.route,{...probe,timeoutMs:10000});
+    if(probe.method==='GET'){const type=new URLSearchParams(probe.route.split('?')[1]).get('entity_type').slice(3);if(!Array.isArray(result)||result.length>1)throw new Error('Cloud recovery page could not be verified.');for(const row of result)checkedCloudRecord(row,type,c,false);}
+    else if(!result||typeof result!=='object'||Array.isArray(result))throw new Error('Cloud recovery access could not be verified.');
+    return {verified:true};
+   }catch(error){throw providerFailure(error);}
+  },
   async submit({operation}){
    const {route,body}=operation.request,kind=CLOUD_COMMAND_KINDS[route];if(!kind)throw Object.assign(new Error('This action requires Cloud 1 account tools.'),{code:'NOT_READY'});
    const {p_colony_id,...args}=body;
@@ -265,8 +276,10 @@ function provider(){
   receipt:({operationId})=>cloud1Request('rpc/parallel_cloud_receipt',{method:'POST',body:{p_colony_id:configuration().colonyId,p_operation_id:operationId}})
  };
  const journal=createIntentJournal({database,getScope:()=>{const c=configuration(),s=session();return verifiedIntentPolicy&&hasLabSession(s)?{server:c.url,userId:s.user.id,colonyId:c.colonyId,policyKey:verifiedIntentPolicy.policyKey}:null;}});
- operationalProvider=createCloudProvider({cloud1,cloud2:nas,getContext:context,onChange:connectionChanged,journal});return operationalProvider;
+ operationalProvider=createCloudProvider({cloud1,cloud2:nas,getContext:context,onChange:connectionChanged,journal,primaryPolicy:primaryCloudPolicy});return operationalProvider;
 }
+// Mouse Data opts in before bootstrap. Other apps keep their existing choices.
+export function setPrimaryCloudPolicy(){primaryCloudPolicy=true;return operationalProvider?.setPrimaryCloudPolicy()||null;}
 async function request(route,options={}){
  const service=provider();if(!service)return cloud1Request(route,options);
  if(!isCloudRead(route,options.method||'GET')&&!CLOUD_COMMAND_KINDS[route]){
@@ -291,7 +304,7 @@ export async function cancelCloudOperation(id){
  if(binding!==conflictBinding()||result?.operation_id!==id||result.status!=='cancelled')throw new Error('Discard could not be confirmed. Check the saved edit again.');
  await service.discardConfirmed(id,'cloud2');cloud2ConflictPage={rows:[],nextAfter:null,binding};await refreshCloudConnections();return result;
 }
-export async function selectCloud(source){const service=provider();if(!service)throw new Error('Parallel clouds are not configured.');await service.refresh();service.choose(source);if(service.getState().active!==source)throw new Error('The selected cloud is not ready for this account.');invalidate();feeVisibility=null;feeVisibilityContext=null;return getCloudStatus();}
+export async function selectCloud(source){if(primaryCloudPolicy&&source!=='cloud1')throw Object.assign(new Error('Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.'),{code:'PRIMARY_POLICY'});const service=provider();if(!service)throw new Error('Parallel clouds are not configured.');await service.refresh();service.choose(source);if(service.getState().active!==source)throw new Error('The selected cloud is not ready for this account.');invalidate();feeVisibility=null;feeVisibilityContext=null;return getCloudStatus();}
 export async function verifyCloudOperation(id){if(!verifiedIntentPolicy)await membership();return provider()?.verify(id);}
 export async function retryCloudOperation(id){await membership();return provider()?.retry(id);}
 export async function syncCloud2(){const service=provider();if(!service)throw new Error('Cloud 2 is not configured.');await service.cloud2.sync();return service.refresh();}
@@ -301,7 +314,7 @@ function adoptCloud2Identity(identity){
 }
 export async function resumeCloud2Session(){
  const service=provider();if(!service)return false;
- try{const identity=await service.cloud2.status({});if(identity.state!=='online')return false;adoptCloud2Identity(identity);await service.refresh();if(!session()?.access_token)service.choose('cloud2');setMode('cloud');return hasLabSession();}
+ try{const identity=await service.cloud2.status({});if(identity.state!=='online')return false;adoptCloud2Identity(identity);await service.refresh();if(!session()?.access_token&&!primaryCloudPolicy)service.choose('cloud2');setMode('cloud');return hasLabSession();}
  catch(error){if(['UNAUTHORIZED','NOT_READY','UNAVAILABLE'].includes(error.code))return false;throw error;}
 }
 export async function connectCloud2({reset=false}={}){
@@ -318,8 +331,8 @@ export async function connectCloud2({reset=false}={}){
   if(identity.colonyId!==configuration().colonyId||initialUser&&identity.userId!==initialUser){service.cloud2.clear();cloud2Identity=null;throw new Error('Cloud 2 must use the same lab account.');}
   adoptCloud2Identity(identity);epoch=providerSessionEpoch;
   if(preferred)service.choose(preferred);await service.refresh();
-  if(!initialCloud1){service.choose('cloud2');setMode('cloud');invalidate();}
-  statusMessage=identity.ready===true?'Cloud 2 connected.':'Cloud 2 connected; initial data is not ready.';return getCloudStatus();
+  if(!initialCloud1){if(!primaryCloudPolicy)service.choose('cloud2');setMode('cloud');invalidate();}
+  statusMessage=primaryCloudPolicy&&service.getState().active!=='cloud2'?'Cloud 2 sign-in verified.':identity.ready===true?'Cloud 2 connected.':'Cloud 2 connected; initial data is not ready.';return getCloudStatus();
  }});
 }
 async function membership(action){
@@ -1051,7 +1064,7 @@ async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}
     progress({phase:'saving',...completedCounts});
     const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,versions,deferredState);check();
     await local('put',data,{check,cacheWrite,syncBaseline});check();
-    rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,deferredState);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');const counts=rows.sync_summary;statusMessage=`Cloud connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
+    rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,deferredState);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');const counts=rows.sync_summary;statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
   }catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}
 }
 /** Hydrate only requested source tables; managed rows and the archive head stay authoritative. */
@@ -1840,7 +1853,7 @@ async function pullGuestRecords({check=()=>{},onProgress=()=>{}}={}){
   onProgress({phase:'records',recordsLoaded:rows.length,archiveBlocksLoaded:0});if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset!==offset+250)throw new Error('Invalid guest page cursor.');offset=page.next_offset;
  }
  rows.fee_visibility=await refreshFeeVisibility();const data=await assemble(rows);check();data.guest_projection=true;
- const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};await local('put',data,{check,cacheWrite});check();rememberCloudCache(cacheWrite.id);remember(rows);deferredArchiveState=null;setMode('cloud');statusMessage='Cloud connected.';return clone(data);
+ const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};await local('put',data,{check,cacheWrite});check();rememberCloudCache(cacheWrite.id);remember(rows);deferredArchiveState=null;setMode('cloud');statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected.`;return clone(data);
 }
 async function saveGuestDataset(dataset,{readDependencies=[]}={}){
  await membership();if(!isGuest(session())||!guestAllows(session(),'mouse.cages.write'))throw new Error('Cage editing is not allowed for this account.');

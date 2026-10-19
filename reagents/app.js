@@ -1,6 +1,6 @@
-import * as store from '../mouse-data/data-store.js?v=147';
+import * as store from '../mouse-data/data-store.js?v=149';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
-import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=139';
+import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=3';

@@ -12,19 +12,31 @@ const stable=value=>Array.isArray(value)?`[${value.map(stable).join(',')}]`:valu
 const count=value=>Number.isSafeInteger(value)&&value>=0?value:null;
 const recordKeys=operation=>operation.request?new Set(['rpc-command']):new Set(operation.changes.map(change=>JSON.stringify([change.domain,change.entity_type,change.entity_id])));
 const date=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;
-const empty=source=>({source,state:'unknown',ready:false,canRead:false,canWrite:false,enrolled:false,pending:null,conflicts:null,lastSyncAt:null,dataRevision:null,capabilities:null});
+const empty=source=>({source,state:'unknown',ready:false,canRead:false,canWrite:false,enrolled:false,pending:null,conflicts:null,lastSyncAt:null,dataRevision:null,capabilities:null,replicationCaughtUp:false});
 const problem=(code,message)=>Object.assign(new Error(message),{code});
 const failure=error=>['UNAVAILABLE','UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED','NOT_READY'].includes(error?.code)?error.code:'UNKNOWN';
 const failureState=error=>({UNAVAILABLE:'unavailable',UNAUTHORIZED:'signed_out',FORBIDDEN:'denied',NOT_ENROLLED:'not_enrolled',NOT_READY:'not_ready'}[failure(error)]||'error');
 
-export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=null}){
+export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=null,primaryPolicy=false}){
   if(typeof getContext!=='function'||!adapters?.cloud1||!adapters?.cloud2)throw new TypeError('Two cloud adapters and a verified context provider are required.');
   const listeners=new Set([onChange]),controllers=new Set(),operations=new Map();
-  let generation=0,contextKey=null,context=null,preferred='cloud1',active=null,refreshing=null,disposed=false;
+  let generation=0,contextKey=null,context=null,preferred='cloud1',active=null,refreshing=null,primaryProbe=null,disposed=false;
+  let fixedPrimary=primaryPolicy===true,fallbackEngaged=false,recoveryVerified=false,recoveryBlocked=false,failedPrimaryRead=null,primaryReadFailure=0,primaryReadFailureState='unavailable';
   let sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};
   const verified=()=>context&&UUID.test(context.userId)&&UUID.test(context.colonyId)&&typeof context.authEpoch==='string'&&context.authEpoch.length>0;
   const readable=source=>verified()&&sources[source].state==='online'&&sources[source].ready&&sources[source].canRead&&(source!=='cloud2'||sources[source].enrolled);
+  const pendingNAS=()=>[...operations.values()].some(entry=>entry.source==='cloud2'&&(entry.inFlight||['submitting','uncertain','queued','conflict','rejected'].includes(entry.outcome)));
+  const caughtUp=()=>sources.cloud2.replicationCaughtUp===true&&!pendingNAS();
   function selectActive(){
+    if(fixedPrimary){
+      if(pendingNAS())fallbackEngaged=true;
+      if(readable('cloud1')){
+        if(fallbackEngaged&&(!caughtUp()||!recoveryVerified))return readable('cloud2')?'cloud2':null;
+        fallbackEngaged=false;return 'cloud1';
+      }
+      if(sources.cloud1.state==='unavailable'&&readable('cloud2')){fallbackEngaged=true;recoveryVerified=false;return 'cloud2';}
+      return null;
+    }
     if(readable(preferred))return preferred;
     // A denied or expired primary session is not proof of an outage. Explicit
     // independent NAS sign-in/selection remains possible after server checks.
@@ -32,11 +44,11 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(preferred==='cloud2'&&sources.cloud2.state==='unavailable'&&readable('cloud1'))return 'cloud1';
     return null;
   }
-  function snapshot(){return {preferred,active,loading:!!refreshing,sources:clone(sources),operations:[...operations.values()].map(({id,source,outcome,receiptOnly})=>({operationId:id,source,outcome,...(receiptOnly?{retryable:false}:{})}))};}
+  function snapshot(){return {preferred,active,primaryPolicy:fixedPrimary?'cloud1':null,failbackPending:fixedPrimary&&fallbackEngaged,loading:!!refreshing,sources:clone(sources),operations:[...operations.values()].map(({id,source,outcome,receiptOnly})=>({operationId:id,source,outcome,...(receiptOnly?{retryable:false}:{})}))};}
   function emit(){active=selectActive();const value=snapshot();for(const listener of listeners){try{listener(value);}catch{/* Status rendering cannot change a transaction outcome. */}}return value;}
   function reset(nextContext=null){
     generation++;for(const controller of controllers)controller.abort();controllers.clear();operations.clear();
-    context=nextContext;contextKey=stable(nextContext);sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};preferred='cloud1';active=null;refreshing=null;
+    context=nextContext;contextKey=stable(nextContext);sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};preferred='cloud1';active=null;refreshing=null;primaryProbe=null;fallbackEngaged=false;recoveryVerified=false;recoveryBlocked=false;failedPrimaryRead=null;primaryReadFailure=0;
     return emit();
   }
   function synchronize(){
@@ -44,7 +56,7 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     const value=getContext(),next=value?{userId:value.userId,colonyId:value.colonyId,authEpoch:value.authEpoch,...(value.policyKey?{policyKey:value.policyKey}:{})}:null;
     if(stable(next)!==contextKey){
       const sameIdentity=context&&next&&context.userId===next.userId&&context.colonyId===next.colonyId&&context.authEpoch===next.authEpoch;
-      if(sameIdentity){generation++;for(const controller of controllers)controller.abort();controllers.clear();operations.clear();context=next;contextKey=stable(next);refreshing=null;emit();}
+      if(sameIdentity){generation++;for(const controller of controllers)controller.abort();controllers.clear();operations.clear();context=next;contextKey=stable(next);refreshing=null;primaryProbe=null;recoveryVerified=false;emit();}
       else reset(next);
     }
   }
@@ -61,29 +73,48 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(!verified()||value.userId!==context.userId||value.colonyId!==context.colonyId)return {...normalized,state:'denied'};
     const enrolled=source==='cloud1'||value.enrolled===true;
     if(!enrolled)return {...normalized,state:'not_enrolled'};
-    return {...normalized,enrolled,ready:value.ready===true,canRead:value.canRead===true,canWrite:value.canWrite===true,pending:count(value.pending),conflicts:count(value.conflicts),lastSyncAt:date(value.lastSyncAt),dataRevision:count(value.dataRevision),capabilities:value.capabilities&&typeof value.capabilities==='object'&&!Array.isArray(value.capabilities)?clone(value.capabilities):null};
+    return {...normalized,enrolled,ready:value.ready===true,canRead:value.canRead===true,canWrite:value.canWrite===true,pending:count(value.pending),conflicts:count(value.conflicts),lastSyncAt:date(value.lastSyncAt),dataRevision:count(value.dataRevision),capabilities:value.capabilities&&typeof value.capabilities==='object'&&!Array.isArray(value.capabilities)?clone(value.capabilities):null,replicationCaughtUp:source==='cloud2'&&value.replicationCaughtUp===true};
   }
-  async function refresh(){
+  async function recoverPrimary(check,query=failedPrimaryRead,{fromRead=false}={}){
+    if(!fixedPrimary||!fallbackEngaged||!readable('cloud1')||!caughtUp())return;
+    recoveryVerified=false;
+    if(typeof adapters.cloud1.recover!=='function'){recoveryBlocked=true;return;}
+    try{const result=await invoke('cloud1','recover',{query:query?clone(query):null,fromRead},check);recoveryVerified=result?.verified===true;recoveryBlocked=!recoveryVerified;}
+    catch(error){check();recoveryBlocked=false;sources.cloud1={...empty('cloud1'),state:failureState(error)};}
+  }
+  async function refresh({recover=true}={}){
     synchronize();if(refreshing)return refreshing;
-    const check=fence();
+    const check=fence(),readFailure=primaryReadFailure;
+    const checkedResult=(source,result)=>fixedPrimary&&source==='cloud1'&&readFailure!==primaryReadFailure&&(result.state==='online'||['signed_out','denied'].includes(primaryReadFailureState))?{...empty(source),state:primaryReadFailureState}:result;
+    let primaryDone;primaryProbe=new Promise(resolve=>{primaryDone=resolve;});
     const task=(async()=>{
-      const results=await Promise.allSettled(SOURCES.map(source=>invoke(source,'status',{},check)));
-      check();for(let i=0;i<SOURCES.length;i++){const source=SOURCES[i],result=results[i];sources[source]=result.status==='fulfilled'?status(source,result.value):{...empty(source),state:failureState(result.reason)};}
+      const results=await Promise.allSettled(SOURCES.map(async source=>{try{const value=await invoke(source,'status',{},check);if(source==='cloud1'&&fixedPrimary&&!fallbackEngaged&&!pendingNAS()){sources.cloud1=checkedResult(source,status(source,value));emit();}return value;}finally{if(source==='cloud1')primaryDone();}}));
+      check();for(let i=0;i<SOURCES.length;i++){const source=SOURCES[i],result=results[i];sources[source]=checkedResult(source,result.status==='fulfilled'?status(source,result.value):{...empty(source),state:failureState(result.reason)});}
+      if(fixedPrimary&&fallbackEngaged){recoveryVerified=false;if(recover)await recoverPrimary(check);}
       return emit();
     })();
     refreshing=task;emit();
     try{await task;}finally{if(refreshing===task){refreshing=null;emit();}}
     return getState();
   }
+  async function refreshForRead(check){
+    const task=refresh();void task.catch(()=>{});
+    if(fixedPrimary&&!fallbackEngaged&&!pendingNAS()&&primaryProbe){await primaryProbe;check();if(readable('cloud1'))return;}
+    await task;check();
+  }
   function getState(){synchronize();return snapshot();}
-  function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');preferred=source;return emit();}
+  function setPrimaryCloudPolicy(){synchronize();fixedPrimary=true;preferred='cloud1';if(active==='cloud2')fallbackEngaged=true;return emit();}
+  function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
   async function read(query){
-    synchronize();if(!active)await refresh();const check=fence(),source=active;
+    synchronize();const check=fence();if(!active)await refreshForRead(check);check();
+    if(fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true});check();emit();}
+    const source=active;
     if(!source)throw problem('NOT_READY','No verified cloud data source is available.');
     try{const data=await invoke(source,'read',{query:clone(query)},check);if(active!==source)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
     catch(error){
-      check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
-      sources[source]={...empty(source),state:'unavailable'};emit();await refresh();check();
+      check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){if(fixedPrimary&&source==='cloud1'){primaryReadFailure++;primaryReadFailureState=failureState(error);}sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
+      if(fixedPrimary&&source==='cloud1'){failedPrimaryRead=clone(query);primaryReadFailure++;primaryReadFailureState='unavailable';recoveryVerified=false;recoveryBlocked=false;}
+      sources[source]={...empty(source),state:'unavailable'};emit();await refresh({recover:false});check();
       // A minimal status check can succeed while the requested data endpoint
       // is unavailable. Preserve that verified read failure for this selection,
       // but never replace a new authorization rejection with an outage state.
@@ -169,5 +200,5 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   function subscribe(listener){synchronize();if(typeof listener!=='function')throw new TypeError('A status listener is required.');listeners.add(listener);try{listener(snapshot());}catch{/* Rendering cannot alter cloud operations. */}return ()=>listeners.delete(listener);}
   function clear(){return reset(null);}
   function dispose(){reset(null);disposed=true;listeners.clear();}
-  return {refresh,getState,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
+  return {refresh,getState,setPrimaryCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
 }
