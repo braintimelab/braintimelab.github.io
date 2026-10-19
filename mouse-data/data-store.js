@@ -6,7 +6,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=149';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=150';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -133,6 +133,10 @@ export async function loadDataset(){
 export async function loadStartupCache(){
  const initial=session(),c=configuration();
  if(mode()!=='cloud'||!c||!initial?.user?.id||!hasLabSession(initial)||initial.passwordRecovery||pendingAccount(initial))return null;
+ const previous=readJSON('localStorage',CLOUD_CACHE_KEY);
+ // Without an account-matching cache marker there is no preview to unlock.
+ // The following authoritative pull still verifies membership and policy.
+ if(!previous||previous.url!==c.url||previous.colony!==c.colonyId||previous.user!==initial.user.id)return null;
  invalidate();
  try{
   await verifyCloudMembership();
@@ -355,7 +359,7 @@ export async function verifyCloudMembership(){
   if(initial.passwordRecovery)throw new Error('Finish resetting your password before opening lab tools.');
   if(initial.setupRequired||initial.role==='pending')throw new Error('Finish your account setup before opening lab tools.');
   const action=beginAuthAction(),service=provider();
-  if(service){await service.refresh();action.check();if(service.getState().active==='cloud2'){await membership(action);action.check();return getCloudStatus();}}
+  if(service){await (primaryCloudPolicy&&typeof service.prepareRead==='function'?service.prepareRead():service.refresh());action.check();if(service.getState().active==='cloud2'){await membership(action);action.check();return getCloudStatus();}}
   const token=await accessToken();action.check();
   const {response,result:user}=await cloudJSON(`${c.url}/auth/v1/user`,{headers:{apikey:publicKey(c.anonKey),Authorization:`Bearer ${token}`},cache:'no-store',redirect:'error'});
   action.check();
@@ -675,6 +679,13 @@ async function cacheDigest(value){
   const bytes=new TextEncoder().encode(stable(value));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(value=>value.toString(16).padStart(2,'0')).join('');
 }
+// A pull owns its payload objects from cache verification through the atomic
+// cache commit. Reuse a checksum only for that exact object in that one pull;
+// a later pull must verify persisted bytes afresh before trusting any row.
+async function payloadDigest(payload,digests=null){
+ const known=digests?.get(payload);if(known)return known;
+ const digest=await cacheDigest(payload);digests?.set(payload,digest);return digest;
+}
 const SUMMARY_COMPUTED_KEYS=new Set(['counts','mouse_state_counts','mice_without_recorded_genotype','mice_without_recorded_parents','mice_with_multiple_candidate_dams']);
 const DEFERRED_HISTORY_ERROR='Deferred history changed or is unverified. Reload shared data before saving.';
 function archiveProjection(data){
@@ -723,7 +734,7 @@ async function mapBounded(values,fn,check){
   await Promise.all(Array.from({length:Math.min(16,values.length)},()=>worker()));check();return result;
 }
 const ordinaryManagedRecord=row=>MANAGED.includes(row?.entity_type)&&row.entity_type!=='locations'&&!feeRecord(row);
-async function baselineEnvelope(rows,writeId,check,recordVersions=versions,deferredState=deferredArchiveState){
+async function baselineEnvelope(rows,writeId,check,recordVersions=versions,deferredState=deferredArchiveState,payloadDigests=null){
   const policy=clone(feeVisibility),identity=persistentIdentity();
   if(!policy.source_archive_allowed)rows=rows.filter(ordinaryManagedRecord);
   if(rows.length>MAX_BASELINE_RECORDS)return null;
@@ -731,7 +742,7 @@ async function baselineEnvelope(rows,writeId,check,recordVersions=versions,defer
     const version=row.version??recordVersions.get(recordKey(row));
     if(!Number.isSafeInteger(version)||version<1)throw new Error('The saved cloud version could not be verified. Pull again.');
     // Archive IDs are already SHA-256 hashes of their canonical payloads.
-    return [row.entity_type,row.entity_id,version,row.archived,isArchiveChunk(row)?row.entity_id.slice(6):await cacheDigest(row.payload)];
+    return [row.entity_type,row.entity_id,version,row.archived,isArchiveChunk(row)?row.entity_id.slice(6):await payloadDigest(row.payload,payloadDigests)];
   },check);
   const body={schema_version:BASELINE_CACHE_VERSION,projection_version:SOURCE_PROJECTION_VERSION,write_id:writeId,identity,policy,entries,...(!deferredState&&policy.source_archive_allowed?{archive_complete:true}:{}),...(deferredState?{deferred_archive:{head:clone(deferredState.head),loaded_tables:[...deferredState.loadedTables],projection_sha256:deferredState.projectionHash}}:{})};
   if(utf8Size(body)>MAX_BASELINE_BYTES)return null;
@@ -739,7 +750,7 @@ async function baselineEnvelope(rows,writeId,check,recordVersions=versions,defer
   if(identity!==persistentIdentity()||stable(policy)!==stable(feeVisibility))throw new Error('Cloud access changed while preparing the saved workspace. Pull again.');
   return {...body,sha256};
 }
-async function persistedBaseline(policy,check,{managedOnly=false}={}){
+async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=null}={}){
   const snapshot=await local('get',undefined,{check,readBaseline:true});check();
   const envelope=snapshot?.baseline,mark=readJSON('localStorage',CLOUD_CACHE_KEY);
   if(!snapshot?.data||!envelope||envelope.schema_version!==BASELINE_CACHE_VERSION||envelope.projection_version!==SOURCE_PROJECTION_VERSION||typeof envelope.write_id!=='string'||envelope.write_id!==snapshot.mark?.id||envelope.write_id!==mark?.write_id||envelope.sha256!==mark?.baseline_sha256||envelope.identity!==persistentIdentity()||stable(envelope.policy)!==stable(policy)||!Array.isArray(envelope.entries)||envelope.entries.length>MAX_BASELINE_RECORDS)return null;
@@ -766,7 +777,7 @@ async function persistedBaseline(policy,check,{managedOnly=false}={}){
     await mapBounded(candidates,async row=>{
       if(!policy.source_archive_allowed&&!ordinaryManagedRecord(row))return;
       const key=recordKey(row),entry=indexed.get(key);if(!entry||entry[3]!==row.archived)return;
-      const digest=isArchiveChunk(row)?row.entity_id.slice(6):await cacheDigest(row.payload);if(digest!==entry[4])return;
+      const digest=isArchiveChunk(row)?row.entity_id.slice(6):await payloadDigest(row.payload,payloadDigests);if(digest!==entry[4])return;
       records.set(key,row);knownVersions.set(key,entry[2]);
     },check);
     if(deferredState){for(const row of deferredState.records.values()){const key=recordKey(row),entry=indexed.get(key);if(!records.has(key)||!entry)throw new Error('The deferred archive cache is incomplete.');records.get(key).version=entry[2];records.get(key).colony_id=configuration().colonyId;}deferredState.records=new Map([...records].filter(([,row])=>row.entity_type==='archive'));}
@@ -897,11 +908,11 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   const finalHead=valid(finalPage[0]);if(finalHead.entity_id!=='reconstruction'||finalHead.archived||finalHead.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const result=[head,...ordered.map(id=>chunks.get(id))];result.reused=Number(headReused)+ordered.length-needed.length;result.archive_versions=[...indexed.values()].map(row=>[`archive:${row.entity_id}`,row.version]);return result;
 }
-async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false}={}){
+async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null}={}){
   const generation=authGeneration,context=exportContext(),c=configuration(),policy=await refreshFeeVisibility({notify:false});const result=[];
   const check=()=>{checkScope?.();if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
   let reusable=referencedArchive&&reuse?.identity===syncIdentity()&&stable(reuse.policy)===stable(policy)?reuse:null;
-  if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check,{managedOnly:deferHistory});check();
+  if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check,{managedOnly:deferHistory,payloadDigests});check();
   // Loaded includes verified cache reuse. Unknown totals remain null rather
   // than estimating a percentage from earlier snapshots or transfer sizes.
   let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
@@ -1047,6 +1058,7 @@ export async function refreshCurrentRecords({canCommit=()=>true}={}){
  const envelope=await baselineEnvelope(rows,mark.id,check,versions,deferred);check();await local('put',data,{check,cacheWrite:mark,syncBaseline:envelope});check();rememberCloudCache(mark.id,envelope?.sha256);remember(rows,deferred);return clone(data);
 }
 async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}={}){
+  const payloadDigests=new WeakMap();
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
   const pull=++pullGeneration;invalidate();
   const generation=authGeneration,config=stable(configuration());let context=null;
@@ -1055,14 +1067,14 @@ async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}
   progress({phase:'access',recordsLoaded:0,recordsTotal:null,recordsReused:0,archiveBlocksLoaded:0,archiveBlocksTotal:null,archiveBlocksReused:0});
   await membership({check});context=exportContext();check();
   if(isGuest(session()))return pullGuestRecords({check,onProgress:progress});
-  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
+  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();const deferredState=await deferredStateOf(rows,data);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
   try{
     const recordsLoaded=rows.filter(row=>row.entity_type!=='archive').length,archiveBlocksLoaded=rows.filter(row=>row.entity_type==='archive').length;
     const completedCounts={recordsLoaded,recordsTotal:recordsLoaded,recordsReused:rows.sync_summary.recordsReused,archiveBlocksLoaded,archiveBlocksTotal:archiveBlocksLoaded,archiveBlocksReused:rows.sync_summary.archiveBlocksReused};
     progress({phase:'saving',...completedCounts});
-    const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,versions,deferredState);check();
+    const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,versions,deferredState,payloadDigests);check();
     await local('put',data,{check,cacheWrite,syncBaseline});check();
     rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,deferredState);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');const counts=rows.sync_summary;statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
   }catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}

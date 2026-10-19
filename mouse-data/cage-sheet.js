@@ -175,7 +175,7 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
 
 export function renderCageSheet(host,dataset,hooks={}){
   dragCleanupByHost.get(host)?.();
-  const renderToken=++renderSequence;let importing=false,creatingMouse=false,managers=hooks.managers||[],managersLoading=typeof hooks.loadManagers==='function',managersError=false,noteHints=hooks.noteHints||[],noteHintsLoading=typeof hooks.loadNoteHints==='function';
+  const renderToken=++renderSequence;let importing=false,creatingMouse=false,managers=hooks.managers||[],managersLoading=typeof hooks.loadManagers==='function'&&hooks.managersReady!==true,managersError=false,noteHints=hooks.noteHints||[],noteHintsLoading=typeof hooks.loadNoteHints==='function';
   hooks={...hooks,readOnly:hooks.readOnly===true||dataset?.history_projection?.read_only===true};
   const accountContext=String(hooks.context||'local');
   const context=accountContext+'|'+(hooks.readOnly?'history:'+String(hooks.selectedDate||'unknown'):'current');
@@ -579,7 +579,7 @@ export function renderCageSheet(host,dataset,hooks={}){
       return `<details class="panel"${lazy?` data-sheet-lazy-group="${esc(key)}"`:''}${open?' open':''}><summary class="panel-head">${esc(title)} · ${g.items.length}</summary>${lazy?`<div data-sheet-group-body data-loaded="${open?'true':'false'}">${open?rackHTML(g):''}</div>`:rackHTML(g)}</details>`;
     }).join('')||'<div class="empty">No cages match.</div>'}</section>`;
     wireLazyPanels();
-    if(host.querySelector('#cage-sheet-managers-retry'))host.querySelector('#cage-sheet-managers-retry').onclick=loadManagers;
+    if(host.querySelector('#cage-sheet-managers-retry'))host.querySelector('#cage-sheet-managers-retry').onclick=()=>loadManagers({force:true});
     if(host.querySelector('#cage-sheet-sync'))host.querySelector('#cage-sheet-sync').onclick=sync;
     if(host.querySelector('#cage-sheet-import'))host.querySelector('#cage-sheet-import').onclick=importFromSheet;
     if(host.querySelector('#cage-sheet-cancel-move'))host.querySelector('#cage-sheet-cancel-move').onclick=()=>{state.selectedCage=null;state.selectedSlot=null;paint();};
@@ -607,7 +607,7 @@ export function renderCageSheet(host,dataset,hooks={}){
       const fresh=await hooks.loadFresh();
       if(state.context!==token||String(hooks.currentContext?.()||accountContext)!==accountContext)throw new Error('Account or colony changed. Reload this sheet.');
       if(pending.some(change=>change.field==='manager'&&!change.positionManager&&['cages','locations'].includes(change.type))&&typeof hooks.loadManagers==='function'){
-        const latest=await hooks.loadManagers();if(state.context!==token||renderToken!==renderSequence||String(hooks.currentContext?.()||accountContext)!==accountContext)throw new Error('Account or colony changed. Reload this sheet.');managers=Array.isArray(latest)?latest:latest?.managers||[];
+        const latest=await hooks.loadManagers({force:true});if(state.context!==token||renderToken!==renderSequence||String(hooks.currentContext?.()||accountContext)!==accountContext)throw new Error('Account or colony changed. Reload this sheet.');managers=Array.isArray(latest)?latest:latest?.managers||[];
         for(const change of pending.filter(change=>change.field==='manager'&&!change.positionManager&&['cages','locations'].includes(change.type)&&change.value))if(!buildCageManagerChoices(managers,'').some(([value,,disabled])=>!disabled&&value===change.value))throw new Error('Selected manager is no longer in the manager list. Choose again.');
       }
       const next=applyCageSheetDrafts(fresh,pending,{canEdit:type=>hooks.canEdit?.(type)===true});
@@ -935,12 +935,13 @@ export function renderCageSheet(host,dataset,hooks={}){
   const handleClick=host.onclick;
   host.onclick=event=>{if(event.target.closest('.sheet-cage')&&(drag||Date.now()<suppressMouseClickUntil)){event.preventDefault?.();return;}return handleClick(event);};
   host.onkeydown=event=>{if(event.key==='Escape'&&(pointerDrag||touchDrag)){event.preventDefault();suppressMouseClickUntil=Date.now()+600;if(touchCount)touchBlocked=true;cancelDrag();return;}if(['Enter',' '].includes(event.key)&&event.target.matches('.sheet-cage')){event.preventDefault();event.target.click();}};
-  async function loadManagers(){
+  async function loadManagers({force=false}={}){
     if(typeof hooks.loadManagers!=='function')return;
-    managersLoading=true;managersError=false;paint();
-    try{const result=await hooks.loadManagers();if(renderToken!==renderSequence||state.context!==context)return;managers=Array.isArray(result)?result:result?.managers||[];}
-    catch{if(renderToken!==renderSequence||state.context!==context)return;managers=[];managersError=true;}
-    finally{if(renderToken===renderSequence&&state.context===context){managersLoading=false;paint();}}
+    const wasLoading=managersLoading;managersLoading=true;managersError=false;if(!wasLoading)paint();
+    const current=()=>renderToken===renderSequence&&state.context===context&&String(hooks.currentContext?.()||accountContext)===accountContext;
+    try{const result=await hooks.loadManagers({force});if(!current())return;managers=Array.isArray(result)?result:result?.managers||[];}
+    catch{if(!current())return;managers=[];managersError=true;}
+    finally{if(current()){managersLoading=false;paint();}}
   }
   async function loadNoteHints(){
     try{
@@ -953,7 +954,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     }catch{noteHintsLoading=false;/* Current row notes and saved badges remain available offline. */}
   }
   paint();
-  if(typeof hooks.loadManagers==='function'&&!hooks.readOnly)void loadManagers();
+  if(typeof hooks.loadManagers==='function'&&!hooks.readOnly&&hooks.managersReady!==true)void loadManagers();
   if(typeof hooks.loadNoteHints==='function'&&!hooks.readOnly)void loadNoteHints();
 }
 

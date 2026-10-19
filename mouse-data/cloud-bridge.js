@@ -102,6 +102,7 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(fixedPrimary&&!fallbackEngaged&&!pendingNAS()&&primaryProbe){await primaryProbe;check();if(readable('cloud1'))return;}
     await task;check();
   }
+  async function prepareRead(){const check=fence();await refreshForRead(check);check();return getState();}
   function getState(){synchronize();return snapshot();}
   function setPrimaryCloudPolicy(){synchronize();fixedPrimary=true;preferred='cloud1';if(active==='cloud2')fallbackEngaged=true;return emit();}
   function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
@@ -200,5 +201,5 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   function subscribe(listener){synchronize();if(typeof listener!=='function')throw new TypeError('A status listener is required.');listeners.add(listener);try{listener(snapshot());}catch{/* Rendering cannot alter cloud operations. */}return ()=>listeners.delete(listener);}
   function clear(){return reset(null);}
   function dispose(){reset(null);disposed=true;listeners.clear();}
-  return {refresh,getState,setPrimaryCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
+  return {refresh,prepareRead,getState,setPrimaryCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
 }

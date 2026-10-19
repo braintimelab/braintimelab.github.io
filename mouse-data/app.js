@@ -9,7 +9,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=149';
+import * as store from './data-store.js?v=150';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -29,7 +29,7 @@ import { createAccessActivity } from './access-activity.js?v=113';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=146';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=150';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
 import { renderCageLabelEditor } from './cage-label.js?v=146';
 import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=100';
@@ -88,10 +88,23 @@ let cryoLinkFocus=null,cryoLinkRequest=0;
 let cryoRenderToken = 0, cryoHistoryPending = null, cryoHistoryIndex = null, cryoHistoryContext = '';
 let strainIndexDataset=null, strainAssignments=new Map();
 let breedingScope='living', cageView='rack', cageDate='', cageHistoryArchivedLayouts=false;
-const cageSheetContext=()=>JSON.stringify([cloud.mode,cloud.url,cloud.colonyId,cloud.email,cloud.role,Boolean(cloud.signedIn)]);
-let cageManagerDirectory=[],cageManagerDirectoryContext='';
+const cageSheetContext=(status=cloud)=>JSON.stringify([status.mode,status.url,status.colonyId,status.email,status.userId??null,status.role,Boolean(status.signedIn),Boolean(status.passwordRecovery),Boolean(status.setupRequired),status.active??null,status.exportLevel,status.guestLevel,status.permissions,status.guestPermissions]);
+let cageManagerDirectory=[],cageManagerDirectoryContext='',cageManagerDirectoryAt=0,cageManagerDirectoryRequest=null;
+function clearCageManagerDirectory(){cageManagerDirectory=[];cageManagerDirectoryContext='';cageManagerDirectoryAt=0;cageManagerDirectoryRequest=null;}
 const currentCageManagers=()=>cageManagerDirectoryContext===cageSheetContext()?cageManagerDirectory:[];
-async function loadCageManagerOptions(){const context=cageSheetContext(),result=await store.listCageManagers();if(context!==cageSheetContext())throw new Error('Account changed. Reload cage managers.');cageManagerDirectory=result.managers;cageManagerDirectoryContext=context;return result.managers;}
+const cageManagersReady=()=>cageManagerDirectoryContext===cageSheetContext()&&Date.now()-cageManagerDirectoryAt>=0&&Date.now()-cageManagerDirectoryAt<60000;
+async function loadCageManagerOptions({force=false}={}){
+ const context=cageSheetContext();if(!force&&cageManagersReady())return cageManagerDirectory;
+ if(cageManagerDirectoryRequest?.context===context&&(!force||cageManagerDirectoryRequest.force))return cageManagerDirectoryRequest.promise;
+ const request={context,force,promise:null};cageManagerDirectoryRequest=request;
+ request.promise=Promise.resolve().then(()=>store.listCageManagers()).then(result=>{
+  if(context!==cageSheetContext())throw new Error('Account changed. Reload cage managers.');
+  if(!Array.isArray(result?.managers))throw new Error('Cage manager list is unavailable.');
+  const rows=result.managers.map(row=>({person_id:row.person_id,name:row.name,acronym:row.acronym??null,nickname:row.nickname??null,status:row.status}));
+  if(cageManagerDirectoryRequest===request){cageManagerDirectory=rows;cageManagerDirectoryContext=context;cageManagerDirectoryAt=Date.now();}
+  return rows;
+ }).finally(()=>{if(cageManagerDirectoryRequest===request)cageManagerDirectoryRequest=null;});return request.promise;
+}
 let cageNoteHintCache={context:'',at:0,rows:[]},cageNoteHintRequest=null;
 async function loadCageNoteHints(){
  const context=cageSheetContext();
@@ -282,7 +295,7 @@ function panel(title,body,action='') { return `<section class="panel"><div class
 function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`; }
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { if(!error&&/saved|recorded|updated/i.test(message)&&store.getCloudConnections?.()?.operations?.at(-1)?.outcome==='queued')message+=' Cloud 2 saved; sync pending.'; $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
-async function refreshCloud({verifyFees=true}={}) { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();cageManagerDirectory=[];cageManagerDirectoryContext='';cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(verifyFees&&cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
+async function refreshCloud({verifyFees=true}={}) { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);cloud=await store.getCloudStatus();if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();clearCageManagerDirectory();cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(verifyFees&&cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending')await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 function workspaceCloudIndicator(connections=store.getCloudConnections?.()){return cloudDataIndicator(connections,{mode:cloud.mode,checking:startupLoading||cachedPreview,offline:navigator.onLine===false,legacyConnected:cloud.signedIn&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending'&&cloud.activeCloud!=='cloud2'});}
 function workspaceSourceVerified(source){return cloud.signedIn&&!cloud.passwordRecovery&&cloud.role!=='pending'&&cloudReady&&store.getCloudStatus().readyForEdits!==false&&source.connected;}
 function workspaceConnectionText(connections=store.getCloudConnections?.()){if(cloud.mode!=='cloud')return 'Local only';const source=workspaceCloudIndicator(connections);return workspaceSourceVerified(source)?`${source.label} connected`:'Reconnect to edit';}
@@ -585,7 +598,7 @@ function renderCages(){
  if(cageView==='table'&&!view.readOnly){renderTable();return;}
  $('main').innerHTML=demoBanner()+cageViewMenuHTML()+cageHistoryNotice(view)+(view.readOnly?'':cageSummaryHTML())+(cageView==='table'?historicalCageTable(view):'<div id="cage-sheet-content"></div>');
  if(cageView==='table')return;
- renderCageSheet($('cage-sheet-content'),view.dataset,{managers:currentCageManagers(),loadManagers:cloud.signedIn?loadCageManagerOptions:undefined,noteHints:cageNoteHintCache.context===cageSheetContext()?cageNoteHintCache.rows:[],loadNoteHints:cloud.signedIn?loadCageNoteHints:undefined,layout:cageView==='sheet'?'detailed':'compact',canPrint:guestAllows(cloud,'mouse.export'),readOnly:view.readOnly,selectedDate:view.selectedDate,newCage:positionId=>{const position=records('locations').find(p=>p.location_id===positionId);if(position)openEditor('cages',null,{cage_tag:position.label,location_id:positionId,room_id:position.room_id,rack_id:position.rack_id,...(Object.hasOwn(position,'manager')?{manager:position.manager}:{} )});},newMouse:openCageMouse,context:cageSheetContext()+cageDate,currentContext:()=>cageSheetContext()+cageDate,
+ renderCageSheet($('cage-sheet-content'),view.dataset,{managers:currentCageManagers(),managersReady:cageManagersReady(),loadManagers:cloud.signedIn?loadCageManagerOptions:undefined,noteHints:cageNoteHintCache.context===cageSheetContext()?cageNoteHintCache.rows:[],loadNoteHints:cloud.signedIn?loadCageNoteHints:undefined,layout:cageView==='sheet'?'detailed':'compact',canPrint:guestAllows(cloud,'mouse.export'),readOnly:view.readOnly,selectedDate:view.selectedDate,newCage:positionId=>{const position=records('locations').find(p=>p.location_id===positionId);if(position)openEditor('cages',null,{cage_tag:position.label,location_id:positionId,room_id:position.room_id,rack_id:position.rack_id,...(Object.hasOwn(position,'manager')?{manager:position.manager}:{} )});},newMouse:openCageMouse,context:cageSheetContext()+cageDate,currentContext:()=>cageSheetContext()+cageDate,
   canEdit:type=>!view.readOnly&&canEditRecords(type==='mice'?'mice':'housing'),
   canImport:()=>!view.readOnly&&canImportAnimalsSheet(),importFromSheet:openCageSheetImport,
   openCage:view.readOnly?undefined:id=>navigate('cages',id),openMouse:view.readOnly?undefined:id=>navigate('mice',id),printLabel:view.readOnly?undefined:id=>openCageLabel(id),printPositionLabel:view.readOnly?undefined:id=>openCageLabel(null,'front',id),
@@ -737,7 +750,7 @@ async function runMouseReviewBatch({scope='current'}={},current=()=>true){
  const context=cageSheetContext();let fresh=dataset,started=false;
  const checkAccess=()=>{
   const status=store.getCloudStatus();
-  if(context!==cageSheetContext()||context!==JSON.stringify([status.mode,status.url,status.colonyId,status.email,status.role,Boolean(status.signedIn)])||status.mode!=='cloud'||status.role!=='owner'||status.signedIn!==true||status.passwordRecovery||!current())throw new Error('Access or page changed. Reopen Review.');
+  if(context!==cageSheetContext()||context!==cageSheetContext(status)||status.mode!=='cloud'||status.role!=='owner'||status.signedIn!==true||status.passwordRecovery||!current())throw new Error('Access or page changed. Reopen Review.');
   if(!canBatchMouseReview())throw new Error('Synchronizing. BB review is paused.');
  };
  brainbotReviewPending=true;busy=true;
@@ -844,7 +857,7 @@ async function validateEditorCageManager(draft,context,accountContext){
  if(context.type!=='cages')return;
  const changed=Object.hasOwn(draft,'manager')!==Object.hasOwn(context.record,'manager')||draft.manager!==context.record.manager;
  if(changed&&draft.manager){
-  const managers=await loadCageManagerOptions();
+  const managers=await loadCageManagerOptions({force:true});
   if(!current())throw new Error('Account or editor changed. Reopen this record.');
   if(!buildCageManagerChoices(managers,'').some(([name,,disabled])=>!disabled&&name===draft.manager))throw new Error('Selected manager is no longer in the manager list. Choose again.');
  }
