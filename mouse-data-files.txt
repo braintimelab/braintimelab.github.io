@@ -84,6 +84,7 @@ mouse-summary.js
 overview-summary.js
 permissions.js
 planner-layout.css
+presence.js
 room-order.js
 site-migration.js
 strain-cryo-links.js

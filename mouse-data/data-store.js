@@ -191,7 +191,7 @@ export function getCloudStatus(){
   const c=configuration(),s=session(),connections=operationalProvider?.getState()||null,activeCloud=connections?connections.active:synced?'cloud1':null;
   const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
   const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
-  return {configured:Boolean(c),signedIn:hasLabSession(s),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
+  return {configured:Boolean(c),signedIn:hasLabSession(s),userId:s?.user?.id??null,sessionEpoch:String(providerSessionEpoch),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -1587,6 +1587,56 @@ export async function listNasAppAccess(filters={}){
  if(!response.ok)throw apiError(response,result);
  if(result?.source!=='nas'||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Lab Notes access logs could not be verified.');
  return result;
+}
+
+
+// Presence is ephemeral and independent of audit history, data synchronization
+// and source selection. A hidden tab removes only its own per-app client row.
+const PRESENCE_UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const PRESENCE_APPS=['lab-tools','mouse','reagents'];
+function presenceEnvelope(result,source){
+ const apps=source==='nas'?['notes','calculator','qpcr']:PRESENCE_APPS;
+ const time=v=>typeof v==='string'&&Number.isFinite(Date.parse(v));
+ if(!result||result.source!==source||result.available!==true||!time(result.server_time)||result.expires_after_seconds!==90||!Array.isArray(result.users)||result.users.length>1000)throw new Error('Online members could not be verified.');
+ const ids=new Set(),serverTime=Date.parse(result.server_time);
+ const users=result.users.map(row=>{
+  if(!row||!PRESENCE_UUID.test(row.user_id||'')||ids.has(row.user_id)||typeof row.name!=='string'||row.name.length>200||!(row.acronym===null||typeof row.acronym==='string'&&row.acronym.length<=20)||!Array.isArray(row.apps)||!row.apps.length||row.apps.length>apps.length||new Set(row.apps).size!==row.apps.length||row.apps.some(app=>!apps.includes(app))||!time(row.last_seen_at)||!time(row.expires_at)||Date.parse(row.last_seen_at)>serverTime+5000||Date.parse(row.expires_at)<=serverTime||Date.parse(row.expires_at)-Date.parse(row.last_seen_at)!==90000)throw new Error('An online member could not be verified.');
+  ids.add(row.user_id);return {user_id:row.user_id,name:row.name,acronym:row.acronym,apps:[...row.apps],last_seen_at:row.last_seen_at,expires_at:row.expires_at};
+ });
+ return {source,available:true,server_time:result.server_time,expires_after_seconds:90,users};
+}
+export function recordAppPresence(payload){
+ const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch;
+ if(!c||!hasLabSession(s)||!PRESENCE_UUID.test(s?.user?.id||'')||s.passwordRecovery||s.setupRequired||!['owner','manager','editor','viewer'].includes(s.role)||!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!['app','clientId','present'].includes(k))||!PRESENCE_APPS.includes(payload.app)||!PRESENCE_UUID.test(payload.clientId||'')||typeof payload.present!=='boolean')return Promise.resolve(null);
+ const unchanged=()=>generation===authGeneration&&epoch===providerSessionEpoch&&configuration()?.url===c.url&&configuration()?.colonyId===c.colonyId&&session()?.user?.id===s.user.id&&session()?.role===s.role&&!session()?.passwordRecovery&&!session()?.setupRequired;
+ const body={p_colony_id:c.colonyId,p_app:payload.app,p_client_id:payload.clientId,p_present:payload.present};
+ const checked=result=>unchanged()&&typeof result?.recorded==='boolean'&&typeof result.server_time==='string'&&Number.isFinite(Date.parse(result.server_time))&&(payload.present?typeof result.expires_at==='string'&&Number.isFinite(Date.parse(result.expires_at)):result.expires_at===null)?{recorded:result.recorded,server_time:result.server_time,expires_at:result.expires_at}:null;
+ const service=provider();
+ if(service?.getState().active==='cloud2')return Promise.reject(Object.assign(new Error('Online presence is unavailable on Cloud 2.'),{code:'PRESENCE_UNAVAILABLE'}));
+ if(!s.access_token)return Promise.resolve(null);
+ const send=token=>Promise.resolve(fetch(`${c.url}/rest/v1/rpc/record_app_presence`,{method:'POST',cache:'no-store',credentials:'omit',redirect:'error',keepalive:true,headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body),...(typeof globalThis.AbortSignal?.timeout==='function'?{signal:globalThis.AbortSignal.timeout(5000)}:{})})).then(async response=>response.ok?checked(await responseJSON(response)):null).catch(()=>null);
+ try{if(payload.present&&s.expires_at<=Date.now()/1000+60)return accessToken(5000).then(token=>unchanged()?send(token):null).catch(()=>null);return send(s.access_token);}catch{return Promise.resolve(null);}
+}
+function ownerPresenceContext(){
+ const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch;
+ const denied=()=>new Error('Only the owner can view online members.');
+ if(!c||!hasLabSession(s)||!PRESENCE_UUID.test(s?.user?.id||'')||s.role!=='owner'||s.passwordRecovery||s.setupRequired)throw denied();
+ const check=()=>{if(generation!==authGeneration||epoch!==providerSessionEpoch||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The account changed. Reopen online members.');if(session()?.role!=='owner'||session()?.passwordRecovery||session()?.setupRequired)throw denied();};
+ return {c,check};
+}
+export async function listAppPresence(){
+ const {c,check}=ownerPresenceContext(),service=provider();
+ if(service?.getState().active==='cloud2')throw Object.assign(new Error('Online presence is unavailable on Cloud 2.'),{code:'PRESENCE_UNAVAILABLE'});
+ // A narrow owner-authorized RPC is sufficient; no scientific data pull or
+ // provider health check is needed for a status indicator.
+ const result=await cloud1Request('rpc/list_app_presence',{method:'POST',body:{p_colony_id:c.colonyId},timeoutMs:10000});check();return presenceEnvelope(result,'cloud1');
+}
+export async function listNasPresence(){
+ const {c,check}=ownerPresenceContext();
+ if(provider()?.getState().active==='cloud2')throw Object.assign(new Error('Online presence is unavailable on Cloud 2.'),{code:'PRESENCE_UNAVAILABLE'});
+ if(c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)throw new Error('BraintimeDisk online members are unavailable for this workspace.');
+ const token=await accessToken(8000);check();const endpoint=new URL('/api/owner/presence',PUBLIC_CONFIG.cloud2Url);
+ const {response,result}=await cloudJSON(endpoint.href,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();if(!response.ok)throw apiError(response,result);return presenceEnvelope(result,'nas');
 }
 
 const HISTORY_BUCKET='colony-history';

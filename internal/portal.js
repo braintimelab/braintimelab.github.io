@@ -1,3 +1,4 @@
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=156';
 import {guestAllows} from '../mouse-data/guest-access.js?v=155';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=152';
 
@@ -206,7 +207,8 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=155');
+  const store = await import('../mouse-data/data-store.js?v=156');
+  let presence=null;
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,
     isVisible: () => !document.hidden,
@@ -235,8 +237,10 @@ export async function mountPortal(document, window) {
         ? 'Finish resetting your password in Mouse Data before opening the lab tools.'
         : 'Finish setting up your username and password in Mouse Data to open the lab tools.';
       element('account-link').textContent = recovery ? 'Continue password reset' : 'Continue account setup';
+      if(state.phase==='member')void presence?.refresh();else presence?.clear();
     }
   });
+  presence=createPresence({app:'lab-tools',container:element('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:controller.getState().phase==='member'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
   element('sign-in-form').addEventListener('submit', async event => {
     event.preventDefault();
     const password = element('login-password').value;

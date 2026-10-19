@@ -127,7 +127,7 @@ test('mounted portal hides all document groups for Guests and reveals them only 
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: config});
+  const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: config});
   vm.runInContext(source, context);
   const controller = await context.mountPortal(document, window);
   for (const guestLevel of ['guest1', 'guest2', 'guest3']) {
@@ -317,7 +317,7 @@ test('a hanging or failed Cloud 1 verification leaves native Cloud 2 navigation 
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: config});
+  const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: config});
   vm.runInContext(source, context);
   const mounted = context.mountPortal(document, window);
   await Promise.resolve();
@@ -403,7 +403,7 @@ test('submitting a visible password clears and conceals it before authentication
     .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
     .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = globalThis.testBackupLink;')
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
+  const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
   vm.runInContext(source, context);
   await context.mountPortal(document, window);
   assert.equal(element('backup-viewer').hidden,true);assert.equal(element('backup-viewer').innerHTML,'');assert.equal(calls.length,0);

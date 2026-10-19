@@ -1,4 +1,5 @@
-import * as store from '../mouse-data/data-store.js?v=155';
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=156';
+import * as store from '../mouse-data/data-store.js?v=156';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
@@ -76,6 +77,7 @@ async function loadUsagePeople(){
 }
 const usageLogger=row=>usageLoggedBy(row,{directory:usagePeople?.key===context()?usagePeople.directory:[]});
 const accessActivity=createAccessActivity({app:'reagents',sections:SECTIONS.map(([route])=>route),record:args=>store.recordAppAccess?.(args),getContext:()=>{const current=store.getCloudStatus();return member&&permissions.role&&!current.setupRequired?{...current,mode:'cloud'}:null;}});
+const presence=createPresence({app:'reagents',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:member&&!!permissions.role}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const section=()=>{const key=location.hash.slice(1).split('/')[0];return SECTIONS.some(s=>s[0]===key)?key:'orders';};
 function observeAccess(resume=false,touch=false){if(!member||document.hidden)return;const current=section();if(!canViewSection(permissions,current))return;accessActivity[resume?'resume':touch?'touch':'observe'](current);}
 const label=s=>labels[s]||text(s).replaceAll('_',' ');
@@ -115,6 +117,7 @@ function loadingHTML(message='Loading Reagents…'){
 }
 function showLoading(message,attempt=generation){if(attempt===generation)main.innerHTML=loadingHTML(message);}
 function updateConnectionIndicator(state=connectionState){
+ void presence.refresh();
  connectionState=state;const host=$('account-connection');if(host)host.innerHTML=connectionIndicator();
 }
 function showIdentity(account){
@@ -123,9 +126,10 @@ function showIdentity(account){
  const role=permissions.role==='owner'?'Owner':permissions.role==='manager'?'Manager':'';
  const connection=connectionIndicator();
  $('identity').innerHTML=`<span class="account-initials" aria-hidden="true">${esc(initials.toUpperCase())}</span><span class="account-details"><a class="account-name" href="../mouse-data/#settings" title="Account settings">${esc(name)}</a><span class="account-status">${role?`<span class="account-role">${role}</span>`:''}<span id="account-connection">${connection}</span></span></span>`;
- $('identity').hidden=false;$('sidebar-account').hidden=false;$('sidebar-reload').hidden=false;
+ $('identity').hidden=false;$('sidebar-account').hidden=false;$('sidebar-reload').hidden=false;void presence.refresh();
 }
 function resetPrivate(){
+ presence.clear();
  connectionState='checking';usagePeople=null;inventoryLoaded=false;inventoryLoad=null;
  closeExportPreview();$('sheet-import').hidden=true;$('sheet-import-dialog').close();$('import-preview').innerHTML='';
  closeOrders();closeAccessLogs();if(!store.getCloudStatus().signedIn)accessActivity.reset();

@@ -9,7 +9,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=155';
+import * as store from './data-store.js?v=156';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -26,6 +26,7 @@ import { renderUserManagement } from './user-management.js?v=155';
 import { renderLabMembers, clearLabMembers } from './lab-members.js?v=155';
 import { renderAccessLogs } from './access-logs.js?v=153';
 import { createAccessActivity } from './access-activity.js?v=113';
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from './presence.js?v=156';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
@@ -241,6 +242,7 @@ function queueLabUserDirectory(){
 }
 const accessLogContext=()=>{const state=store.getCloudStatus();return [state.url,state.colonyId,state.email,state.mode,state.role,state.signedIn,state.passwordRecovery].join('|');};
 const accessActivity=createAccessActivity({app:'mouse',sections:Object.keys(titles),record:store.recordAppAccess,getContext:store.getCloudStatus,isVisible:()=>!document.hidden&&!startupLoading});
+const presence=createPresence({app:'mouse',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:!startupLoading&&!cachedPreview&&cloud.mode==='cloud'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const accessPage=()=>route;
 const resumeAccess=()=>{if(!document.hidden&&!startupLoading)accessActivity.resume(accessPage());};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)accessActivity.suspend();else resumeAccess();});
@@ -302,6 +304,7 @@ function workspaceConnectionText(connections=store.getCloudConnections?.()){if(c
 function cloudConnectionPanelHTML(){return cloud.cloud2Configured?`<div id="cloud-connections">${cloudControlsHTML(store.getCloudConnections?.(),{allowManualSelection:false})}</div>`:'';}
 function renderCloudConnections(connections=store.getCloudConnections?.()){renderSidebarAccount(connections);const host=$('cloud-connections');if(host&&cloud.cloud2Configured)host.innerHTML=cloudControlsHTML(connections,{allowManualSelection:false});}
 function renderConnection(connections=store.getCloudConnections?.()) {
+ void presence.refresh();
  renderCloudConnections(connections);renderSidebarAccount(connections);
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
  if(cachedPreview){$('mode-badge').textContent='Saved view · syncing';$('mode-badge').classList.remove('cloud');$('workspace-label').textContent='Shared laboratory workspace';return;}

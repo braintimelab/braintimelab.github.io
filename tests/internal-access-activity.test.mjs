@@ -101,7 +101,7 @@ test('mounted foreground and online returns revalidate access, while hidden page
   .replace(/^import .*;$/gm,'').replace(/^export /gm,'')
   .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/,'const PUBLIC_CONFIG=globalThis.testConfig,backupViewerLinkHTML=()=>"";')
   .replace(/const store = await import\('[^']+'\);/,'const store=globalThis.testStore;');
- const context=vm.createContext({URL,URLSearchParams,guestAllows,createAccessActivity,setTimeout,clearTimeout,testConfig:config,testStore:store});
+ const context=vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL,URLSearchParams,guestAllows,createAccessActivity,setTimeout,clearTimeout,testConfig:config,testStore:store});
  vm.runInContext(source,context);await context.mountPortal(document,window);await settle();
  assert.equal(events.length,1);assert.equal(verifications,1);
  document.hidden=true;documentEvents.get('visibilitychange')();windowEvents.get('focus')();windowEvents.get('online')();await settle();
