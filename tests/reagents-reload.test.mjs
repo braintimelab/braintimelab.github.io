@@ -6,6 +6,7 @@ import * as model from '../reagents/model.js';
 import * as sorting from '../reagents/table-sort.js';
 import * as inventoryExports from '../reagents/inventory-export.js';
 import * as usage from '../reagents/usage.js';
+import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js';
 
 const source=await readFile(new URL('../reagents/app.js',import.meta.url),'utf8');
 const deferred=()=>{let resolve;return {promise:new Promise(done=>{resolve=done;}),resolve:value=>resolve(value)};};
@@ -15,7 +16,7 @@ function fixture(){
  const permissions={role:'owner',can_write:true,can_import:true,can_manage_safety:true,export_level:'max'},config={url:'https://synthetic.supabase.co',colonyId:'synthetic-colony'},state={...config,configured:true,signedIn:true,email:'owner@example.invalid',name:'Synthetic Owner',role:'owner',exportLevel:'max'},gates={};
  const store={getCloudStatus:()=>({...state}),verifyCloudMembership:async()=>{calls.push('verify');await gates.verify?.promise;return {...state};},callReagents:async action=>{calls.push(action);await gates[action]?.promise;return action==='access'?{permissions,members:[]}:{rows:[],total:0,next_offset:null};},signOut:async()=>{calls.push('sign-out');state.signedIn=false;}};
  const location=new URL('https://synthetic.invalid/reagents/#inventory');
- const context=vm.createContext({...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,document:{hidden:false,getElementById:element,querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('#main input')?controls:[],addEventListener:(name,fn)=>events.set(`document:${name}`,fn)},window:{addEventListener(){},confirm:message=>{prompts.push(message);return gates.confirm===true;}},location,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createAccessActivity:()=>({observe(){},reset(){},signOut(){calls.push('activity-sign-out');}})});
+ const context=vm.createContext({...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),document:{hidden:false,getElementById:element,querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('#main input')?controls:[],addEventListener:(name,fn)=>events.set(`document:${name}`,fn)},window:{addEventListener(){},confirm:message=>{prompts.push(message);return gates.confirm===true;}},location,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createAccessActivity:()=>({observe(){},reset(){},signOut(){calls.push('activity-sign-out');}})});
  vm.runInContext(source.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+'\nglobalThis.app={start,reloadShared,signOut,rpc,setImporting,hasUnsavedChanges,state:()=>({member,reloadPending,pendingWrites})};',context);
  return {app:context.app,element,events,calls,controls,prompts,gates,location,state};
 }
@@ -56,6 +57,6 @@ test('repeated Reload clicks share one active reload and recover their buttons',
 
 test('Settings retains Sign out while the sidebar uses a fixed SVG circular arrow',async()=>{
  const html=await readFile(new URL('../reagents/index.html',import.meta.url),'utf8'),css=await readFile(new URL('../reagents/styles.css',import.meta.url),'utf8');
- assert.match(html,/id="sidebar-reload"[^>]*aria-label="Reload shared data"[^>]*><svg[^>]*>[\s\S]*?<path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7"/);assert.doesNotMatch(html,/id="sign-out"|sign-out-icon/);assert.match(css,/\.reload-icon svg\{[^}]*fill:none;stroke:currentColor/);
+ assert.match(html,/id="sidebar-reload"[^>]*aria-label="Reload shared data"[^>]*><svg[^>]*width="20"[^>]*height="20"[^>]*fill="none"[^>]*stroke="currentColor"[^>]*>[\s\S]*?<path d="M20 8V3l-3 3a8 8 0 1 0 2.3 10M20 8h-5"/);assert.doesNotMatch(html,/id="sign-out"|sign-out-icon/);assert.match(css,/\.reload-icon svg\{[^}]*fill:none;stroke:currentColor/);
  const f=fixture();f.location.hash='#settings';await f.app.start();assert.match(f.element('main').innerHTML,/data-action="sign-out">Sign out/);await f.app.signOut();assert(f.calls.includes('sign-out'));assert.equal(f.element('sidebar-account').hidden,true);
 });
