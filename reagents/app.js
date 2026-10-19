@@ -1,12 +1,12 @@
 import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=157';
-import * as store from '../mouse-data/data-store.js?v=159';
+import * as store from '../mouse-data/data-store.js?v=160';
 import {PUBLIC_CONFIG,backupViewerLinkHTML} from '../mouse-data/config.js?v=137';
 import {cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn} from '../mouse-data/cloud-status.js?v=149';
 import {createCloudMonitor} from '../mouse-data/cloud-monitor.js?v=139';
 import {createWorkbookXlsx} from '../mouse-data/workbook-export.js?v=95';
 import {inventoryExportWorkbook,inventoryPrintBodyHTML,inventoryExportFilename} from './inventory-export.js?v=7';
 import {sortRows,toggleSort,sortHeader} from './table-sort.js?v=2';
-import {renderAccessLogs} from '../mouse-data/access-logs.js?v=153';
+import {renderAccessLogs} from '../mouse-data/access-logs.js?v=160';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=113';
 import {createOrdersUI,validateOrderCatalog,importOrderCatalog} from './orders.js?v=8';
 import {buildUsageGroups,usageSelectorHTML,resolveUsageSelection,usageLoggedBy} from './usage.js?v=4';
@@ -76,7 +76,11 @@ async function loadUsagePeople(){
  return entry.promise;
 }
 const usageLogger=row=>usageLoggedBy(row,{directory:usagePeople?.key===context()?usagePeople.directory:[]});
-const accessActivity=createAccessActivity({app:'reagents',sections:SECTIONS.map(([route])=>route),record:args=>store.recordAppAccess?.(args),getContext:()=>{const current=store.getCloudStatus();return member&&permissions.role&&!current.setupRequired?{...current,mode:'cloud'}:null;}});
+const accessIdentity=value=>JSON.stringify([value?.url,value?.colonyId,value?.userId,value?.email,value?.role,value?.sessionEpoch,Boolean(value?.signedIn),Boolean(value?.passwordRecovery),Boolean(value?.setupRequired)]);
+let verifiedAccessIdentity='',openedAccessIdentity='';
+const accessActivity=createAccessActivity({app:'reagents',sections:SECTIONS.map(([route])=>route),record:args=>store.recordAppAccess?.(args),getContext:()=>{const current=store.getCloudStatus();return verifiedAccessIdentity&&accessIdentity(current)===verifiedAccessIdentity?{...current,mode:'cloud'}:null;}});
+function recordPendingReagentsEntry(returned=false){const current=store.getCloudStatus();if(document.hidden||!verifiedAccessIdentity||accessIdentity(current)!==verifiedAccessIdentity||openedAccessIdentity===verifiedAccessIdentity&&!returned)return;accessActivity.resume(section());openedAccessIdentity=verifiedAccessIdentity;}
+store.subscribeVerifiedMembership?.(status=>{if(accessIdentity(status)!==accessIdentity(store.getCloudStatus())||!status.signedIn||status.passwordRecovery||status.setupRequired||!['owner','manager','editor','viewer'].includes(status.role))return;verifiedAccessIdentity=accessIdentity(status);recordPendingReagentsEntry();});
 const presence=createPresence({app:'reagents',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:member&&!!permissions.role}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const section=()=>{const key=location.hash.slice(1).split('/')[0];return SECTIONS.some(s=>s[0]===key)?key:'orders';};
 function observeAccess(resume=false,touch=false){if(!member||document.hidden)return;const current=section();if(!canViewSection(permissions,current))return;accessActivity[resume?'resume':touch?'touch':'observe'](current);}
@@ -227,7 +231,7 @@ async function revalidateImportAccess(){
 }
 async function revalidateOrdersAccess(){const g=generation,refresh=refreshOrders;try{await rpc('access');if(g===generation&&refresh===refreshOrders){observeAccess(true);await refresh?.();}}catch(error){if(g===generation&&member)accessFailure(error);}}
 async function revalidateDraftAccess(){const g=generation;try{await rpc('access');if(g===generation)observeAccess(true);}catch(error){if(g===generation&&member){if([401,403].includes(error.status)||error.reagentsAccessChanged)accessFailure(error);else status(error.message||'Access check unavailable. Your draft is retained.',true);}}}
-function returnToApp(){if(document.hidden){accessActivity.suspend();return;}if(startupLoad?.generation===generation)return startupLoad.promise;return importing?revalidateImportAccess():pendingWrites||hasUnsavedChanges()||$('editor').open?revalidateDraftAccess():disposeOrders?revalidateOrdersAccess():start({resumeActivity:true});}
+function returnToApp(){recordPendingReagentsEntry(startupLoad?.generation===generation);if(document.hidden){accessActivity.suspend();return;}if(startupLoad?.generation===generation)return startupLoad.promise;return importing?revalidateImportAccess():pendingWrites||hasUnsavedChanges()||$('editor').open?revalidateDraftAccess():disposeOrders?revalidateOrdersAccess():start({resumeActivity:true});}
 async function render(){if(!member)return;closeExportPreview();closeOrders();closeAccessLogs();clearTimeout(searchTimer);listKind=null;nav();observeAccess();const v=++viewGeneration;selected=null;showLoading('Opening '+(SECTIONS.find(s=>s[0]===section())?.[2]||'Reagents')+'…');try{
  const s=section();if(!canViewSection(permissions,s)){main.innerHTML='<div class="empty">This section is not available to your account.</div>';return;}if(s==='history'&&!ownerHistoryAccess()){main.innerHTML='<div class="empty">History is available only to the owner.</div>';return;}if(s==='review'&&!canReviewHistory(permissions)){main.innerHTML='<div class="empty">Review is available to the owner and managers.</div>';return;}if(s==='orders'){await ordersView(v);return;}if(['inventory','safety','usage'].includes(s)){if(!inventoryLoaded)showLoading('Loading inventory…');await ensureInventory();if(v!==viewGeneration)return;}if(['inventory','safety'].includes(s)){inventoryView(s==='safety');if(s==='safety')await safetyRecords(v);return;}
  if(s==='history'){await historyView(v);return;}if(s==='settings'){await settingsView(v);return;}await recordList(v,s);

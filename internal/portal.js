@@ -20,12 +20,18 @@ export function createPortalController({store, config, location, navigate, onSta
   let generation = 0, pendingCheck = null, pendingAction = null;
   let verifiedIdentity = '';
   let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
-  const identityKey = current => JSON.stringify([current.url, current.colonyId, current.email, current.role, current.signedIn, current.passwordRecovery, current.setupRequired]);
+  const identityKey = current => JSON.stringify([current.url, current.colonyId, current.userId, current.sessionEpoch, current.email, current.role, current.signedIn, current.passwordRecovery, current.setupRequired]);
   const activity = createAccessActivity({app: 'lab-tools', sections: ['tools'], record: store.recordAppAccess,
     // A data-free membership check verifies portal access even before Mouse Data
     // has selected its dataset mode. Do not load animal records for activity.
     getContext: () => { const current = store.getCloudStatus(); return verifiedIdentity && identityKey(current) === verifiedIdentity ? {...current, mode: 'cloud'} : null; },
     isVisible, setTimer: (fn, delay) => timers.setTimeout(fn, delay), clearTimer: timer => timers.clearTimeout(timer)});
+  const stopMembership = store.subscribeVerifiedMembership?.(current => {
+    if (state.phase !== 'checking' || !current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
+      || current.url !== config.url || current.colonyId !== config.colonyId || identityKey(current) !== identityKey(store.getCloudStatus())) return;
+    verifiedIdentity = identityKey(current);
+    activity.resume('tools');
+  });
   const appURL = () => new URL('../mouse-data/', location.href).href;
   const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
@@ -129,6 +135,7 @@ export function createPortalController({store, config, location, navigate, onSta
       return await bounded(async () => {
         await store.signIn(identifier, password);
         if (action.attempt !== generation) return state;
+        publish({phase: 'checking', message: 'Checking your session…'});
         return resolveAccess(action.attempt);
       }, 'sign-in');
     } catch (error) { return failure(error, action.attempt); }
@@ -194,6 +201,7 @@ export function createPortalController({store, config, location, navigate, onSta
   return Object.freeze({
     start, checkAccess, signIn, signOut, openMouseData, openReagents,
     suspendActivity: () => activity.suspend(),
+    dispose: () => { generation++; stopMembership?.(); verifiedIdentity = ''; activity.reset(); },
     requestReset: identifier => sendRequest('reset', () => store.requestPasswordReset(identifier)),
     sendEmailLink: email => sendRequest('email', () => store.requestEmailLink(email, appURL())),
     getState: () => state
@@ -207,7 +215,7 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=159');
+  const store = await import('../mouse-data/data-store.js?v=160');
   let presence=null;
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,

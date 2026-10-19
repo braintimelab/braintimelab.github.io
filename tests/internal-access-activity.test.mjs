@@ -13,12 +13,12 @@ const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{reso
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function fixture(t,{status=member(),verify,record=()=>({recorded:true}),signedInStatus={}}={}){
  let current=status,visible=true,at=1000,sequence=0;
- const events=[],calls=[],timers=new Map(),navigation=[];
+ const events=[],calls=[],timers=new Map(),navigation=[],membershipListeners=new Set();
  t.mock.method(Date,'now',()=>at);
  const store={
-  getCloudStatus:()=>({...current}),
+  getCloudStatus:()=>({...current}),subscribeVerifiedMembership(fn){membershipListeners.add(fn);return()=>membershipListeners.delete(fn);},
   configureCloud(){assert.fail('Do not replace the lab configuration');},
-  async verifyCloudMembership(){calls.push('verify');return verify?verify():{...current};},
+  async verifyCloudMembership(){calls.push('verify');if(verify)return verify();for(const fn of membershipListeners)fn({...current});return {...current};},
   async signIn(){calls.push('sign-in');current=member(signedInStatus);},
   async signOut(){calls.push('sign-out');current=signedOut();},
   recordAppAccess(payload){calls.push('activity');events.push(payload);return record(payload);}
@@ -27,7 +27,7 @@ function fixture(t,{status=member(),verify,record=()=>({recorded:true}),signedIn
   timers:{setTimeout(fn,delay){timers.set(++sequence,{fn,delay});return sequence;},clearTimeout(id){timers.delete(id);}},
   navigate:(url,mode)=>navigation.push({url,...mode})});
  return {controller,events,calls,timers,navigation,state:value=>{current=value;},visible:value=>{visible=value;},advance:ms=>{at+=ms;},
-  retry(){const [id,job]=timers.entries().next().value||[];assert.ok(job,'retry is scheduled');timers.delete(id);job.fn();return job.delay;}};
+  verified(value){for(const fn of membershipListeners)fn(value||{...current});},retry(){const [id,job]=timers.entries().next().value||[];assert.ok(job,'retry is scheduled');timers.delete(id);job.fn();return job.delay;}};
 }
 
 test('Lab tools records only after successful independent membership verification, without loading Mouse Data',async t=>{
@@ -91,12 +91,12 @@ test('sign-out activity captures the verified session before credentials clear, 
 });
 
 test('mounted foreground and online returns revalidate access, while hidden pages suspend without requests',async t=>{
- let at=1000,current=member(),verifications=0;const events=[],elements=new Map(),windowEvents=new Map(),documentEvents=new Map();
+ let at=1000,current=member(),verifications=0;const events=[],elements=new Map(),windowEvents=new Map(),documentEvents=new Map(),membershipListeners=new Set();
  t.mock.method(Date,'now',()=>at);
  const element=id=>{if(!elements.has(id))elements.set(id,{type:id==='login-password'?'password':'',hidden:true,textContent:'',innerHTML:'',dataset:{},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const document={hidden:false,getElementById:element,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentEvents.set(name,fn)};
  const window={location:new URL('https://lab.example/internal/'),addEventListener:(name,fn)=>windowEvents.set(name,fn)};
- const store={getCloudStatus:()=>({...current}),verifyCloudMembership:async()=>{verifications++;return {...current};},recordAppAccess:payload=>{events.push(payload);return {recorded:true};}};
+ const store={getCloudStatus:()=>({...current}),subscribeVerifiedMembership(fn){membershipListeners.add(fn);return()=>membershipListeners.delete(fn);},verifyCloudMembership:async()=>{verifications++;return {...current};},recordAppAccess:payload=>{events.push(payload);return {recorded:true};}};
  const source=(await readFile(new URL('../internal/portal.js',import.meta.url),'utf8'))
   .replace(/^import .*;$/gm,'').replace(/^export /gm,'')
   .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/,'const PUBLIC_CONFIG=globalThis.testConfig,backupViewerLinkHTML=()=>"";')
@@ -110,4 +110,12 @@ test('mounted foreground and online returns revalidate access, while hidden page
  assert.equal(verifications,2);assert.equal(events.length,2);assert.notEqual(events[0].sessionId,events[1].sessionId);
  windowEvents.get('online')();await settle();assert.equal(verifications,3);assert.equal(events.length,2);
  current=member({role:'pending',setupRequired:true});windowEvents.get('focus')();await settle();assert.equal(events.length,2);
+});
+
+
+test('a fresh membership signal records entry before a later verification stage stalls, without unlocking tools',async t=>{
+ const gate=deferred(),f=fixture(t,{verify:()=>gate.promise}),checking=f.controller.start();await settle();assert.equal(f.events.length,0);f.verified();await settle();assert.equal(f.events.length,1);assert.equal(f.events[0].event,'session_start');assert.equal(f.controller.getState().phase,'checking');f.verified();assert.equal(f.events.length,1);gate.reject(Error('Connection unavailable after membership verification'));await checking;assert.equal(f.controller.getState().phase,'signed-out');assert.equal(f.events.length,1,'verified entry is separate from successfully opening tool data');
+});
+test('stale verified signals and disposed controllers cannot report another account',async t=>{
+ const gate=deferred(),f=fixture(t,{verify:()=>gate.promise}),checking=f.controller.start();await settle();f.state(member({email:'other@example.invalid'}));f.verified(member());assert.equal(f.events.length,0);f.controller.dispose();f.verified();assert.equal(f.events.length,0);gate.resolve(member());await checking;assert.equal(f.events.length,0);
 });

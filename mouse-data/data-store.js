@@ -364,20 +364,21 @@ export async function connectCloud2({reset=false}={}){
  }});
 }
 async function membership(action){
-  const c=configuration(),s=session();
+  const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch,config=stable(c);
   if(!s?.user?.id)throw new Error('The signed-in user is unavailable. Sign in again.');
+  const checkPolicy=()=>{action?.check();if(generation!==authGeneration||epoch!==providerSessionEpoch||stable(configuration())!==config||session()?.user?.id!==s.user.id)throw new Error('The account changed while verifying application permissions.');};
   const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,notes_permissions,mouse_permissions,reagents_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  checkPolicy();
   if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
   if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The cloud account or colony changed. Sign in again.');
   action?.check();assertGuestAvailability(rows[0]);
-  const generation=authGeneration,checkPolicy=()=>{action?.check();if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The account changed while verifying application permissions.');};
   const purgePolicyCache=async()=>{const historyCached=Boolean(baseline||readJSON('localStorage',CLOUD_CACHE_KEY));invalidate();verifiedIntentPolicy=null;feeVisibility=null;feeVisibilityContext=null;await local('delete',undefined,{check:checkPolicy});if(historyCached)await clearHistoryIndex({check:checkPolicy});checkPolicy();};
   let appPermissions;
   try{appPermissions=appPermissionFields(rows[0],true);}catch(error){saveSession({...session(),...appPermissionFields(rows[0])});await purgePolicyCache();throw error;}
   if(stable(appPermissionFields(s))!==stable(appPermissions)||stable({level:s.guestLevel||null,permissions:s.guestPermissions||{},starts:s.guestAccessStartsOn??null,ends:s.guestAccessEndsOn??null})!==stable({level:rows[0].guest_level||null,permissions:rows[0].guest_permissions||{},starts:rows[0].guest_access_starts_on??null,ends:rows[0].guest_access_ends_on??null})){saveSession({...session(),...appPermissions});await purgePolicyCache();}
   saveSession({...session(),role:rows[0].role,guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},guestAccessStartsOn:rows[0].guest_access_starts_on??null,guestAccessEndsOn:rows[0].guest_access_ends_on??null,permissions:rows[0].permissions||{},...appPermissions,setupRequired:false,exportLevel:rows[0].role==='owner'?'max':rows[0].export_level||'low'});
   verifiedIntentPolicy={policyKey:stable({role:rows[0].role,exportLevel:rows[0].export_level||'low',permissions:rows[0].permissions||{},...appPermissions,guestLevel:rows[0].guest_level||null,guestPermissions:rows[0].guest_permissions||{},guestAccessStartsOn:rows[0].guest_access_starts_on??null,guestAccessEndsOn:rows[0].guest_access_ends_on??null,updatedAt:rows[0].updated_at||null})};
-  await provider()?.restore();return rows[0].role;
+  notifyVerifiedMembership();checkPolicy();await provider()?.restore();checkPolicy();return rows[0].role;
 }
 // A live, data-free access check for the internal tools portal. Cached roles
 // alone never unlock the portal; no animal records or roster are requested.
@@ -1572,21 +1573,33 @@ export async function inviteLabMember(payload){return manageColonyUsers('invite_
 export async function createLabMemberInvitationLink(payload){return manageColonyUsers('create_preregistered_link',payload);}
 
 const ACCESS_PAGES={'lab-tools':['tools'],mouse:['overview','mice','strains','review','matings','litters','cages','family','planner','experiments','iacuc','housing','locobox','cryo','fees','archive','brainbot','settings'],reagents:['inventory','safety','usage','orders','vendors','equipment','history','review','settings']};
+const verifiedMembershipListeners=new Set(),appAccessListeners=new Set(),appAccessReceipts=new Map();let appAccessReceiptContext='';
+// This signal comes only from the existing fresh membership read. It carries no
+// token and cannot delay authorization or the following dataset load.
+export function subscribeVerifiedMembership(listener){if(typeof listener!=='function'||verifiedMembershipListeners.size>=8)return()=>{};verifiedMembershipListeners.add(listener);return()=>verifiedMembershipListeners.delete(listener);}
+function notifyVerifiedMembership(){const generation=authGeneration,epoch=providerSessionEpoch,current=session(),config=stable(configuration()),status=Object.freeze(getCloudStatus());for(const listener of [...verifiedMembershipListeners]){if(generation!==authGeneration||epoch!==providerSessionEpoch||session()?.user?.id!==current?.user?.id||stable(configuration())!==config)break;try{Promise.resolve(listener(status)).catch(()=>{});}catch{/* Reporting cannot change access. */}}}
+const appAccessContext=()=>{const c=configuration(),s=session();return c&&s?.user?.id&&hasLabSession(s)&&!s.passwordRecovery&&!pendingAccount(s)?JSON.stringify([c.url,c.colonyId,s.user.id,s.role,providerSessionEpoch]):'';};
+function accessReceiptContext(){const current=appAccessContext();if(current!==appAccessReceiptContext){appAccessReceiptContext=current;appAccessReceipts.clear();}return current;}
+function accessReceipt(app,context,state){if(!context||accessReceiptContext()!==context)return;const previous=appAccessReceipts.get(app)||{attempts:0,last_attempt_at:null,last_confirmed_at:null};appAccessReceipts.set(app,{state,attempts:Math.min(999,previous.attempts+(state==='pending'?1:0)),last_attempt_at:state==='pending'?new Date().toISOString():previous.last_attempt_at,last_confirmed_at:['confirmed','rate_limited'].includes(state)?new Date().toISOString():previous.last_confirmed_at});for(const listener of [...appAccessListeners])try{listener();}catch{/* Diagnostic rendering is optional. */}}
+export function getAppAccessStatus(app='mouse'){accessReceiptContext();return {...(appAccessReceipts.get(app)||{state:'idle',attempts:0,last_attempt_at:null,last_confirmed_at:null})};}
+export function subscribeAppAccessStatus(listener){if(typeof listener!=='function'||appAccessListeners.size>=8)return()=>{};appAccessListeners.add(listener);return()=>appAccessListeners.delete(listener);}
 // Authenticated app activity is best effort and contains only allowlisted labels.
 // Capture the current token before sign-out clears it; never delay sign-out for logging.
 export function recordAppAccess(payload){
  const c=configuration(),s=session(),generation=authGeneration,idPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  if(!c||!hasLabSession(s)||!s.user?.id||s.passwordRecovery||s.setupRequired||!['owner','manager','editor','viewer'].includes(s.role)||!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!['app','event','page','sessionId','eventId'].includes(k))||!['mouse','reagents','lab-tools'].includes(payload.app)||!['session_start','page_view','sign_out'].includes(payload.event)||!ACCESS_PAGES[payload.app]?.includes(payload.page)||!idPattern.test(payload.sessionId||'')||!idPattern.test(payload.eventId||''))return Promise.resolve(null);
  const body={p_colony_id:c.colonyId,p_app:payload.app,p_event:payload.event,p_page:payload.page,p_session_id:payload.sessionId,p_event_id:payload.eventId};
- const service=provider();if(service&&service.getState().active==='cloud2')return service.cloud2.activity(body).then(reply=>reply?.result&&typeof reply.result.recorded==='boolean'?reply.result:null).catch(()=>null);
- if(!s.access_token)return Promise.resolve(null);
- const send=token=>Promise.resolve(fetch(`${c.url}/rest/v1/rpc/record_app_access`,{method:'POST',cache:'no-store',redirect:'error',keepalive:true,headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body),...(typeof globalThis.AbortSignal?.timeout==='function'?{signal:globalThis.AbortSignal.timeout(5000)}:{})})).then(async response=>{if(!response.ok)return null;const result=await responseJSON(response);return result&&typeof result.recorded==='boolean'&&['recorded','duplicate','debounced','rate_limited'].includes(result.reason)?result:null;}).catch(()=>null);
+ const receiptContext=accessReceiptContext();accessReceipt(payload.app,receiptContext,'pending');
+ const settled=result=>{const confirmed=result&&typeof result.recorded==='boolean'&&['recorded','duplicate','debounced','rate_limited'].includes(result.reason)&&result.recorded===(result.reason==='recorded')&&result.event_id===payload.eventId;accessReceipt(payload.app,receiptContext,confirmed?(result.reason==='rate_limited'?'rate_limited':'confirmed'):'unconfirmed');return confirmed?result:null;};
+ const service=provider();if(service&&service.getState().active==='cloud2')return service.cloud2.activity(body).then(reply=>settled(reply?.result),()=>settled(null));
+ if(!s.access_token)return Promise.resolve(settled(null));
+ const send=token=>Promise.resolve(fetch(`${c.url}/rest/v1/rpc/record_app_access`,{method:'POST',cache:'no-store',redirect:'error',keepalive:true,headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body),...(typeof globalThis.AbortSignal?.timeout==='function'?{signal:globalThis.AbortSignal.timeout(5000)}:{})})).then(async response=>settled(response.ok?await responseJSON(response):null)).catch(()=>settled(null));
  // Local section navigation may not make any other authenticated request for hours.
  // Refresh ordinary activity tokens; sign-out still captures its token immediately.
  try{
-  if(payload.event!=='sign_out'&&s.expires_at<=Date.now()/1000+60)return accessToken().then(token=>{const current=session();if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||current?.user?.id!==s.user.id||current?.role!==s.role||current.passwordRecovery||current.setupRequired)return null;return send(token);}).catch(()=>null);
+  if(payload.event!=='sign_out'&&s.expires_at<=Date.now()/1000+60)return accessToken().then(token=>{const current=session();if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||current?.user?.id!==s.user.id||current?.role!==s.role||current.passwordRecovery||current.setupRequired)return settled(null);return send(token);}).catch(()=>settled(null));
   return send(s.access_token);
- }catch{return Promise.resolve(null);}
+ }catch{return Promise.resolve(settled(null));}
 }
 
 export async function listAppAccess(filters={}){
