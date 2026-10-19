@@ -259,6 +259,7 @@ test('published page starts with tools hidden, accessible labels and a Reagents 
   assert.match(html, /name="robots" content="noindex, nofollow"/);
   assert.match(html, /for="login-id"/);
   assert.match(html, /autocomplete="current-password"/);
+  assert.match(html, /<h2 id="sign-in-heading">Lab sign-in<\/h2>\s*<p class="small"><span class="availability">Cloud 1<\/span><\/p>/);
   assert.match(html, /role="status"/);
   const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1];
   assert(csp);
@@ -368,14 +369,19 @@ test('setup and recovery sessions cannot open Reagents', async () => {
 
 test('password visibility is opt-in, accessible, and never reads or modifies the password value', async () => {
   const input = {type: 'password', get value() { throw Error('The visibility toggle must not read the password'); }, set value(_) { throw Error('The visibility toggle must not change the password'); }};
-  const attributes = new Map(), button = {textContent: 'Show password', setAttribute(name, value) { attributes.set(name, value); }};
+  const attributes = new Map(), button = {get textContent() { throw Error('Keep the eye icon intact'); }, set textContent(_) { throw Error('Keep the eye icon intact'); }, setAttribute(name, value) { attributes.set(name, value); }};
   const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
   assert.match(html, /id="login-password"[^>]+type="password"/);
   assert.match(html, /id="show-password"[^>]+type="button"[^>]+aria-controls="login-password"[^>]+aria-pressed="false"/);
+  assert.match(html, /aria-label="Show password" title="Show password"><svg[^>]+aria-hidden="true"/);
+  assert.match(html, /class="password-eye-slash"/);
+  const css = await readFile(new URL('../internal/portal.css', import.meta.url), 'utf8');
+  assert.match(css, /\.password-eye-slash\s*\{\s*display:\s*block/);
+  assert.match(css, /\[aria-pressed="true"\]\s+\.password-eye-slash\s*\{\s*display:\s*none/);
   togglePasswordVisibility(input, button);
-  assert.equal(input.type, 'text');assert.equal(button.textContent, 'Hide password');assert.equal(attributes.get('aria-pressed'), 'true');
+  assert.equal(input.type, 'text');assert.equal(attributes.get('aria-label'), 'Hide password');assert.equal(attributes.get('title'), 'Hide password');assert.equal(attributes.get('aria-pressed'), 'true');
   togglePasswordVisibility(input, button);
-  assert.equal(input.type, 'password');assert.equal(button.textContent, 'Show password');assert.equal(attributes.get('aria-pressed'), 'false');
+  assert.equal(input.type, 'password');assert.equal(attributes.get('aria-label'), 'Show password');assert.equal(attributes.get('title'), 'Show password');assert.equal(attributes.get('aria-pressed'), 'false');
 });
 
 test('submitting a visible password clears and conceals it before authentication completes', async () => {
@@ -401,7 +407,7 @@ test('submitting a visible password clears and conceals it before authentication
   let prevented = false;
   const submission = element('sign-in-form').listeners.get('submit')({preventDefault() { prevented = true; }});
   assert.equal(prevented, true);assert.equal(element('login-password').value, '');assert.equal(element('login-password').type, 'password');
-  assert.equal(element('show-password').textContent, 'Show password');assert.equal(element('show-password').attributes.get('aria-pressed'), 'false');
+  assert.equal(element('show-password').attributes.get('aria-label'), 'Show password');assert.equal(element('show-password').attributes.get('aria-pressed'), 'false');
   assert.deepEqual(calls, [{identifier: 'lab.member', password: 'synthetic-only-password'}]);
   assert.ok(![...elements.values()].some(e => e.textContent.includes('synthetic-only-password')));
   waiting.resolve();await submission;

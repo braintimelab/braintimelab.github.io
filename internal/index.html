@@ -9,8 +9,8 @@
   <meta name="theme-color" content="#f7f4e7">
   <title>Lab tools · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
-  <link rel="stylesheet" href="./portal.css?v=12">
-  <script type="module" src="./portal.js?v=18"></script>
+  <link rel="stylesheet" href="./portal.css?v=14">
+  <script type="module" src="./portal.js?v=19"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -50,13 +50,13 @@
     <section id="sign-in-panel" class="sign-in-layout" hidden aria-labelledby="sign-in-heading">
       <div class="sign-in-card">
         <h2 id="sign-in-heading">Lab sign-in</h2>
-        <p class="small">Cloud 1</p>
+        <p class="small"><span class="availability">Cloud 1</span></p>
         <button id="discard-session" class="text-button" type="button" data-sign-out hidden>Sign out of this session</button>
         <form id="sign-in-form">
           <label for="login-id">ID or email</label>
           <input id="login-id" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
           <label for="login-password">Password</label>
-          <div class="password-entry"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button id="show-password" class="text-button" type="button" aria-controls="login-password" aria-pressed="false">Show password</button></div>
+          <div class="password-entry"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button id="show-password" class="password-toggle" type="button" aria-controls="login-password" aria-pressed="false" aria-label="Show password" title="Show password"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="password-eye-slash" d="m3 3 18 18"/></svg></button></div>
           <button class="button primary" type="submit">Sign in</button>
         </form>
         <details class="alternative">
@@ -142,8 +142,8 @@
           <div class="tool-top"><span class="tool-number" aria-hidden="true">05</span></div>
           <h3>Lab calculators</h3>
           <div class="tool-links">
-            <a id="open-braintime-calculator" class="tool-link" href="https://braintimedisk.tail933238.ts.net:10000/calculator/"><span>Braintime Calculator</span><span class="availability">BraintimeDisk</span></a>
-            <a id="open-qpcr-calculator" class="tool-link" href="../qpcr-calculator/"><span>qPCR Calculator</span><span class="availability">On this device</span></a>
+            <div class="tool-entry"><a id="open-braintime-calculator" class="tool-link" href="https://braintimedisk.tail933238.ts.net:10000/calculator/">Braintime Calculator</a><span class="availability">BraintimeDisk</span></div>
+            <div class="tool-entry"><a id="open-qpcr-calculator" class="tool-link" href="https://braintimedisk.tail933238.ts.net:10000/qpcr/">qPCR Calculator</a><span class="availability">BraintimeDisk</span></div>
             <a class="tool-link" href="https://github.com/JihwanMyung/ImagingAnalysis" target="_blank" rel="noopener noreferrer"><span class="tool-link-label"><img src="../assets/icons/github.svg" width="18" height="18" alt="GitHub">PMTAnalysis · Mathematica</span><span aria-hidden="true">↗</span><span class="visually-hidden"> (opens in a new tab)</span></a>
             <a class="tool-link" href="https://github.com/JihwanMyung/LocoBox" target="_blank" rel="noopener noreferrer"><span class="tool-link-label"><img src="../assets/icons/github.svg" width="18" height="18" alt="GitHub">LocoBox code</span><span aria-hidden="true">↗</span><span class="visually-hidden"> (opens in a new tab)</span></a>
           </div>

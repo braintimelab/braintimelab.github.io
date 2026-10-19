@@ -4,7 +4,9 @@ const CALLBACK_KEYS = ['access_token', 'refresh_token', 'error', 'error_descript
 
 export function togglePasswordVisibility(input, button, show = input.type === 'password') {
   input.type = show ? 'text' : 'password';
-  button.textContent = show ? 'Hide password' : 'Show password';
+  const label = show ? 'Hide password' : 'Show password';
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
   button.setAttribute('aria-pressed', String(show));
 }
 
@@ -134,6 +136,7 @@ export function createPortalController({store, config, location, navigate, onSta
 export async function mountPortal(document, window) {
   const {PUBLIC_CONFIG, backupViewerLinkHTML} = await import('../mouse-data/config.js');
   const element = id => document.getElementById(id);
+  togglePasswordVisibility(element('login-password'), element('show-password'), false);
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
