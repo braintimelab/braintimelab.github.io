@@ -300,6 +300,9 @@ test('the portal imports the same maintained store release as Mouse Data and Rea
   assert(version(mouse));
   assert.equal(version(portal), version(mouse));
   assert.equal(version(reagents), version(mouse));
+  assert.equal(version(mouse), '160', 'the verified-membership observer and its consumers share one store instance');
+  const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
+  assert.match(html, /portal\.js\?v=28/, 'changed portal code must use a new immutable cache URL');
 });
 
 test('a hanging or failed Cloud 1 verification leaves native Cloud 2 navigation usable and tools hidden', async () => {
