@@ -25,7 +25,7 @@ export const esc = v => text(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','
 export function safeURL(value) {try {const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password?u.href:'';}catch{return '';}}
 export function hazardous(p) {
   const known=value=>Array.isArray(value)?value.some(known):!['','unknown','unverified','none','n','no','na','n/a','無','未確認','未分類','not recorded'].includes(text(value).trim().toLowerCase());
-  return p.safety?.flagged===true || p.safety?.regulated===true || [p.safety?.hazard_codes,p.safety?.classification,p.safety?.regulatory_list,p.hazard_statements].some(known);
+  return p.safety?.flagged===true || p.safety?.regulated===true || [p.safety?.hazard_codes,p.safety?.classification,p.safety?.ghs_classification,p.safety?.regulatory_list,p.hazard_statements].some(known);
 }
 export function quantity(p) {
   if(typeof p.remaining_amount==='number'&&Number.isFinite(p.remaining_amount)&&p.remaining_amount>=0)return `${p.remaining_amount} ${p.unit||'(unit unknown)'}`;
@@ -122,6 +122,11 @@ export function validDate(value) {
   if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
   const d=new Date(value+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;
 }
+// A source import or record-edit date is not evidence of physical arrival.
+export function inventoryArrivalDate(row) {
+  const value=row?.payload?.received_date;
+  return validDate(value)?value:null;
+}
 export function mergeRecordFields(previous,values,fields,{canManageSafety=true}={}) {
   const payload=structuredClone(previous);
   for(const [key,,type] of fields){
@@ -135,6 +140,7 @@ export function mergeSafety(previous,values) {
   if(values.sds_url&&!safeURL(values.sds_url))throw Error('Use a valid http or https SDS link.');
   const next={...structuredClone(previous),...values};
   next.hazard_codes=text(values.hazard_codes).split(',').map(s=>s.trim()).filter(Boolean);
+  if(Object.hasOwn(values,'ghs_classification'))next.ghs_classification=(Array.isArray(values.ghs_classification)?values.ghs_classification:text(values.ghs_classification).split(/\r?\n/)).map(text).map(value=>value.trim()).filter(Boolean);
   return next;
 }
 export async function collectPages(call,args={},check=()=>{}) {
@@ -174,4 +180,64 @@ export async function executeImport(bundle,{call,check=()=>{},onProgress=()=>{},
     }
     report.complete=true;return report;
   } catch(error){error.importReport=report;throw error;}
+}
+
+/* Product-only manufacturer SDS references. No inventory, stock or member data.
+ * A catalog match proposes the supplier document. Bottle identity, regional SDS
+ * and handling assessment still require the existing safety review workflow.
+ */
+const sdsCheckedDate='2026-10-21';
+const sdsSigmaBrands=['sigma','sigma-aldrich','aldrich','milliporesigma'];
+export const SUPPLIER_SDS_REFERENCES=Object.freeze([
+ {id:'aldrich-m6250',brand:'Sigma-Aldrich',brand_aliases:sdsSigmaBrands,catalog_number:'M6250',catalog_aliases:['M6250','M6250-100ML','SI-M6250'],catalog_cas_required:{'SI-M6250':'60-24-2'},name:'2-Mercaptoethanol',cas_numbers:['60-24-2'],form:'liquid',concentration:'≥99.0% as supplied',percentage_values:[99,99.0],product_url:'https://www.sigmaaldrich.com/US/en/product/aldrich/m6250',sds_url:'https://www.sigmaaldrich.com/US/en/sds/aldrich/m6250',sds_version:'8.4',sds_document_date:'2026-06-15',sds_retrieved_date:sdsCheckedDate,sds_region:'US',sds_language:'English',signal_word:'Danger',hazard_codes:['H227','H301','H331','H310','H315','H317','H318','H361','H373','H400','H411'],ghs_classification:['Flammable liquid 4','Acute toxicity: oral 3, inhalation 3, dermal 2','Skin irritation 2','Serious eye damage 1','Skin sensitization 1A','Reproductive toxicity 2','Specific target organ toxicity, repeated exposure 2','Aquatic hazard: acute 1, chronic 2'],note:'US supplier SDS; verify the regional SDS and unchanged supplied product against the bottle.'},
+ {id:'aldrich-202908',brand:'Sigma-Aldrich',brand_aliases:sdsSigmaBrands,catalog_number:'202908',catalog_aliases:['202908','202908-10G'],name:'Cadmium chloride',cas_numbers:['10108-64-2'],form:'solid',concentration:'99.99% trace metals basis, as supplied',percentage_values:[99.99],product_url:'https://www.sigmaaldrich.com/US/en/product/aldrich/202908',sds_url:'https://www.sigmaaldrich.com/US/en/sds/aldrich/202908',sds_version:'6.14',sds_document_date:'2026-07-10',sds_retrieved_date:sdsCheckedDate,sds_region:'KR',sds_language:'English',signal_word:'Danger',hazard_codes:['H301','H330','H340','H350','H360','H372','H400','H410'],ghs_classification:['Acute toxicity: oral 3, inhalation 2','Germ cell mutagenicity 1','Carcinogenicity 1','Reproductive toxicity 1','Specific target organ toxicity, repeated exposure 1','Aquatic hazard: acute 1, chronic 1'],note:'The supplier returned a Korean regional SDS at this URL. This is an identified product reference, not a Taiwan regulatory determination.'},
+ {id:'biorad-1610158',brand:'Bio-Rad',brand_aliases:['bio-rad','bio rad','biorad'],catalog_number:'1610158',catalog_aliases:['1610158','#1610158','161-0158'],name:'30% Acrylamide/Bis Solution, 37.5:1',cas_numbers:['79-06-1','110-26-9','7732-18-5'],form:'aqueous solution',concentration:'30%, acrylamide:bis 37.5:1, as supplied',percentage_values:[30],ratio:'37.5:1',product_url:'https://www.bio-rad.com/en-gr/product/acrylamide-solutions-powders?ID=5e7a4f31-879c-4d63-ba0b-82556a0ccf1d',sds_url:'https://bio-rad-sds.thewercs.com/DirectDocumentDownloader/Document?prd=HRLS00590~~PDF~~MTR~~AGHS~~EN',sds_version:'4',sds_document_date:'2026-06-09',sds_retrieved_date:sdsCheckedDate,sds_region:'US',sds_language:'English',signal_word:'Danger',hazard_codes:[],ghs_classification:['Acute toxicity, oral 4','Skin irritation 2','Eye irritation 2A','Skin sensitization 1','Germ cell mutagenicity 1B','Carcinogenicity 1B','Reproductive toxicity 1B','Specific target organ toxicity, single exposure 1','Specific target organ toxicity, repeated exposure 1'],note:'US supplier SDS. Hazard codes are not transcribed because this version supplies statements without codes. Its transport text has inconsistent names; no transport fields are copied.'},
+ {id:'sigma-e1510',brand:'Sigma-Aldrich',brand_aliases:sdsSigmaBrands,catalog_number:'E1510',catalog_aliases:['E1510','E1510-10ML'],name:'Ethidium bromide solution',cas_numbers:['1239-45-8'],form:'aqueous solution',concentration:'10 mg/mL in water, as supplied',percentage_values:[1],mass_concentration_values:['10mg/ml'],product_url:'https://www.sigmaaldrich.com/ID/en/product/sigma/e1510',sds_url:'https://www.sigmaaldrich.com/US/en/sds/sigma/e1510',sds_version:'6.9',sds_document_date:'2026-05-13',sds_retrieved_date:sdsCheckedDate,sds_region:'US',sds_language:'English',signal_word:'Danger',hazard_codes:['H331','H341'],ghs_classification:['Acute toxicity, inhalation 3','Germ cell mutagenicity 2'],note:'US supplier SDS for the 10 mg/mL aqueous product; do not apply to powder or other solutions. Verify the bottle and regional SDS.'},
+ {id:'sigma-a6283',brand:'Sigma-Aldrich',brand_aliases:sdsSigmaBrands,catalog_number:'A6283',catalog_aliases:['A6283','A6283-500ML'],name:'Acetic acid',cas_numbers:['64-19-7'],form:'liquid',concentration:'Glacial, ReagentPlus ≥99%, as supplied',percentage_values:[99],product_url:'https://www.sigmaaldrich.com/US/en/product/sigald/a6283',sds_url:'https://www.sigmaaldrich.com/US/en/sds/sigald/a6283',sds_version:'6.19',sds_document_date:'2026-06-15',sds_retrieved_date:sdsCheckedDate,sds_region:'US',sds_language:'English',signal_word:'Danger',hazard_codes:['H226','H314'],ghs_classification:['Flammable liquid 3','Skin corrosion 1A','Serious eye damage 1'],note:'US supplier SDS for the glacial product. Do not apply to diluted acetic acid. Verify the bottle and regional SDS.'}
+].map(reference=>Object.freeze({...reference,brand_aliases:Object.freeze(reference.brand_aliases),catalog_aliases:Object.freeze(reference.catalog_aliases),cas_numbers:Object.freeze(reference.cas_numbers),catalog_cas_required:Object.freeze(reference.catalog_cas_required||{}),mass_concentration_values:Object.freeze(reference.mass_concentration_values||[]),percentage_values:Object.freeze(reference.percentage_values),hazard_codes:Object.freeze(reference.hazard_codes),ghs_classification:Object.freeze(reference.ghs_classification)})));
+const sdsString=value=>typeof value==='string'?value.trim():'';
+const sdsNormalized=value=>sdsString(value).normalize('NFKC').toLowerCase().replace(/\s+/g,' ');
+const sdsCatalog=value=>sdsString(value).normalize('NFKC').toUpperCase();
+const sdsEmpty=value=>value==null||value===''||Array.isArray(value)&&value.length===0||['unknown','unverified','not recorded'].includes(sdsNormalized(value));
+export function validChemicalCAS(value){if(!/^\d{2,7}-\d{2}-\d$/.test(sdsString(value)))return false;const digits=value.replaceAll('-','');return [...digits.slice(0,-1)].reverse().reduce((n,d,i)=>n+Number(d)*(i+1),0)%10===Number(digits.at(-1));}
+function sdsIdentityConflict(payload,reference){
+ const values=[payload.name,payload.concentration,payload.concentration_raw,payload.form,payload.phase].map(sdsString).filter(Boolean).join(' ').normalize('NFKC').toLowerCase();
+ const cas=sdsString(payload.cas_number);if(validChemicalCAS(cas)&&!reference.cas_numbers.includes(cas))return true;
+ const requiredCas=reference.catalog_cas_required?.[sdsCatalog(payload.catalog_number)];if(requiredCas&&cas!==requiredCas)return true;
+ for(const match of values.matchAll(/(\d+(?:\.\d+)?)\s*(mg\/m[lL]|g\/l|[μµu]g\/ml)\b/gi)){const concentration=(match[1]+match[2]).toLowerCase().replace(/[μµ]/g,'u');if(!(reference.mass_concentration_values||[]).includes(concentration))return true;}
+ for(const match of values.matchAll(/(\d+(?:\.\d+)?)\s*%/g))if(!reference.percentage_values.includes(Number(match[1])))return true;
+ const ratios=[...values.matchAll(/\b\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?\b/g)].map(m=>m[0].replaceAll(' ',''));
+ if(reference.ratio&&ratios.some(ratio=>ratio!==reference.ratio))return true;
+ if(/\bdilut\w*\b/.test(values)||!reference.ratio&&ratios.length)return true;
+ if(reference.form==='solid'&&/\b(solution|liquid|aqueous|dilut\w*)\b/.test(values))return true;
+ if(reference.form!=='solid'&&/\b(powder|solid|crystal\w*)\b/.test(values))return true;
+ if(reference.form==='liquid'&&/\b(solution|aqueous|dilut\w*)\b/.test(values))return true;
+ return false;
+}
+export function lookupSafetyReference(payload){
+ if(!payload||typeof payload!=='object'||Array.isArray(payload))return null;
+ const brand=sdsNormalized(payload.brand),code=sdsCatalog(payload.catalog_number);
+ if(!brand||!code)return null;
+ const matches=SUPPLIER_SDS_REFERENCES.filter(reference=>reference.brand_aliases.includes(brand)&&reference.catalog_aliases.map(sdsCatalog).includes(code)&&!sdsIdentityConflict(payload,reference));
+ return matches.length===1?structuredClone(matches[0]):null;
+}
+export function supplierSafetyPatch(payload,referenceId){
+ const reference=lookupSafetyReference(payload);if(!reference||reference.id!==referenceId)throw Error('The supplier SDS does not match this product. Confirm brand, catalogue number, concentration and form.');
+ const previous=payload.safety&&typeof payload.safety==='object'&&!Array.isArray(payload.safety)?payload.safety:{};
+ if(!sdsEmpty(previous.sds_url)&&previous.sds_url!==reference.sds_url)throw Error('An existing supplier SDS is recorded. Review it before replacing its safety details.');
+ if(['reviewed','approved','verified'].includes(sdsNormalized(previous.review_status))||/^\d{4}-\d{2}-\d{2}$/.test(sdsString(previous.sds_review_date)))throw Error('This safety assessment has already been reviewed. Review changes to its supplier SDS explicitly instead of filling it automatically.');
+ for(const key of ['sds_version','sds_document_date','sds_region','sds_language','sds_reference_id'])if(!sdsEmpty(previous[key])&&sdsNormalized(previous[key])!==sdsNormalized(key==='sds_reference_id'?reference.id:reference[key]))throw Error('The recorded SDS version or region differs. Review the supplier document before filling details.');
+ const sdsCodes=value=>(Array.isArray(value)?value:sdsString(value).split(',')).map(sdsNormalized).filter(Boolean).sort().join('|');
+ if(!sdsEmpty(previous.signal_word)&&sdsNormalized(previous.signal_word)!==sdsNormalized(reference.signal_word)||!sdsEmpty(previous.hazard_codes)&&sdsCodes(previous.hazard_codes)!==sdsCodes(reference.hazard_codes)||!sdsEmpty(previous.ghs_classification)&&sdsCodes(previous.ghs_classification)!==sdsCodes(reference.ghs_classification))throw Error('Recorded hazard details differ from this SDS. Review the differences before filling details.');
+ const next=structuredClone(previous),fields={signal_word:reference.signal_word,hazard_codes:reference.hazard_codes,ghs_classification:reference.ghs_classification,sds_url:reference.sds_url,sds_version:reference.sds_version,sds_document_date:reference.sds_document_date,sds_retrieved_date:reference.sds_retrieved_date,sds_region:reference.sds_region,sds_language:reference.sds_language,sds_reference_id:reference.id,sds_source_type:'manufacturer_sds',sds_product_number:reference.catalog_number,sds_product_name:reference.name,sds_product_form:reference.form,sds_product_concentration:reference.concentration};
+ // Source regulatory classification, reviewer, review date, stock and provenance
+ // remain untouched. An SDS reference is not a completed bottle review.
+ for(const [key,value] of Object.entries(fields))if(sdsEmpty(next[key]))next[key]=structuredClone(value);
+ next.review_status='supplier_sds_pending_bottle_check';
+ if(sdsEmpty(next.notes))next.notes=reference.note;
+ return next;
+}
+export function supplierSDSSearchURL(payload){
+ const pieces=[sdsString(payload?.brand),sdsString(payload?.catalog_number),sdsString(payload?.name),'safety data sheet'];
+ const query=pieces.filter(Boolean).join(' ').slice(0,500);return 'https://www.google.com/search?q='+encodeURIComponent(query);
 }

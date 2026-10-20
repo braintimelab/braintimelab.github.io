@@ -1,4 +1,4 @@
-import {esc,hazardous,itemClassification,labels,quantity,safeURL,text} from './model.js?v=9';
+import {esc,hazardous,itemClassification,labels,quantity,safeURL,text,inventoryArrivalDate} from './model.js?v=10';
 
 // The caller supplies only records already authorized by the server. This module
 // never fetches data, expands a filter, or includes raw source/history payloads.
@@ -26,7 +26,8 @@ function scopedRows(rows,dangerous) {
 
 function safetySummary(payload) {
   const safety=payload.safety||{},parts=[];
-  if(present(safety.classification))parts.push(value(safety.classification));
+  if(present(safety.classification))parts.push('Source: '+value(safety.classification));
+  if(present(safety.ghs_classification))parts.push('Supplier GHS: '+value(safety.ghs_classification));
   if(present(safety.hazard_codes))parts.push(value(safety.hazard_codes));
   if(present(payload.hazard_statements))parts.push(value(payload.hazard_statements));
   if(present(safety.signal_word))parts.push(value(safety.signal_word));
@@ -43,15 +44,15 @@ const INVENTORY_COLUMNS = [
   ['Remaining amount',p=>knownNumber(p.remaining_amount),18],['Unit',p=>p.unit,12],['Quantity as recorded',p=>p.quantity_text||(knownNumber(p.remaining_amount)===''?p.remaining_amount??p.amount:''),24],
   ['Package size as recorded',p=>p.package_size_raw,24],['Containers as recorded',p=>p.container_count_raw,22],
   ['Stock status',p=>displayLabel(p.status),24],['Physical stock verified',p=>recordedBoolean(p.current_physical_stock_verified),22],
-  ['Received',p=>p.received_date,14],['Opened',p=>p.opened_date,14],['Expires',p=>p.expiry_date,14],
+  ['In-stock date (arrival)',(p,row)=>inventoryArrivalDate(row),18],['Opened',p=>p.opened_date,14],['Expires',p=>p.expiry_date,14],
   ['Notes',p=>p.notes,40]
 ];
 const SAFETY_COLUMNS = [
   ['Safety flag',p=>recordedBoolean(p.safety?.flagged),14],['Regulated',p=>recordedBoolean(p.safety?.regulated),14],
-  ['Classification',p=>p.safety?.classification,26],['Hazard / GHS codes',p=>p.safety?.hazard_codes,26],
+  ['Source / regulatory classification',p=>p.safety?.classification,26],['Supplier GHS classification',p=>p.safety?.ghs_classification,36],['Hazard / GHS codes',p=>p.safety?.hazard_codes,26],
   ['Hazard statements',p=>p.hazard_statements,36],['Signal word',p=>p.safety?.signal_word,18],['Regulatory list',p=>p.safety?.regulatory_list,30],
   ['SDS review status',p=>displayLabel(p.safety?.review_status),24],['SDS URL',p=>p.safety?.sds_url,45],
-  ['SDS version',p=>p.safety?.sds_version,18],['SDS date',p=>p.safety?.sds_document_date,14],
+  ['SDS region',p=>p.safety?.sds_region,16],['SDS language',p=>p.safety?.sds_language,16],['SDS retrieved',p=>p.safety?.sds_retrieved_date,16],['SDS version',p=>p.safety?.sds_version,18],['SDS date',p=>p.safety?.sds_document_date,14],
   ['SDS reviewed',p=>p.safety?.sds_review_date,14],['SDS reviewer',p=>p.safety?.sds_reviewer,22],
   ['SDS next review',p=>p.safety?.sds_next_review_date,16],['SDS hard copy reported',p=>recordedBoolean(p.safety?.sds_hard_copy_reported),22],
   ['Safety notes',p=>p.safety?.notes,40],['Review flags',p=>p.review_flags,32]
@@ -81,7 +82,7 @@ function identifiersCell(payload) {
   return `${line('CAS:',payload.cas_number||payload.cas_raw)}${line('Brand:',payload.brand)}${line('Cat.:',payload.catalog_number)}${line('Lot:',payload.lot_number)}${line('Container:',payload.barcode)}`||'Not recorded';
 }
 function storageCell(payload) {
-  return `${esc(shown(payload.location))}${line('',payload.storage)}${line('Contact:',payload.owner)}`;
+  return `${esc(shown(payload.location))}${line('',payload.storage)}${line('Contact:',payload.owner)}${line('Arrived:',inventoryArrivalDate({payload}))}`;
 }
 function quantityCell(payload) {
   return `<strong>${esc(quantity(payload))}</strong>${line('',displayLabel(payload.status))}${line('Expires:',payload.expiry_date)}`;
@@ -91,7 +92,7 @@ function hazardCell(payload) {
 }
 function sdsCell(payload) {
   const safety=payload.safety||{},url=safeURL(safety.sds_url);
-  return `${esc(displayLabel(safety.review_status))}${line('Reviewed:',safety.sds_review_date)}${line('By:',safety.sds_reviewer)}${line('Next:',safety.sds_next_review_date)}${line('Version:',safety.sds_version)}${line('Dated:',safety.sds_document_date)}${url?`<div class="export-sds"><a href="${esc(url)}" rel="noopener noreferrer">${esc(url)}</a></div>`:line('SDS URL:',safety.sds_url)}`;
+  return `${esc(displayLabel(safety.review_status))}${line('Reviewed:',safety.sds_review_date)}${line('By:',safety.sds_reviewer)}${line('Next:',safety.sds_next_review_date)}${line('Version:',safety.sds_version)}${line('Dated:',safety.sds_document_date)}${line('Region:',safety.sds_region)}${line('Language:',safety.sds_language)}${line('Retrieved:',safety.sds_retrieved_date)}${url?`<div class="export-sds"><a href="${esc(url)}" rel="noopener noreferrer">${esc(url)}</a></div>`:line('SDS URL:',safety.sds_url)}`;
 }
 
 // Scoped styles also work in the app's dedicated print dialog. The app decides
