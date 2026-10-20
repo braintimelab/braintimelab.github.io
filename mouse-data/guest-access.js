@@ -9,7 +9,7 @@ export function guestDefaults(level){
  if(level==='guest3')for(const key of ['notes.shared_pages.read',...['overview','mice','breeding','litters','family','planner','strains','housing','experiments','cryo','fees','iacuc'].map(k=>`mouse.${k}.read`),'reagents.inventory.read','reagents.dangerous.read','reagents.usage.read','reagents.vendors.read','reagents.equipment.read'])permissions[key]=true;
  return permissions;
 }
-export const GUEST_LOCKED_FEATURES=Object.freeze(['notes.resources.read','notes.resources.write','notes.boards.create','notes.boards.member','notes.boards.images','notes.personal.images',...GUEST_PERMISSION_KEYS.filter(key=>key.startsWith('mouse.')&&key.endsWith('.write')&&key!=='mouse.cages.write')]);
+export const GUEST_LOCKED_FEATURES=Object.freeze(['notes.announcements.write','notes.resources.read','notes.resources.write','notes.boards.create','notes.boards.member','notes.boards.images','notes.personal.images',...GUEST_PERMISSION_KEYS.filter(key=>key.startsWith('mouse.')&&key.endsWith('.write')&&key!=='mouse.cages.write')]);
 export function guestPermissions(level,overrides={}){const result=guestDefaults(level);for(const [key,value] of Object.entries(overrides||{}))if(Object.hasOwn(result,key)&&typeof value==='boolean')result[key]=value;for(const key of GUEST_LOCKED_FEATURES)result[key]=false;return result;}
 export function isGuest(context){return Object.hasOwn(GUEST_LEVELS,context?.guestLevel??context?.guest_level);}
 export function guestQuotaLabel(context){if(!isGuest(context))return '';return (context.guestLevel??context.guest_level)==='guest1'?'Personal space: up to 100 MB':'Personal space: up to 200 MB';}
