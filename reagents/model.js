@@ -12,7 +12,8 @@ export function reagentAllows(permissions,key){if(!reagentKeys.has(key))return f
 const sectionFeature=id=>({safety:'dangerous',review:'dangerous'})[id]||id;
 export const canViewSection = (permissions,id) => permissions?.guest_level ? Array.isArray(permissions.allowed_sections)&&permissions.allowed_sections.includes(id)&&!['history','review'].includes(id) : id==='settings'?true:id==='history'?canViewHistory(permissions):(id!=='review'||canReviewHistory(permissions))&&reagentAllows(permissions,`reagents.${sectionFeature(id)}.read`);
 export const visibleSections = permissions => SECTIONS.filter(([id])=>canViewSection(permissions,id));
-export function canWriteKind(permissions,kind='item',row=null){if(!permissions?.can_write)return false;const key=({item:row&&itemClassification(row)==='Equipment'?'equipment':'inventory',equipment:'equipment',usage:'usage',vendor:'vendors',safety:'dangerous',review:'dangerous',order:'orders'})[kind];if(!permissions.guest_level)return kind==='review'?canReviewHistory(permissions):Boolean(key)&&reagentAllows(permissions,`reagents.${key}.read`)&&reagentAllows(permissions,`reagents.${key}.write`)&&(kind!=='safety'||permissions.can_manage_safety===true);return !['review','order'].includes(kind)&&Boolean(key)&&permissions.guest_flags?.[key+'_read']===true&&permissions.guest_flags?.[key+'_write']===true;}
+export function inventoryEditingEligible(permissions){if(!permissions||(permissions.guest_level??permissions.guestLevel)!=null)return false;const eligible=['owner','manager'].includes(permissions.role)||permissions.role==='editor'&&['high','max'].includes(permissions.export_level??permissions.exportLevel);return eligible&&(!Object.hasOwn(permissions,'can_edit_inventory')||permissions.can_edit_inventory===true);}
+export function canWriteKind(permissions,kind='item',row=null){if(!permissions?.can_write||['item','equipment'].includes(kind)&&!inventoryEditingEligible(permissions))return false;const key=({item:row&&itemClassification(row)==='Equipment'?'equipment':'inventory',equipment:'equipment',usage:'usage',vendor:'vendors',safety:'dangerous',review:'dangerous',order:'orders'})[kind];if(!permissions.guest_level)return kind==='review'?canReviewHistory(permissions):Boolean(key)&&reagentAllows(permissions,`reagents.${key}.read`)&&reagentAllows(permissions,`reagents.${key}.write`)&&(kind!=='safety'||permissions.can_manage_safety===true);return !['review','order'].includes(kind)&&Boolean(key)&&permissions.guest_flags?.[key+'_read']===true&&permissions.guest_flags?.[key+'_write']===true;}
 export const canManageSafety=permissions=>permissions?.can_manage_safety===true&&(permissions.guest_level?permissions.guest_flags?.dangerous_read===true&&permissions.guest_flags?.dangerous_write===true:reagentAllows(permissions,'reagents.dangerous.read')&&reagentAllows(permissions,'reagents.dangerous.write'));
 export const canExport=permissions=>permissions?.can_export!==false&&(permissions?.guest_level?permissions.can_export===true:reagentAllows(permissions,'reagents.export')&&['orders','inventory','dangerous','usage','vendors','equipment'].every(feature=>reagentAllows(permissions,`reagents.${feature}.read`)));
 export const canWriteOrders=permissions=>canViewSection(permissions,'orders')&&(permissions?.guest_level?permissions.can_order===true||permissions.can_request_purchase===true:reagentAllows(permissions,'reagents.orders.write'));
@@ -122,10 +123,42 @@ export function validDate(value) {
   if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
   const d=new Date(value+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;
 }
-// A source import or record-edit date is not evidence of physical arrival.
-export function inventoryArrivalDate(row) {
-  const value=row?.payload?.received_date;
-  return validDate(value)?value:null;
+const inventoryDayFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'});
+const inventoryToday=()=>{const parts=Object.fromEntries(inventoryDayFormatter.formatToParts(new Date()).map(part=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`;};
+const confirmedInventoryDate=(value,today)=>validDate(value)&&value>='0001-01-01'&&value<=today?value:null;
+// Only these exact arrival columns are source evidence. Ambiguous multiple
+// columns, import, purchase, opening and expiry dates never establish arrival.
+const sourceArrivalHeaders=['Order Arrival Date','Arrival date / stock date','Date delivered'];
+export function inventorySourceArrivalDate(row,today=inventoryToday()) {
+  const derived=confirmedInventoryDate(row?.inventory_source_arrival_date,today);if(derived)return derived;
+  const fields=row?.payload?.original_fields||{},values=sourceArrivalHeaders.map(key=>fields[key]).filter(value=>value!=null&&(typeof value!=='string'||value.trim()!==''));
+  if(values.length!==1)return null;
+  const value=values[0],match=typeof value==='string'?value.trim().match(/^(\d{4}-\d{2}-\d{2})(?:[T ]00:00:00(?:\.0{1,9})?Z?)?$/):null;
+  return confirmedInventoryDate(match?.[1],today);
+}
+export function inventoryArrivalDate(row,today=inventoryToday()) {
+  return confirmedInventoryDate(row?.payload?.received_date,today)||inventorySourceArrivalDate(row,today);
+}
+export function inventoryProductDeliveryDate(row,today=inventoryToday()) {
+  return confirmedInventoryDate(row?.payload?.latest_product_delivery_date,today);
+}
+export function inventoryDateInfo(row,today=inventoryToday()) {
+  const arrival=inventoryArrivalDate(row,today),product=inventoryProductDeliveryDate(row,today);
+  if(product&&(!arrival||product>arrival))return {date:product,basis:'Latest product delivery',productDelivery:true};
+  return {date:arrival,basis:arrival?(confirmedInventoryDate(row?.payload?.received_date,today)?'Arrival':'Arrival (source)'):'',productDelivery:false};
+}
+export const inventoryStockDate=row=>inventoryDateInfo(row).date;
+export function mergeInventoryDates(previous,values,today=inventoryToday()) {
+  const payload=structuredClone(previous);
+  for(const [key,label] of [['received_date','In-stock date (this stock)'],['latest_product_delivery_date','Latest product delivery']]){
+    if(!Object.hasOwn(values,key))continue;
+    if(typeof values[key]!=='string')throw Error(label+' must be a valid date.');
+    const value=values[key].trim(),before=typeof previous[key]==='string'?previous[key]:'';
+    if(value===before)continue;
+    if(value&&!confirmedInventoryDate(value,today))throw Error(label+' must be a valid date no later than today.');
+    payload[key]=value;
+  }
+  return payload;
 }
 export function mergeRecordFields(previous,values,fields,{canManageSafety=true}={}) {
   const payload=structuredClone(previous);

@@ -1,4 +1,4 @@
-import {esc,hazardous,itemClassification,labels,quantity,safeURL,text,inventoryArrivalDate} from './model.js?v=10';
+import {esc,hazardous,itemClassification,labels,quantity,safeURL,text,inventoryArrivalDate,inventoryProductDeliveryDate,inventoryDateInfo} from './model.js?v=11';
 
 // The caller supplies only records already authorized by the server. This module
 // never fetches data, expands a filter, or includes raw source/history payloads.
@@ -44,7 +44,7 @@ const INVENTORY_COLUMNS = [
   ['Remaining amount',p=>knownNumber(p.remaining_amount),18],['Unit',p=>p.unit,12],['Quantity as recorded',p=>p.quantity_text||(knownNumber(p.remaining_amount)===''?p.remaining_amount??p.amount:''),24],
   ['Package size as recorded',p=>p.package_size_raw,24],['Containers as recorded',p=>p.container_count_raw,22],
   ['Stock status',p=>displayLabel(p.status),24],['Physical stock verified',p=>recordedBoolean(p.current_physical_stock_verified),22],
-  ['In-stock date (arrival)',(p,row)=>inventoryArrivalDate(row),18],['Opened',p=>p.opened_date,14],['Expires',p=>p.expiry_date,14],
+  ['In-stock date (arrival)',(p,row)=>inventoryArrivalDate(row),18],['Latest product delivery',(p,row)=>inventoryProductDeliveryDate(row),20],['Inventory date',(p,row)=>inventoryDateInfo(row).date,18],['Inventory date basis',(p,row)=>inventoryDateInfo(row).basis,24],['Opened',p=>p.opened_date,14],['Expires',p=>p.expiry_date,14],
   ['Notes',p=>p.notes,40]
 ];
 const SAFETY_COLUMNS = [
@@ -81,8 +81,8 @@ function itemCell(payload,row) {
 function identifiersCell(payload) {
   return `${line('CAS:',payload.cas_number||payload.cas_raw)}${line('Brand:',payload.brand)}${line('Cat.:',payload.catalog_number)}${line('Lot:',payload.lot_number)}${line('Container:',payload.barcode)}`||'Not recorded';
 }
-function storageCell(payload) {
-  return `${esc(shown(payload.location))}${line('',payload.storage)}${line('Contact:',payload.owner)}${line('Arrived:',inventoryArrivalDate({payload}))}`;
+function storageCell(payload,row) {
+  return `${esc(shown(payload.location))}${line('',payload.storage)}${line('Contact:',payload.owner)}${line('Arrived:',inventoryArrivalDate(row))}${line('Latest product delivery:',inventoryProductDeliveryDate(row))}`;
 }
 function quantityCell(payload) {
   return `<strong>${esc(quantity(payload))}</strong>${line('',displayLabel(payload.status))}${line('Expires:',payload.expiry_date)}`;
@@ -130,7 +130,7 @@ export const INVENTORY_PRINT_CSS = `
 /** HTML fragment for a permission-fenced preview. No scripts, inline events or remote assets. */
 export function inventoryPrintBodyHTML(rows,options={}) {
   const meta=metadata(options),selected=scopedRows(rows,meta.dangerous);
-  return `<article class="inventory-print"><p class="export-brand">Braintime Reagents</p><h1>${esc(meta.title)}</h1><p class="export-meta">${esc(meta.localTime)} · ${selected.length.toLocaleString('en-US')} ${selected.length===1?'item':'items'}<br>${esc(meta.filterSummary)}</p><table><colgroup><col class="export-item"><col class="export-identifiers"><col class="export-storage"><col class="export-quantity"><col class="export-hazards"><col class="export-review"></colgroup><thead><tr><th>Reagent</th><th>Identifiers</th><th>Location / storage</th><th>Quantity / status</th><th>Classification / GHS</th><th>SDS review</th></tr></thead><tbody>${selected.map(row=>{const p=row.payload;return `<tr><td>${itemCell(p,row)}</td><td>${identifiersCell(p)}</td><td>${storageCell(p)}</td><td>${quantityCell(p)}</td><td>${hazardCell(p)}</td><td>${sdsCell(p)}</td></tr>`;}).join('')}</tbody></table><p class="export-legend">Safety fields show recorded information. Unrecorded or unflagged does not mean safe.</p></article>`;
+  return `<article class="inventory-print"><p class="export-brand">Braintime Reagents</p><h1>${esc(meta.title)}</h1><p class="export-meta">${esc(meta.localTime)} · ${selected.length.toLocaleString('en-US')} ${selected.length===1?'item':'items'}<br>${esc(meta.filterSummary)}</p><table><colgroup><col class="export-item"><col class="export-identifiers"><col class="export-storage"><col class="export-quantity"><col class="export-hazards"><col class="export-review"></colgroup><thead><tr><th>Reagent</th><th>Identifiers</th><th>Location / storage</th><th>Quantity / status</th><th>Classification / GHS</th><th>SDS review</th></tr></thead><tbody>${selected.map(row=>{const p=row.payload;return `<tr><td>${itemCell(p,row)}</td><td>${identifiersCell(p)}</td><td>${storageCell(p,row)}</td><td>${quantityCell(p)}</td><td>${hazardCell(p)}</td><td>${sdsCell(p)}</td></tr>`;}).join('')}</tbody></table><p class="export-legend">Safety fields show recorded information. Unrecorded or unflagged does not mean safe.</p></article>`;
 }
 
 /** Standalone print-ready HTML, also useful for saved preview artifacts. */

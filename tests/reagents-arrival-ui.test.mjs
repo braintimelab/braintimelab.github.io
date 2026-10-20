@@ -18,13 +18,13 @@ function appFixture(rows,{route='inventory',access={},list=async kind=>rows.filt
  const permissions={role:'editor',can_write:false,can_import:false,can_manage_safety:false,export_level:'high',...access},location=new URL(`https://synthetic.invalid/reagents/#${route}`);
  let orderConfig;
  const context=vm.createContext({bindSheetOrderImportDialog,createPresence:()=>({refresh(){},clear(){},destroy(){}}),cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),createOrdersUI:config=>(orderConfig=config,{dispose(){},refresh(){},async mount(){}}),...model,...sorting,...inventoryExports,
-  store:{getCloudStatus:()=>({...status}),callReagents:async(action,args)=>{calls.push({action,args});if(action==='access')return {permissions};if(action!=='list')return mutate(action,args);const selected=await list(args?.p_kind);return {rows:selected,total:selected.length,next_offset:null};}},PUBLIC_CONFIG:{},document:{getElementById:element,createElement:()=>element('download'),querySelector:()=>null,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentListeners.set(name,fn)},window:{addEventListener:(event,handler)=>windowListeners.set(event,handler)},location,console,setTimeout,clearTimeout,URL,Blob,
+  backupViewerLinkHTML:()=>'',store:{getCloudStatus:()=>({...status}),callReagents:async(action,args)=>{calls.push({action,args});if(action==='access')return {permissions};if(action!=='list')return mutate(action,args);const selected=await list(args?.p_kind);return {rows:selected,total:selected.length,next_offset:null};}},PUBLIC_CONFIG:{},document:{getElementById:element,createElement:()=>element('download'),querySelector:()=>null,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentListeners.set(name,fn)},window:{addEventListener:(event,handler)=>windowListeners.set(event,handler)},location,console,setTimeout,clearTimeout,URL,Blob,
   createWorkbookXlsx:book=>{workbooks.push(structuredClone(book));return new Blob(['synthetic']);},createAccessActivity:()=>({observe(){},resume(){},touch(){},suspend(){},reset(){},signOut(){}})});
  context.fixtureRows=structuredClone(rows);context.fixturePermissions=permissions;
- const expose='\nmember=true;permissions=globalThis.fixturePermissions;items=globalThis.fixtureRows;inventoryLoaded=true;records=new Map(items.map(row=>[row.id,row]));globalThis.app={inventoryView,render,sortTable,exportRows,ensureInventory,ordersView,rpc,switchActor:rows=>{generation++;member=true;items=rows;records=new Map(rows.map(row=>[row.id,row]));inventoryLoaded=true;},emptyCache:()=>{inventoryLoaded=false;inventoryLoad=null;},state:()=>({loaded:inventoryLoaded,ids:items.map(row=>row.id)}),setFilters:value=>{filters={...filters,...value};}};';
+ const expose='\nmember=true;permissions=globalThis.fixturePermissions;items=globalThis.fixtureRows;inventoryLoaded=true;records=new Map(items.map(row=>[row.id,row]));globalThis.app={inventoryView,render,sortTable,exportRows,ensureInventory,ordersView,rpc,detail,editRecord,editInventoryDates,settingsView,submitEditor:values=>editAction(values),setAccess:patch=>Object.assign(permissions,patch),switchActor:rows=>{generation++;member=true;items=rows;records=new Map(rows.map(row=>[row.id,row]));inventoryLoaded=true;},emptyCache:()=>{inventoryLoaded=false;inventoryLoad=null;},state:()=>({loaded:inventoryLoaded,ids:items.map(row=>row.id)}),setFilters:value=>{filters={...filters,...value};}};';
  vm.runInContext(appSource.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+expose,context);
  const renderedIds=()=>[...element('main').innerHTML.matchAll(/data-action="open" data-id="([^"]+)"/g)].map(match=>match[1]);
- return {app:context.app,element,renderedIds,workbooks,calls,location,documentListeners,get orderConfig(){return orderConfig;}};
+ return {app:context.app,element,renderedIds,workbooks,calls,location,documentListeners,windowListeners,get orderConfig(){return orderConfig;}};
 }
 
 test('arrival date uses only a valid recorded received date, never an order or import date',()=>{
@@ -41,6 +41,68 @@ test('Inventory starts with latest arrivals, undated items last, and exposes a c
  await f.app.sortTable('inventory','arrival');assert.deepEqual(f.renderedIds(),['old','new','invalid','undated']);
  await f.app.sortTable('inventory','arrival');assert.deepEqual(f.renderedIds(),['new','old','invalid','undated']);
  assert.deepEqual(rows.map(row=>row.id),['undated','old','new','invalid']);
+});
+
+test('Inventory defaults to Chemicals, keeps newest confirmed arrivals first, and lets the user choose Equipment or all classifications',async()=>{
+ const rows=[{...item('equipment','2026-10-21',{inventory_classification:'Equipment'}),kind:'equipment'},item('unknown',null),item('older','2026-01-01'),item('newest','2026-10-20'),item('antibody','2026-10-21',{inventory_classification:'Antibody'})],f=appFixture(rows);f.app.inventoryView();
+ assert.deepEqual(f.renderedIds(),['newest','older','unknown']);assert.match(f.element('main').innerHTML,/<option value="Chemicals" selected>Chemicals<\/option>/);
+ f.app.setFilters({category:'Equipment'});f.app.inventoryView();assert.deepEqual(f.renderedIds(),['equipment']);
+ f.app.setFilters({category:''});f.app.inventoryView();assert.deepEqual(f.renderedIds(),['antibody','equipment','newest','older','unknown']);
+ await f.app.sortTable('inventory','name');assert.deepEqual(f.renderedIds(),['antibody','equipment','newest','older','unknown']);
+ f.location.hash='safety';f.windowListeners.get('hashchange')();await new Promise(resolve=>setImmediate(resolve));assert.match(f.element('main').innerHTML,/All classifications/);assert.doesNotMatch(f.element('main').innerHTML,/<option value="Chemicals" selected/);
+ f.location.hash='inventory';f.windowListeners.get('hashchange')();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(f.renderedIds(),['newest','older','unknown']);
+});
+
+test('an Inventory without Chemicals stays clearly filtered instead of silently displaying Equipment',()=>{
+ const f=appFixture([{...item('only-equipment','2026-10-21'),kind:'equipment'}]);f.app.inventoryView();assert.deepEqual(f.renderedIds(),[]);assert.match(f.element('main').innerHTML,/<option value="Chemicals" selected>Chemicals<\/option>/);assert.match(f.element('main').innerHTML,/No matching items/);
+});
+
+test('High and Max inventory edits are available with existing write rights; other tiers and owner restrictions remain enforced',async()=>{
+ const row=item('editable','2026-10-21');
+ for(const access of [{role:'owner',export_level:'low'},{role:'manager',export_level:'low'},{role:'editor',export_level:'high'},{role:'editor',export_level:'max'}]){
+  const f=appFixture([row],{access:{can_write:true,can_edit_inventory:true,...access}});f.app.inventoryView();assert.match(f.element('main').innerHTML,/data-action="new-item"/);await f.app.detail(row.id);assert.match(f.element('main').innerHTML,/data-action="edit"/);
+ }
+ for(const access of [{role:'editor',export_level:'low'},{role:'editor',export_level:'mid1'},{role:'editor',export_level:'mid2'},{role:'viewer',export_level:'high'},{role:'editor',export_level:'high',guest_level:'guest3'},{role:'editor',export_level:'high',can_write:false},{role:'editor',export_level:'high',can_edit_inventory:false},{role:'editor',export_level:'high',reagents_permissions:{'reagents.inventory.write':false}}]){
+  const f=appFixture([row],{access:{can_write:true,can_edit_inventory:true,...access}});f.app.inventoryView();assert.doesNotMatch(f.element('main').innerHTML,/data-action="new-item"/);await f.app.detail(row.id);assert.doesNotMatch(f.element('main').innerHTML,/data-action="edit"/);f.app.editRecord(row);assert.equal(f.element('editor').open,false);assert.equal(f.calls.filter(call=>call.action==='save').length,0);
+ }
+ const low={role:'editor',export_level:'low',can_write:true};assert.equal(model.canWriteKind(low,'usage'),true);assert.equal(model.canWriteKind(low,'vendor'),true);assert.equal(model.canWriteKind({...low,can_manage_safety:true},'safety'),true);
+ const high=appFixture([row],{route:'settings',access:{can_write:true,can_edit_inventory:true}});await high.app.settingsView(0);assert.match(high.element('main').innerHTML,/<dt>Inventory editing<\/dt><dd>Allowed<\/dd>/);
+ const blocked=appFixture([row],{route:'settings',access:{can_write:true,can_edit_inventory:false}});await blocked.app.settingsView(0);assert.match(blocked.element('main').innerHTML,/<dt>Inventory editing<\/dt><dd>Read only<\/dd>/);
+});
+
+test('explicit source arrivals are available without raw rows and never use ambiguous, future or other source dates',()=>{
+ const today='2026-10-21',raw=value=>({...item('source',null),payload:{...item('source',null).payload,original_fields:{'Order Arrival Date':value,'Order Date':'2026-10-20','Expected Arrival Date':'2026-10-20'}}});
+ for(const value of ['2024-12-16','2024-12-16T00:00:00','2024-12-16 00:00:00.000','2024-12-16T00:00:00Z'])assert.equal(model.inventoryArrivalDate(raw(value),today),'2024-12-16');
+ for(const value of ['0000-01-01','2026-02-30','2026/10/20','10/20/2026','2026-10-20T13:00:00','2099-01-01T00:00:00',45642,null,{},'2026-10-20 planned'])assert.equal(model.inventoryArrivalDate(raw(value),today),null,String(value));
+ const projected={...item('safe',null),inventory_source_arrival_date:'2019-08-23'};assert.equal(model.inventoryArrivalDate(projected,today),'2019-08-23');assert.equal(model.inventoryArrivalDate({...projected,inventory_source_arrival_date:'2099-01-01'},today),null);
+ for(const header of ['Arrival date / stock date','Date delivered'])assert.equal(model.inventoryArrivalDate({payload:{original_fields:{[header]:'2025-12-10T00:00:00'}}},today),'2025-12-10');
+ assert.equal(model.inventoryArrivalDate({payload:{original_fields:{'Date delivered':'2025-12-10','Order Arrival Date':'2024-12-16'}}},today),null);
+ assert.equal(model.inventoryArrivalDate({payload:{original_fields:{'Date delivered':'2025-12-10','Arrival date / stock date':'2025-12-10'}}},today),null);
+ assert.equal(model.inventoryArrivalDate({payload:{original_fields:{'Date delivered':'2025-12-10','Note (delivery date)':'2026-07-24','Inventory check':'2026-07-24'}}},today),'2025-12-10');
+ assert.equal(model.inventoryArrivalDate({...item('not-arrival',null,{request_date:'2026-10-20',opened_date:'2026-10-20',expiry_date:'2026-10-20',source_fields:{'Order Arrival Date':'2026-10-20'}}),record_date:'2026-10-20'},today),null);
+});
+
+test('latest product delivery sorts ahead with a distinct badge while physical arrival and export evidence remain separate',async()=>{
+ const older={...item('product',null,{original_fields:{'Order Arrival Date':'2019-08-23T00:00:00'},latest_product_delivery_date:'2026-07-24',lot_number:'Original lot',expiry_date:'2027-01-01'}),inventory_source_arrival_date:'2019-08-23'},f=appFixture([item('other','2026-01-01'),older]);f.app.inventoryView();
+ assert.deepEqual(f.renderedIds(),['product','other']);assert.match(f.element('main').innerHTML,/2026-07-24[^]*?Product delivery/);assert.equal(model.inventoryArrivalDate(older),'2019-08-23');assert.deepEqual(model.inventoryDateInfo(older),{date:'2026-07-24',basis:'Latest product delivery',productDelivery:true});
+ await f.app.exportRows();const sheet=f.workbooks[0].sheets[0],columns=sheet.rows[0],row=sheet.rows[1];assert.equal(row[columns.indexOf('In-stock date (arrival)')],'2019-08-23');assert.equal(row[columns.indexOf('Latest product delivery')],'2026-07-24');assert.equal(row[columns.indexOf('Inventory date')],'2026-07-24');assert.equal(row[columns.indexOf('Inventory date basis')],'Latest product delivery');assert.equal(row[columns.indexOf('Lot / batch')],'Original lot');
+ await f.app.exportRows('item','pdf');const html=f.element('pdf-export-content').innerHTML;assert.match(html,/Arrived:<\/span> 2019-08-23/);assert.match(html,/Latest product delivery:<\/span> 2026-07-24/);
+ const same={...older,payload:{...older.payload,received_date:'2026-07-24'}};assert.equal(model.inventoryDateInfo(same).productDelivery,false);
+});
+
+test('date-only editing preserves absent fields, source evidence and all unrelated metadata',async()=>{
+ const previous={name:'Legacy bottle',original_fields:{'Order Arrival Date':'2019-08-23T00:00:00','Order Date':'2019-06-01'},expiry_date:'2027-01-01',category:'Ab',safety:{classification:['Irritant'],review_status:'pending'},custom:{keep:true}},record={...item('date-only',null),payload:previous,inventory_source_arrival_date:'2019-08-23'},f=appFixture([record],{access:{can_write:true,can_edit_inventory:true},mutate:async(action,args)=>{assert.equal(action,'save');return {...record,payload:args.p_payload,version:2};}});
+ f.app.editInventoryDates(record);const fields=f.element('edit-fields').innerHTML;assert.match(fields,/name="received_date"[^>]*value=""/);assert.match(fields,/Source arrival: 2019-08-23 \(read only\)/);assert.match(fields,/Latest product delivery/);assert.doesNotMatch(fields,/name="(?:inventory_classification|expiry_date|category)"/);
+ await f.app.submitEditor({received_date:'',latest_product_delivery_date:'2026-07-24'});const saved=f.calls.find(call=>call.action==='save');assert.ok(saved);assert.equal(saved.args.p_expected_version,1);assert.deepEqual(JSON.parse(JSON.stringify(saved.args.p_payload)),{...previous,latest_product_delivery_date:'2026-07-24'});assert.equal(Object.hasOwn(saved.args.p_payload,'received_date'),false);assert.equal(Object.hasOwn(saved.args.p_payload,'inventory_source_arrival_date'),false);assert.deepEqual(previous.original_fields,{'Order Arrival Date':'2019-08-23T00:00:00','Order Date':'2019-06-01'});
+});
+
+test('date-only Save blocks future, invalid and stale access; clearing a manual arrival preserves source fallback',async()=>{
+ const previous={name:'Recorded stock',received_date:'2026-01-01',original_fields:{'Order Arrival Date':'2019-08-23T00:00:00'}};
+ const corrected={payload:{received_date:'2025-12-09',original_fields:{'Date delivered':'2025-12-10'}}};assert.equal(model.inventoryArrivalDate(corrected,'2026-10-21'),'2025-12-09');assert.equal(model.inventoryDateInfo(corrected,'2026-10-21').basis,'Arrival');assert.equal(corrected.payload.original_fields['Date delivered'],'2025-12-10');
+ const sameDate={payload:{received_date:'2025-12-10',original_fields:{'Date delivered':'2025-12-10'}}};assert.equal(model.inventoryDateInfo(sameDate,'2026-10-21').basis,'Arrival');
+ const cleared=model.mergeInventoryDates(previous,{received_date:'',latest_product_delivery_date:''},'2026-10-21');assert.equal(cleared.received_date,'');assert.equal(Object.hasOwn(cleared,'latest_product_delivery_date'),false);assert.equal(model.inventoryArrivalDate({payload:cleared},'2026-10-21'),'2019-08-23');
+ for(const value of ['2099-01-01','2026-02-30','2026-10-20T00:00:00'])assert.throws(()=>model.mergeInventoryDates(previous,{latest_product_delivery_date:value},'2026-10-21'),/valid date no later than today/);
+ const record={...item('restricted','2026-01-01'),payload:previous},f=appFixture([record],{access:{can_write:true,can_edit_inventory:true}});f.app.editInventoryDates(record);await assert.rejects(f.app.submitEditor({received_date:'2026-01-01',latest_product_delivery_date:'2099-01-01'}),/valid date no later than today/);assert.equal(f.calls.filter(call=>call.action==='save').length,0);f.app.setAccess({can_edit_inventory:false});await assert.rejects(f.app.submitEditor({received_date:'2026-01-01',latest_product_delivery_date:'2026-07-24'}),/access changed/);assert.equal(f.calls.filter(call=>call.action==='save').length,0);
 });
 
 test('an unreviewed arrival has a neutral safety marker without being treated as hazardous',()=>{

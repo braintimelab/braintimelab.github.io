@@ -46,7 +46,7 @@ import {managedViewNeeds,managedEditorNeeds,pendingManagedNeeds,hasManagedNeeds}
 // Each mount is fenced by its account, render generation and actual DOM node.
 const settingsComponentModules=new Map(),settingsComponentPending=new Map(),settingsComponentMounts=new WeakMap();
 const settingsComponentLoaders={
- users:()=>import('./user-management.js?v=175'),
+ users:()=>import('./user-management.js?v=179'),
  members:()=>import('./lab-members.js?v=175'),
  access:()=>import('./access-logs.js?v=171'),
  account:()=>import('./account-setup.js?v=162'),
