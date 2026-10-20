@@ -215,7 +215,7 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=164');
+  const store = await import('../mouse-data/data-store.js?v=165');
   let presence=null;
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,

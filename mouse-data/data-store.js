@@ -7,7 +7,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=164';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=165';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -27,6 +27,7 @@ const BASELINE_CACHE_VERSION=1,MAX_BASELINE_RECORDS=250000,MAX_BASELINE_BYTES=32
 let deferredArchiveState=null;
 let operationalProvider=null,operationalConfig=null,cloud2Identity=null,providerSource=null,providerRevision=0,providerSessionEpoch=0;
 let primaryCloudPolicy=false;
+let cloud1SessionSuspended=false;
 let verifiedIntentPolicy=null;
 let cloud2ConflictPage={rows:[],nextAfter:null,binding:null};
 const cloudConnectionListeners=new Set();
@@ -64,10 +65,11 @@ const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==fals
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
 function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;startupCacheSnapshot=null;}
-function saveSession(s){const before=session();if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);}
+function saveSession(s){const before=session();if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;cloud1SessionSuspended=false;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);}
 function stable(value){if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return `{${Object.keys(value).sort().filter(k=>value[k]!==undefined).map(k=>JSON.stringify(k)+':'+stable(value[k])).join(',')}}`;return JSON.stringify(value);}
 function advanceAuthGeneration(){authGeneration++;for(const cancel of guardedCacheWrites)cancel();return authGeneration;}
 function beginAuthAction(){const generation=advanceAuthGeneration(),config=stable(configuration());const current=()=>generation===authGeneration&&stable(configuration())===config;return {current,check(){if(!current())throw new Error('The account or cloud configuration changed. Start sign-in again.');}};}
+function passiveAuthAction(source=null){const generation=authGeneration,epoch=providerSessionEpoch,config=stable(configuration()),userId=session()?.user?.id;const current=()=>generation===authGeneration&&epoch===providerSessionEpoch&&stable(configuration())===config&&session()?.user?.id===userId;return {source,current,check(){if(!current())throw Object.assign(new Error('The account or cloud configuration changed. Reopen the shared colony.'),{code:'CONTEXT_CHANGED'});if(source&&(operationalProvider?operationalProvider.getState().active!==source:source!=='cloud1')){const state=operationalProvider?.getState(),failure=state?.sources?.[source]?.state;if(['signed_out','denied','not_enrolled'].includes(failure))throw Object.assign(new Error(failure==='signed_out'?'The cloud session expired. Sign in again.':'Your account no longer has access to this cloud.'),{code:failure==='signed_out'?'UNAUTHORIZED':'FORBIDDEN',status:failure==='signed_out'?401:403});throw Object.assign(new Error('The original cloud is unavailable. Retry when it reconnects.'),{code:failure==='unavailable'?'UNAVAILABLE':'SOURCE_CHANGED'});}}};}
 
 let dbPromise,dbHandle;
 function storageTimeout(operation){const error=new Error(`Browser storage stopped responding while ${operation}. Close other Mouse Data tabs, then try again.`);error.storageTimeout=true;return error;}
@@ -218,7 +220,7 @@ export function getCloudStatus(){
   const c=configuration(),s=session(),connections=operationalProvider?.getState()||null,activeCloud=connections?connections.active:synced?'cloud1':null;
   const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
   const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
-  return {configured:Boolean(c),signedIn:hasLabSession(s),userId:s?.user?.id??null,sessionEpoch:String(providerSessionEpoch),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},...appPermissionFields(s),username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
+  return {configured:Boolean(c),signedIn:hasLabSession(s),userId:s?.user?.id??null,sessionEpoch:String(providerSessionEpoch),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),recoverySource:providerSource,readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced&&baselineIdentity===syncIdentity()&&(!connections||!!connections.active)&&(activeCloud!=='cloud1'||!cloud1SessionSuspended)),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},...appPermissionFields(s),username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -263,13 +265,13 @@ async function accessToken(timeoutMs=30000){
   let s=session();if(!s?.access_token)throw new Error('Sign in before using cloud data.');
   if(s.expires_at<=Date.now()/1000+60){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);return next;}).catch(e=>{
+    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);cloud1SessionSuspended=false;return next;}).catch(e=>{
       if(current()){
         // An independent, verified NAS session does not depend on renewing
         // Supabase credentials. This failure still rejects the Cloud 1 action.
         const nas=cloud2Identity,independent=operationalProvider?.getState().active==='cloud2'&&nas?.userId===s.user?.id&&nas?.colonyId===configuration()?.colonyId&&Date.parse(nas.session_expires_at)>Date.now();
         if(independent)statusMessage='Cloud 1 sign-in unavailable. Cloud 2 remains connected.';
-        else{invalidate();if(e.sessionRejected===true)saveSession(null);else statusMessage='Cloud connection unavailable. Reconnect before editing.';}
+        else if(e.sessionRejected===true){invalidate();saveSession(null);}else{cloud1SessionSuspended=true;statusMessage='Cloud 1 connection interrupted. Retrying keeps your current view.';}
       }
       throw e;
     }).finally(()=>{refreshPromise=null;});
@@ -287,7 +289,11 @@ async function cloud1Request(route,{method='GET',body,timeoutMs=30000}={}){
 function cloud2URL(){return configuration()?.url===PUBLIC_CONFIG.url&&configuration()?.colonyId===PUBLIC_CONFIG.colonyId?PUBLIC_CONFIG.cloud2Url||'':'';}
 function clearOperationalSession(){operationalProvider?.cloud2.clear();operationalProvider?.dispose();operationalProvider=null;operationalConfig=null;cloud2Identity=null;providerSource=null;providerRevision++;cloud2ConflictPage={rows:[],nextAfter:null,binding:null};}
 function connectionChanged(state){
- if(state.active!==providerSource){if(providerSource!==null){invalidate();feeVisibility=null;feeVisibilityContext=null;}providerSource=state.active;providerRevision++;}
+ // A transport interruption suspends editing, but is not an identity or data
+ // change. Retain its baseline for a live-verified return to the same server.
+ // A real denial or a different selected server still invalidates it immediately.
+ const denied=providerSource&&['signed_out','denied','not_enrolled'].includes(state.sources?.[providerSource]?.state);
+ if(state.active!==providerSource&&(state.active!==null||denied)){if(providerSource!==null){invalidate();feeVisibility=null;feeVisibilityContext=null;}providerSource=state.active;providerRevision++;}
  for(const listener of cloudConnectionListeners)try{listener(clone(state));}catch{/* Status rendering cannot change provider decisions. */}
 }
 function provider(){
@@ -389,9 +395,9 @@ async function membership(action){
   const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch,config=stable(c);
   if(!s?.user?.id)throw new Error('The signed-in user is unavailable. Sign in again.');
   const checkPolicy=()=>{action?.check();if(generation!==authGeneration||epoch!==providerSessionEpoch||stable(configuration())!==config||session()?.user?.id!==s.user.id)throw new Error('The account changed while verifying application permissions.');};
-  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,notes_permissions,mouse_permissions,reagents_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`);
+  const rows=await request(`memberships?select=role,active,export_level,permissions,guest_level,guest_permissions,guest_access_starts_on,guest_access_ends_on,notes_permissions,mouse_permissions,reagents_permissions,updated_at&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{cloudSource:action?.source??null});
   checkPolicy();
-  if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw new Error('This account is not an active member of the configured colony.');
+  if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true||!['owner','manager','editor','viewer'].includes(rows[0].role))throw Object.assign(new Error('This account is not an active member of the configured colony.'),{status:403,code:'FORBIDDEN'});
   if(configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The cloud account or colony changed. Sign in again.');
   action?.check();assertGuestAvailability(rows[0]);
   const purgePolicyCache=async()=>{const historyCached=Boolean(baseline||readJSON('localStorage',CLOUD_CACHE_KEY));invalidate();verifiedIntentPolicy=null;feeVisibility=null;feeVisibilityContext=null;await local('delete',undefined,{check:checkPolicy});if(historyCached)await clearHistoryIndex({check:checkPolicy});checkPolicy();};
@@ -404,19 +410,31 @@ async function membership(action){
 }
 // A live, data-free access check for the internal tools portal. Cached roles
 // alone never unlock the portal; no animal records or roster are requested.
-export async function verifyCloudMembership(){
+export async function verifyCloudMembership({source=null}={}){
+  if(source!==null&&!['cloud1','cloud2'].includes(source))throw new Error('Choose Cloud 1 or Cloud 2.');
   const initial=session(),c=configuration();
   if(!c||!initial?.user?.id)throw new Error('Sign in to open lab tools.');
   if(initial.passwordRecovery)throw new Error('Finish resetting your password before opening lab tools.');
   if(initial.setupRequired||initial.role==='pending')throw new Error('Finish your account setup before opening lab tools.');
-  const action=beginAuthAction(),service=provider();
-  if(service){await (primaryCloudPolicy&&typeof service.prepareRead==='function'?service.prepareRead():service.refresh());action.check();if(service.getState().active==='cloud2'){await membership(action);action.check();return getCloudStatus();}}
-  const token=await accessToken();action.check();
-  const {response,result:user}=await cloudJSON(`${c.url}/auth/v1/user`,{headers:{apikey:publicKey(c.anonKey),Authorization:`Bearer ${token}`},cache:'no-store',redirect:'error'});
-  action.check();
-  if(!response.ok||user?.id!==initial.user.id||user.is_anonymous||!user.email_confirmed_at)throw new Error('Your sign-in could not be verified. Sign in again.');
-  await membership(action);action.check();
-  return getCloudStatus();
+  const action=passiveAuthAction(source),service=provider();
+  try{
+    if(service){await (primaryCloudPolicy&&typeof service.prepareRead==='function'?service.prepareRead():service.refresh());action.check();if(service.getState().active==='cloud2'){await membership(action);action.check();return getCloudStatus();}}
+    const token=await accessToken();action.check();
+    const {response,result:user}=await cloudJSON(`${c.url}/auth/v1/user`,{headers:{apikey:publicKey(c.anonKey),Authorization:`Bearer ${token}`},cache:'no-store',redirect:'error'});
+    action.check();
+    if(!response.ok)throw apiError(response,user);
+    if(user?.id!==initial.user.id||user.is_anonymous||!user.email_confirmed_at)throw Object.assign(new Error('Your sign-in could not be verified. Sign in again.'),{status:401});
+    await membership(action);action.check();cloud1SessionSuspended=false;
+    return getCloudStatus();
+  }catch(error){if(action.current()&&([401,403].includes(error?.status)||['UNAUTHORIZED','FORBIDDEN'].includes(error?.code)||error?.guestAccessUnavailable)){invalidate();feeVisibility=null;feeVisibilityContext=null;}throw error;}
+}
+/** Resume a suspended browser connection without reloading history or replaying a save. */
+export async function recoverCloudConnection({source=providerSource||'cloud1',canCommit=()=>true}={}){
+  if(!canCommit())throw Object.assign(new Error('Connection recovery postponed while editing.'),{code:'BACKGROUND_CANCELLED'});
+  await verifyCloudMembership({source});const action=passiveAuthAction(source);
+  await refreshFeeVisibility({cloudSource:source});action.check();const status=getCloudStatus();
+  if(!canCommit())throw Object.assign(new Error('Connection recovery postponed while editing.'),{code:'BACKGROUND_CANCELLED'});
+  return {status,dataset:null};
 }
 // Shared lab-tool transport; authorization and history limits are enforced again by each RPC.
 const REAGENT_ACTIONS=new Set(['list','save','history','sources','observations','import','record_usage','access','set_access',
@@ -689,18 +707,18 @@ function checkedManagedLocation(row,colonyId){
  if(row?.entity_type!=='locations'||row.colony_id!==colonyId||typeof row.entity_id!=='string'||!row.entity_id||!Number.isInteger(row.version)||row.version<1||typeof row.archived!=='boolean'||!managedLocationPayload(row.payload)||row.payload.location_id!==row.entity_id||Boolean(row.payload.app_archived_at)!==row.archived)throw new Error('Invalid projected location record. Pull the latest cloud data.');
  return row;
 }
-async function refreshFeeVisibility({notify=true}={}){
- if(isGuest(session())){const context=exportContext();const visible=guestAllows(session(),'mouse.fees.read')?checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:configuration().colonyId}})):{version:0,owner:false,estimate:false,actual:false};checkExportContext(context);feeVisibility={...visible,owner:false,source_archive_allowed:false,history_allowed:false};feeVisibilityContext=context;return clone(feeVisibility);}
+async function refreshFeeVisibility({notify=true,cloudSource=null}={}){
+ if(isGuest(session())){const context=exportContext();const visible=guestAllows(session(),'mouse.fees.read')?checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:configuration().colonyId},cloudSource})):{version:0,owner:false,estimate:false,actual:false};checkExportContext(context);feeVisibility={...visible,owner:false,source_archive_allowed:false,history_allowed:false};feeVisibilityContext=context;return clone(feeVisibility);}
  const generation=authGeneration,context=exportContext(),c=configuration();if(!c||!hasLabSession())throw new Error('Sign in before loading shared fee visibility.');
  const check=()=>{if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
- const value=checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:c.colonyId}}));check();
+ const value=checkedFeeVisibility(await request('rpc/get_lac_fee_visibility',{method:'POST',body:{p_colony_id:c.colonyId},cloudSource}));check();
  const previousPolicy=feeVisibility,changed=feeVisibilityContext!==context||!feeVisibility||!sameFeeVisibility(feeVisibility,value);
  feeVisibility=value;feeVisibilityContext=context;
  // A projected baseline cannot become a full replacement when access expands.
  // Reload the previously withheld fields before allowing another cloud edit.
  if(previousPolicy?.source_archive_allowed===false&&value.source_archive_allowed)invalidate();
  if(!value.source_archive_allowed){
-  const cached=await local('get',undefined,{check});check();const mark=readJSON('localStorage',CLOUD_CACHE_KEY),validCache=currentRestrictedCache(cached,mark,value)&&mark.url===c.url&&mark.colony===c.colonyId&&mark.user===session()?.user?.id;
+  const cached=await local('get',undefined,{check,managedOnly:true});check();const mark=readJSON('localStorage',CLOUD_CACHE_KEY),validCache=currentRestrictedCache(cached,mark,value)&&mark.url===c.url&&mark.colony===c.colonyId&&mark.user===session()?.user?.id;
   if(changed||!validCache){
   check();invalidate();if(!validCache)await local('delete',undefined,{check});check();
   await clearHistoryIndex({check,registerCancel:cancel=>{guardedCacheWrites.add(cancel);return()=>guardedCacheWrites.delete(cancel);}});check();
@@ -1136,12 +1154,12 @@ export async function pullFromCloud(options={}){
  catch(error){if(source&&source!==providerSource&&providerRevision!==revision&&operationalProvider?.getState().active&&!['FORBIDDEN','UNAUTHORIZED'].includes(error.code)&&![401,403].includes(error.status))return pullFromCloudOnce(options);throw error;}
 }
 /** A detached current-record refresh commits only while the view has no draft. */
-export async function refreshCurrentRecords({canCommit=()=>true}={}){
+export async function refreshCurrentRecords({canCommit=()=>true,source=null}={}){
  if(!provider()||!hasLabSession()||mode()!=='cloud')return null;
  const original=baseline,identity=syncIdentity(),generation=authGeneration,pull=pullGeneration,config=stable(configuration());
  const cancelled=()=>Object.assign(new Error('Background refresh postponed while editing.'),{code:'BACKGROUND_CANCELLED'});
- const check=()=>{if(!canCommit())throw cancelled();if(generation!==authGeneration||pull!==pullGeneration||config!==stable(configuration())||identity!==syncIdentity()||baseline!==original)throw cancelled();};
- check();await membership({check});check();
+ const check=()=>{if(!canCommit())throw cancelled();if(source&&operationalProvider?.getState().active!==source)throw cancelled();if(generation!==authGeneration||pull!==pullGeneration||config!==stable(configuration())||identity!==syncIdentity()||baseline!==original)throw cancelled();};
+ check();await membership({check,source});check();
  if(isGuest(session()))return pullGuestRecords({check});
  if(restrictedMouseMember())return pullMemberRecords({check});
  const reuse=synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;

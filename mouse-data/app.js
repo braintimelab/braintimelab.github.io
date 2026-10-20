@@ -10,7 +10,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=164';
+import * as store from './data-store.js?v=165';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -39,7 +39,8 @@ import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=137';
-import {createCloudMonitor} from './cloud-monitor.js?v=164';
+import {createCloudMonitor} from './cloud-monitor.js?v=165';
+import {createCloudRecovery} from './cloud-recovery.js?v=165';
 import {cloudControlsHTML,cloudDataIndicator,cloudIndicatorHTML,showCloud1SignIn} from './cloud-status.js?v=149';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=146';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=146';
@@ -70,7 +71,7 @@ const localDate = () => {const d=new Date();return [d.getFullYear(),String(d.get
 const editableTypes = ['mice','matings','litters','cages'];
 let dataset = null, cloud = {}, route = 'overview', detail = null, query = '', filters = {}, page = 0, sortKey = '', sortDesc = false;
 let editor = null, busy = false, cloudReady = true, archiveTable = 'issues', familyFocus = '', selectedMice = new Set(), deferredInstall = null;
-let brainbotReviewPending=false,cloudConnectionBusy=false;
+let brainbotReviewPending=false,cloudConnectionBusy=false,cloudRecoveryChecking=false;
 let startupLoading=false,startupMessage='Checking access…',startupProgressValue=null,manualPullPending=false,cloudLoadError='',cachedPreview=false,startupRequest=0;
 const pageSize = 50;
 let tableWindowIndex=0,tableUndated=false,tableWindowAnchor=localDate(),tableWindow=null;
@@ -251,10 +252,10 @@ store.subscribeAppAccessStatus?.(renderAccessRecordingStatus);
 const presence=createPresence({app:'mouse',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:!startupLoading&&!cachedPreview&&cloud.mode==='cloud'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const accessPage=()=>route;
 const resumeAccess=()=>{recordPendingMouseEntry();if(document.hidden)return;if(!startupLoading)accessActivity.resume(accessPage());else if(verifiedAccessIdentity&&accessIdentity(store.getCloudStatus())===verifiedAccessIdentity){const view=location.hash.slice(1).split('/')[0];openingAccess=true;try{accessActivity.resume(titles[view]?view:accessPage());}finally{openingAccess=false;}}};
-document.addEventListener('visibilitychange',()=>{if(document.hidden)accessActivity.suspend();else resumeAccess();});
-window.addEventListener('pagehide',()=>accessActivity.suspend());
-window.addEventListener('pageshow',event=>{if(event.persisted)resumeAccess();});
-window.addEventListener('focus',resumeAccess);
+document.addEventListener('visibilitychange',()=>{if(document.hidden){accessActivity.suspend();cloudRecovery.pause();cloudRecoveryChecking=false;}else{resumeAccess();void cloudRecovery.request();}});
+window.addEventListener('pagehide',()=>{accessActivity.suspend();cloudRecovery.pause();cloudRecoveryChecking=false;});
+window.addEventListener('pageshow',event=>{resumeAccess();void cloudRecovery.request({force:event.persisted===true});});
+window.addEventListener('focus',()=>{resumeAccess();void cloudRecovery.request();});
 window.addEventListener('online',resumeAccess);
 for(const type of ['pointerdown','keydown'])document.addEventListener(type,event=>{if(event.isTrusted!==false&&!document.hidden&&!startupLoading)accessActivity.touch(accessPage());});
 function clearAccessLogView(){accessLogsCleanup?.();accessLogsCleanup=null;}
@@ -325,6 +326,7 @@ function renderConnection(connections=store.getCloudConnections?.()) {
  renderCloudConnections(connections);renderSidebarAccount(connections);
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
  if(cachedPreview){$('mode-badge').textContent='Saved view · syncing';$('mode-badge').classList.remove('cloud');$('workspace-label').textContent='Shared laboratory workspace';return;}
+ if(cloudRecoveryChecking){$('mode-badge').textContent=`Checking ${recoveryContext()?.source==='cloud2'?'Cloud 2':'Cloud 1'}…`;$('mode-badge').classList.remove('cloud');return;}
  if(cloud.signedIn&&cloud.role==='pending'){$('mode-badge').textContent='Account setup';$('mode-badge').classList.remove('cloud');$('workspace-label').textContent='Braintime Lab account';return;}
  const connected=cloud.mode==='cloud',source=workspaceCloudIndicator(connections),verified=connected&&workspaceSourceVerified(source);$('mode-badge').textContent=verified?`${source.label} connected${cloud.role==='viewer'?' · read only':''}`:connected?'Cloud · reconnect required':'Local only';$('mode-badge').classList.toggle('cloud',verified);
  $('workspace-label').textContent=dataset?.demo||dataset?.is_demo||dataset?.synthetic?'Synthetic demonstration':connected?'Shared laboratory workspace':'Private browser workspace';
@@ -1033,8 +1035,8 @@ window.addEventListener('lac-fee-visibility-changed',async()=>{
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(route==='settings')renderSettings()});
 window.addEventListener('hashchange',()=>{const [view,id]=location.hash.slice(1).split('/');if(titles[view]&&(view!==route||String(detail?.id||'')!==decodeURIComponent(id||''))){route=view;detail=id&&entity[view]?{type:view,id:decodeURIComponent(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;resetTableWindow();selectedMice.clear();render()}});
 window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()||hasStrainDrafts($('main'))){event.preventDefault();event.returnValue='';}});
-window.addEventListener('offline',()=>{if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
-window.addEventListener('online',()=>{if(cloud.mode==='cloud')showToast('Connection restored. Load the shared colony before editing.')});
+window.addEventListener('offline',()=>{cloudRecovery.pause();cloudRecoveryChecking=false;if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
+window.addEventListener('online',()=>{if(cloud.mode==='cloud')void cloudRecovery.request({force:true});});
 async function start(){
  const request=++startupRequest;cachedPreview=false;cloudLoadError='';startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
  try{
@@ -1057,6 +1059,59 @@ async function start(){
  }catch(error){if(request!==startupRequest)return;cachedPreview=false;startupLoading=false;dataset=null;cloudReady=false;cloud=store.getCloudStatus();$('main').innerHTML=`<div class="alert error">Workspace could not load: ${esc(error.message||String(error))}</div><div class="actions">${button('Try again','retry-startup',true)}${button('Connection settings','settings')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}`;renderConnection()}
  if('serviceWorker'in navigator&&['http:','https:'].includes(location.protocol))navigator.serviceWorker.register('./sw.js').catch(()=>{})
 }
+function recoveryContext(){
+ const status=store.getCloudStatus();
+ if(status.mode!=='cloud'||!status.signedIn||status.passwordRecovery||status.setupRequired||status.role==='pending')return null;
+ const source=status.activeCloud||status.recoverySource||cloud.activeCloud||'cloud1';
+ return {source,key:JSON.stringify([status.url,status.colonyId,status.userId||status.email,status.sessionEpoch,source])};
+}
+function currentSourceDenied(connections=store.getCloudConnections?.()){
+ const source=connections?.active||store.getCloudStatus().recoverySource||cloud.activeCloud||'cloud1';
+ return ['denied','signed_out'].includes(connections?.sources?.[source]?.state);
+}
+function clearUnavailableAccess(){
+ dataset=null;cloudReady=false;cachedPreview=false;cloudRecoveryChecking=false;editor=null;detail=null;clearCageSheetDrafts();clearSidebarProfile();clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));verifiedAccessIdentity='';accessActivity.suspend();presence.clear();
+ for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
+ route='settings';render();
+}
+const cloudRecovery=createCloudRecovery({
+ getContext:recoveryContext,isVisible:()=>!document.hidden,isOnline:()=>navigator.onLine!==false,
+ canRun:()=>typeof store.recoverCloudConnection==='function'&&!cloudConnectionBusy&&!manualPullPending&&!busy&&!startupLoading&&!cachedPreview&&!historyLoadState&&!brainbotReviewPending,
+ onChecking:()=>{cloudReady=false;cloudRecoveryChecking=true;renderConnection();},
+ recover:async(context,{isCurrent})=>{
+  // This check verifies access and the existing baseline only. It does not
+  // replace records, so a suspended tab can recover with its draft intact.
+  const previousPolicy=cageSheetContext(cloud),canCommit=isCurrent;
+  let result;
+  try{result=await store.recoverCloudConnection({source:context.source,canCommit});}
+  catch(error){const status=store.getCloudStatus();if(!status.signedIn||status.passwordRecovery||status.setupRequired){cloud=status;clearUnavailableAccess();}throw error;}
+  if(!isCurrent())return {recovered:false};
+  await refreshCloud({verifyFees:false});
+  if(previousPolicy!==cageSheetContext(cloud)){clearUnavailableAccess();throw Object.assign(new Error('Account access changed. Reload your permitted records.'),{code:'BACKGROUND_CANCELLED'});}
+  cloudRecoveryChecking=false;
+  if(!result?.status?.readyForEdits||cloud.readyForEdits!==true||!dataset){renderConnection();return {recovered:false};}
+  return {...result,recovered:true};
+ },
+ onRecovered:result=>{
+  // The store has reverified the same account, source and existing baseline.
+  // Status updates do not rebuild an open editor or discard its draft.
+  cloudRecoveryChecking=false;cloudReady=store.getCloudStatus().readyForEdits===true&&Boolean(dataset);cloudLoadError='';
+  if(result.dataset&&!historyDraftOpen()&&!document.querySelector('dialog[open]'))dataset=result.dataset;
+  renderConnection();if(route==='settings')refreshSettingsConnection();
+ },
+ onError:(error,{denied})=>{
+  cloudRecoveryChecking=false;cloud=store.getCloudStatus();
+  if(denied||currentSourceDenied()||!cloud.signedIn||cloud.passwordRecovery||cloud.setupRequired){clearUnavailableAccess();return;}
+  cloudReady=false;renderConnection();
+ }
+});
+async function refreshConnectionHealth(){
+ const state=await store.refreshCloudConnections();
+ // A later successful health check can recover after the foreground retry
+ // budget was exhausted, without rereading records or switching providers.
+ if(!cloudReady&&dataset&&!cloudRecoveryChecking&&state?.active===cloud.activeCloud&&!currentSourceDenied(state))void cloudRecovery.request({force:true});
+ return state;
+}
 store.subscribeCloudConnections?.(connections=>{renderConnection(connections);if(route==='settings'&&settingsConnectionContext===settingsAccessContext()){const status=$('workspace-connection-state');if(status)status.textContent=workspaceConnectionText(connections);}});
-createCloudMonitor({getState:()=>store.getCloudConnections?.(),refresh:()=>store.refreshCloudConnections(),verifyPolicy:verifyCurrentAppPolicy,verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:()=>!cloudConnectionBusy&&cloud.cloud2Configured&&cloud.signedIn&&!document.hidden&&!startupLoading&&!cachedPreview&&!historyLoadState&&!historyDraftOpen()&&!document.querySelector('dialog[open]'),onDataChange:async()=>{const clear=()=>!cloudConnectionBusy&&!historyDraftOpen()&&!document.querySelector('dialog[open]');const fresh=await store.refreshCurrentRecords({canCommit:clear});if(!clear())return;if(fresh)dataset=fresh;cloudReady=store.getCloudStatus().readyForEdits;await refreshCloud();if(fresh)render();},onError:error=>{cloud=store.getCloudStatus();const state=store.getCloudConnections?.();if([401,403].includes(error.status)||!state?.active&&Object.values(state?.sources||{}).some(value=>value.state==='denied')){dataset=null;cloudReady=false;clearCageSheetDrafts();route='settings';detail=null;render();}else renderConnection();}});
+createCloudMonitor({healthyMs:window.matchMedia?.('(pointer: coarse)')?.matches?45000:15000,getState:()=>store.getCloudConnections?.(),refresh:refreshConnectionHealth,verifyPolicy:verifyCurrentAppPolicy,verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:()=>!cloudConnectionBusy&&!cloudRecoveryChecking&&cloud.cloud2Configured&&cloud.signedIn&&!document.hidden&&!startupLoading&&!cachedPreview&&!historyLoadState&&!historyDraftOpen()&&!document.querySelector('dialog[open]'),onDataChange:async()=>{const state=store.getCloudConnections?.();if(currentSourceDenied(state)){cloud=store.getCloudStatus();clearUnavailableAccess();return;}if(!state?.active){cloudReady=false;renderConnection();void cloudRecovery.request({force:true});return;}if(!cloudReady&&dataset&&state.active===cloud.activeCloud){await cloudRecovery.request({force:true});return;}const source=state.active,clear=()=>!cloudConnectionBusy&&!cloudRecoveryChecking&&!historyDraftOpen()&&!document.querySelector('dialog[open]');const fresh=await store.refreshCurrentRecords({source,canCommit:clear});if(!clear())return;if(fresh)dataset=fresh;cloudReady=store.getCloudStatus().readyForEdits;await refreshCloud();if(fresh)render();},onError:error=>{cloud=store.getCloudStatus();if([401,403].includes(error.status)||currentSourceDenied())clearUnavailableAccess();else renderConnection();}});
 start();

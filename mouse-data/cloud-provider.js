@@ -1,4 +1,4 @@
-import {createCloudBridge} from './cloud-bridge.js?v=164';
+import {createCloudBridge} from './cloud-bridge.js?v=165';
 
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const READ_RPCS=new Set(['get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','get_member_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
@@ -27,7 +27,7 @@ export function isCloudRead(route,method='GET'){
  if(method==='GET')return true;
  return method==='POST'&&route.startsWith('rpc/')&&READ_RPCS.has(route.slice(4));
 }
-export function cloudUnavailable(error){return error?.code==='UNAVAILABLE'||error?.connectionUnavailable===true||error?.statementTimeout===true||error instanceof TypeError&&/fetch|network|load failed/i.test(error.message);}
+export function cloudUnavailable(error){return error?.code==='UNAVAILABLE'||error?.connectionUnavailable===true||error?.statementTimeout===true||error?.name==='AbortError'||error instanceof TypeError&&/fetch|network|load failed/i.test(error.message);}
 export function providerFailure(error){
  if(error?.code&&['UNAVAILABLE','UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED','NOT_READY'].includes(error.code))return error;
  if([401,403].includes(error?.status))return problem(error.status===401?'UNAUTHORIZED':'FORBIDDEN',error.message,{status:error.status});
@@ -107,9 +107,9 @@ export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=g
 
 export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},journal=null,uuid=()=>crypto.randomUUID(),primaryPolicy=false}={}){
  const bridge=createCloudBridge({adapters:{cloud1,cloud2},getContext,onChange,journal,primaryPolicy});
- async function request(route,{method='GET',body}={}){
+ async function request(route,{method='GET',body,cloudSource=null}={}){
   const query={route,method,...(body===undefined?{}:{body:clone(body)})};
-  if(isCloudRead(route,method))return (await bridge.read(query)).data;
+  if(isCloudRead(route,method))return (await bridge.read(query,{source:cloudSource})).data;
   const receipt=await bridge.submit({operation_id:uuid(),request:query});
   if(receipt.access_changed)throw problem('FORBIDDEN','Account access changed. Verify current access before continuing.',{status:403,reagentsAccessChanged:true});
   if(receipt.status==='conflict')throw problem('CONFLICT','This record changed. Reload and review your edit.',{status:409,receipt});

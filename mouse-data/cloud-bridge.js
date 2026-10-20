@@ -106,9 +106,11 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   function getState(){synchronize();return snapshot();}
   function setPrimaryCloudPolicy(){synchronize();fixedPrimary=true;preferred='cloud1';if(active==='cloud2')fallbackEngaged=true;return emit();}
   function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
-  async function read(query){
+  async function read(query,{source:requiredSource=null}={}){
+    if(requiredSource!==null&&!SOURCES.includes(requiredSource))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');
     synchronize();const check=fence();if(!active)await refreshForRead(check);check();
-    if(fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true});check();emit();}
+    if(requiredSource!==null&&active!==requiredSource)throw problem('SOURCE_CHANGED','The original cloud is unavailable. Retry when it reconnects.');
+    if(requiredSource===null&&fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true});check();emit();}
     const source=active;
     if(!source)throw problem('NOT_READY','No verified cloud data source is available.');
     try{const data=await invoke(source,'read',{query:clone(query)},check);if(active!==source)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
@@ -122,7 +124,7 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
       if(sources[source].state==='online'){sources[source]={...empty(source),state:'unavailable'};emit();}
       // Retry a read only after verifying a different, enrolled source. Never
       // retry an arbitrary error or silently interpret a permission denial.
-      if(!active||active===source)throw error;
+      if(requiredSource!==null||!active||active===source)throw error;
       const fallback=active,data=await invoke(fallback,'read',{query:clone(query)},check);if(active!==fallback)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source:fallback,data};
     }
   }
