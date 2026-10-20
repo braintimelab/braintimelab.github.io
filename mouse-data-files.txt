@@ -39,6 +39,7 @@ config.js
 cryo-sources.js
 cryopreservation-model.js
 cryopreservation.js
+current-record-scope.js
 data-store.js
 entrainment-history.js
 experiment-model.js
@@ -77,6 +78,7 @@ locobox-export.js
 locobox-label.js
 locobox-model.js
 locobox.js
+managed-view.js
 manifest.webmanifest
 model.js
 mouse-registration.js

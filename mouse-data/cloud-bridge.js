@@ -22,7 +22,22 @@ const failureState=error=>({UNAVAILABLE:'unavailable',UNAUTHORIZED:'signed_out',
 const OPTIONAL_PRIMARY_READS=new Set(['get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','list_guest_access','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_lac_fee_visibility','get_export_permission','get_local_backup_permission']);
 export const optionalPrimaryRead=query=>query?.method==='POST'&&typeof query.route==='string'&&query.route.startsWith('rpc/')&&OPTIONAL_PRIMARY_READS.has(query.route.slice(4));
 const CURRENT_PAGE_TYPES=new Set(['mice','matings','litters','cages','rooms','racks','locations','light_events','husbandry_events']);
+// Classification only. Membership, scope and field visibility are enforced by
+// the server. Keep malformed/arbitrary RPCs out of the page-timeout exception.
+export function managedRecordPageQuery(query,colonyId){
+ if(query?.method!=='POST'||query.route!=='rpc/get_managed_record_page'||!UUID.test(colonyId||''))return null;
+ const body=query.body;
+ if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['p_colony_id','p_entity_type','p_scope','p_event_types','p_after','p_limit','p_metadata_only'].includes(key)))return null;
+ if(body.p_colony_id!==colonyId||!CURRENT_PAGE_TYPES.has(body.p_entity_type)||!['current','full','event_types'].includes(body.p_scope))return null;
+ if(body.p_event_types!==undefined&&(!Array.isArray(body.p_event_types)||body.p_event_types.length>64||body.p_event_types.some(type=>typeof type!=='string'||!/^[a-z][a-z0-9_]{0,99}$/.test(type))))return null;
+ if(body.p_scope==='event_types'&&(body.p_entity_type!=='husbandry_events'||!body.p_event_types?.length))return null;
+ if(body.p_scope!=='event_types'&&body.p_event_types?.length)return null;
+ if(body.p_after!==undefined&&body.p_after!==null&&(typeof body.p_after!=='string'||!body.p_after.length||body.p_after.length>200||body.p_after.trim()!==body.p_after||/[\x00-\x1f]/.test(body.p_after)))return null;
+ if(!Number.isSafeInteger(body.p_limit)||body.p_limit<1||body.p_limit>1000||body.p_metadata_only!==undefined&&typeof body.p_metadata_only!=='boolean')return null;
+ return body;
+}
 function shrinkingPrimaryPage(query,colonyId){
+ const managed=managedRecordPageQuery(query,colonyId);if(managed)return managed.p_limit>1;
  if(query?.method!=='GET'||!query.route?.startsWith('entity_records?'))return false;
  const params=new URLSearchParams(query.route.slice('entity_records?'.length)),limit=params.get('limit');
  if([...params.keys()].some(key=>!['select','colony_id','entity_type','order','limit','entity_id'].includes(key)||params.getAll(key).length!==1))return false;

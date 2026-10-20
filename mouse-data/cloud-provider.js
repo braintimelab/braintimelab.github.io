@@ -1,7 +1,7 @@
-import {createCloudBridge,optionalPrimaryRead} from './cloud-bridge.js?v=168';
+import {createCloudBridge,optionalPrimaryRead,managedRecordPageQuery} from './cloud-bridge.js?v=169';
 
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-const READ_RPCS=new Set(['get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','get_member_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
+const READ_RPCS=new Set(['get_managed_record_page','get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','get_member_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
 export const CLOUD_COMMAND_KINDS=Object.freeze(Object.fromEntries(['save_records','save_guest_mouse_records'].map(name=>['rpc/'+name,'mouse.'+name]).concat(['save','record_usage','order_submit','order_transition','order_set_location'].map(name=>['rpc/reagents_'+name,'reagents.'+name]))));
 const clone=value=>structuredClone(value);
 const problem=(code,message,details={})=>Object.assign(new Error(message),{code,...details});
@@ -14,6 +14,8 @@ export function cloud1RecoveryQuery(query,colonyId){
  // A metadata endpoint may stay unavailable after current records recover.
  // Failback verifies the core data path without replaying that optional read.
  if(optionalPrimaryRead(query)&&query.body?.p_colony_id===colonyId)return cloud1RecoveryQuery(null,colonyId);
+ const managed=managedRecordPageQuery(query,colonyId);
+ if(managed)return {route:query.route,method:'POST',body:{...clone(managed),p_limit:1,p_metadata_only:true}};
  if(query?.method!=='GET'||!query.route?.startsWith('entity_records?'))return null;
  const params=new URLSearchParams(query.route.slice('entity_records?'.length)),type=params.get('entity_type')?.slice(3);
  if(params.get('colony_id')!==`eq.${colonyId}`||params.get('entity_type')!==`eq.${type}`||!CURRENT_TYPES.has(type))return null;

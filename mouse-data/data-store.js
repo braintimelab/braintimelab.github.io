@@ -7,8 +7,10 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=168';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=169';
 import {createIntentJournal} from './cloud-intents.js?v=137';
+import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=169';
+export {getDeferredManagedTables,getDeferredManagedEventTypes};
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -21,10 +23,11 @@ const clone=value=>structuredClone(value);
 let feeVisibility=null,feeVisibilityContext=null;
 let authGeneration=0;
 const guardedCacheWrites=new Set(),CACHE_WRITE_KEY='current-cloud-write',BASELINE_CACHE_KEY='current-cloud-baseline';
-const STARTUP_CACHE_KEY='current-managed-snapshot',STARTUP_CACHE_VERSION=1,RECORD_BLOCK_SIZE=1000;
+const STARTUP_CACHE_KEY='current-managed-snapshot',STARTUP_CACHE_VERSION=2,RECORD_BLOCK_SIZE=1000;
 let startupCacheSnapshot=null;
 const BASELINE_CACHE_VERSION=1,MAX_BASELINE_RECORDS=250000,MAX_BASELINE_BYTES=32*1024*1024;
 let deferredArchiveState=null;
+let managedReadCoverage=null;
 let operationalProvider=null,operationalConfig=null,cloud2Identity=null,providerSource=null,providerRevision=0,providerSessionEpoch=0;
 let primaryCloudPolicy=false;
 let cloud1SessionSuspended=false;
@@ -64,7 +67,7 @@ const setupProfileAllowed=p=>!!p?.member&&(p.eligible===true&&p.setup_required==
 const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==false;
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
-function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;startupCacheSnapshot=null;}
+function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;managedReadCoverage=null;startupCacheSnapshot=null;}
 function saveSession(s){const before=session();if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;cloud1SessionSuspended=false;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);}
 function stable(value){if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return `{${Object.keys(value).sort().filter(k=>value[k]!==undefined).map(k=>JSON.stringify(k)+':'+stable(value[k])).join(',')}}`;return JSON.stringify(value);}
 function advanceAuthGeneration(){authGeneration++;for(const cancel of guardedCacheWrites)cancel();return authGeneration;}
@@ -102,7 +105,7 @@ function ownCacheWrite(mark){
   const c=configuration(),s=session();
   return hasLabSession(s)&&mark.url===c?.url&&mark.colony===c?.colonyId&&mark.user===s.user?.id;
 }
-function startupProjection(data){return {...data,tables:Object.fromEntries(MANAGED.map(type=>[type,data.tables?.[type]||[]]))};}
+function startupProjection(data){return currentCacheProjection(data);}
 async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseline=false,managedOnly=false}={}){
   const db=await database();check?.();
   return new Promise((resolve,reject)=>{
@@ -171,13 +174,14 @@ export async function loadDataset(){
 }
 // An optional startup preview is authorized afresh but never becomes a
 // writable cloud baseline. A denied, stale or incompatible cache stays hidden.
-export async function loadStartupCache(){
+export async function loadStartupCache({currentOnly=false}={}){
  const initial=session(),c=configuration();
  if(mode()!=='cloud'||!c||!initial?.user?.id||!hasLabSession(initial)||initial.passwordRecovery||pendingAccount(initial))return null;
  const previous=readJSON('localStorage',CLOUD_CACHE_KEY);
  // Without an account-matching cache marker there is no preview to unlock.
  // The following authoritative pull still verifies membership and policy.
  if(!previous||previous.url!==c.url||previous.colony!==c.colonyId||previous.user!==initial.user.id)return null;
+ if(currentOnly&&previous.startup_cache_version!==STARTUP_CACHE_VERSION)return null;
  invalidate();
  try{
   await verifyCloudMembership();
@@ -286,7 +290,7 @@ async function cloud1Request(route,{method='GET',body,timeoutMs=30000}={}){
   const c=configuration();if(!c)throw new Error('Configure the cloud project first.');publicKey(c.anonKey);
   const token=await accessToken();
   const {response,result}=await cloudJSON(`${c.url}/rest/v1/${route}`,{method,cache:'no-store',redirect:'error',headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(method==='POST'?{Prefer:'return=representation'}:{})},body:body===undefined?undefined:JSON.stringify(body)},timeoutMs);
-  if(!response.ok)throw apiError(response,result);return result;
+  if(!response.ok){const error=apiError(response,result);if(route==='rpc/get_managed_record_page'&&(response.status===404||result?.code==='PGRST202'))error.message='The current-record service is not available. Retry loading.';throw error;}return result;
 }
 function cloud2URL(){return configuration()?.url===PUBLIC_CONFIG.url&&configuration()?.colonyId===PUBLIC_CONFIG.colonyId?PUBLIC_CONFIG.cloud2Url||'':'';}
 function clearOperationalSession(){operationalProvider?.cloud2.clear();operationalProvider?.dispose();operationalProvider=null;operationalConfig=null;cloud2Identity=null;providerSource=null;providerRevision++;cloud2ConflictPage={rows:[],nextAfter:null,binding:null};}
@@ -798,7 +802,7 @@ const SUMMARY_COMPUTED_KEYS=new Set(['counts','mouse_state_counts','mice_without
 const DEFERRED_HISTORY_ERROR='Deferred history changed or is unverified. Reload shared data before saving.';
 function archiveProjection(data){
  const value={...data,tables:Object.fromEntries(Object.entries(data.tables||{}).filter(([type])=>!MANAGED.includes(type)))};
- for(const key of ['source_archive_deferred','_cloud_read_context','fee_visibility','source_archive_restricted'])delete value[key];
+ for(const key of ['source_archive_deferred','managed_records_deferred','_cloud_read_context','fee_visibility','source_archive_restricted'])delete value[key];
  if(value.summary){value.summary=Object.fromEntries(Object.entries(value.summary).filter(([key])=>!SUMMARY_COMPUTED_KEYS.has(key)));if(!Object.keys(value.summary).length)delete value.summary;}
  return value;
 }
@@ -844,6 +848,7 @@ async function mapBounded(values,fn,check){
 const ordinaryManagedRecord=row=>MANAGED.includes(row?.entity_type)&&row.entity_type!=='locations'&&!feeRecord(row);
 async function baselineEnvelope(rows,writeId,check,recordVersions=versions,deferredState=deferredArchiveState,payloadDigests=null){
   const policy=clone(feeVisibility),identity=persistentIdentity();
+  const coverage=Object.hasOwn(rows,'managed_coverage')?rows.managed_coverage:managedReadCoverage;
   if(!policy.source_archive_allowed)rows=rows.filter(ordinaryManagedRecord);
   if(rows.length>MAX_BASELINE_RECORDS)return null;
   const entries=await mapBounded(rows,async row=>{
@@ -852,7 +857,7 @@ async function baselineEnvelope(rows,writeId,check,recordVersions=versions,defer
     // Archive IDs are already SHA-256 hashes of their canonical payloads.
     return [row.entity_type,row.entity_id,version,row.archived,isArchiveChunk(row)?row.entity_id.slice(6):await payloadDigest(row.payload,payloadDigests)];
   },check);
-  const body={schema_version:BASELINE_CACHE_VERSION,projection_version:SOURCE_PROJECTION_VERSION,write_id:writeId,identity,policy,entries,...(!deferredState&&policy.source_archive_allowed?{archive_complete:true}:{}),...(deferredState?{deferred_archive:{head:clone(deferredState.head),loaded_tables:[...deferredState.loadedTables],projection_sha256:deferredState.projectionHash}}:{})};
+  const body={schema_version:BASELINE_CACHE_VERSION,projection_version:SOURCE_PROJECTION_VERSION,write_id:writeId,identity,policy,entries,...(coverage?{managed_coverage:checkedManagedCoverage(coverage)}:{}),...(!deferredState&&policy.source_archive_allowed?{archive_complete:true}:{}),...(deferredState?{deferred_archive:{head:clone(deferredState.head),loaded_tables:[...deferredState.loadedTables],projection_sha256:deferredState.projectionHash}}:{})};
   if(utf8Size(body)>MAX_BASELINE_BYTES)return null;
   const sha256=await cacheDigest(body);check();
   if(identity!==persistentIdentity()||stable(policy)!==stable(feeVisibility))throw new Error('Cloud access changed while preparing the saved workspace. Pull again.');
@@ -869,6 +874,9 @@ async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=
   try{
     const {sha256,...body}=envelope;
     if(typeof sha256!=='string'||!/^[a-f0-9]{64}$/.test(sha256)||utf8Size(body)>MAX_BASELINE_BYTES||await cacheDigest(body)!==sha256)return null;check();
+    const coverage=envelope.managed_coverage?checkedManagedCoverage(envelope.managed_coverage):null;
+    if(!managedOnly&&stable(snapshot.data.managed_records_deferred||null)!==stable(coverage))return null;
+    if(managedOnly&&snapshot.data.managed_records_deferred)checkedManagedCoverage(snapshot.data.managed_records_deferred);
     const indexed=new Map();
     for(const entry of envelope.entries){
       if(!Array.isArray(entry)||entry.length!==5||![...MANAGED,'archive'].includes(entry[0])||typeof entry[1]!=='string'||!entry[1]||!Number.isSafeInteger(entry[2])||entry[2]<1||typeof entry[3]!=='boolean'||typeof entry[4]!=='string'||!/^[a-f0-9]{64}$/.test(entry[4]))return null;
@@ -892,7 +900,7 @@ async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=
       records.set(key,row);knownVersions.set(key,entry[2]);
     },check);
     if(deferredState){for(const row of deferredState.records.values()){const key=recordKey(row),entry=indexed.get(key);if(!records.has(key)||!entry)throw new Error('The deferred archive cache is incomplete.');records.get(key).version=entry[2];records.get(key).colony_id=configuration().colonyId;}deferredState.records=new Map([...records].filter(([,row])=>row.entity_type==='archive'));}
-    return {records,versions:knownVersions,identity:syncIdentity(),policy:clone(policy),deferredState};
+    return {records,versions:knownVersions,identity:syncIdentity(),policy:clone(policy),deferredState,managedCoverage:coverage};
   }catch(error){check();return null;}
 }
 function checkedCloudRecord(row,type,c,payload=true){
@@ -905,10 +913,11 @@ function reusableRecord(reuse,row,c){
   if(!cached||reuse.versions.get(key)!==row.version||cached.archived!==row.archived)return null;
   return checkedCloudRecord({...cached,colony_id:c.colonyId,version:row.version},row.entity_type,c);
 }
-async function managedVersionIndex(type,c,check,read=request){
+async function managedVersionIndex(type,c,check,read=request,scope=null,eventTypes=[]){
   const index=new Map();let cursor=null,limit=1000;
   while(true){
     const loaded=await readCloudPage(size=>{
+      if(scope)return read('rpc/get_managed_record_page',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:c.colonyId,p_entity_type:type,p_scope:scope,p_event_types:eventTypes,p_after:cursor,p_limit:size,p_metadata_only:true}});
       const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
       if(cursor!==null)query.set('entity_id',`gt.${cursor}`);return read(`entity_records?${query}`);
     },limit,check);const page=loaded.page;limit=loaded.limit;
@@ -918,10 +927,24 @@ async function managedVersionIndex(type,c,check,read=request){
   }
   return index;
 }
-async function incrementalManaged(type,c,check,reuse,restricted=false,read=request,onVerified=()=>{}){
-  const index=await managedVersionIndex(type,c,check,read),rows=new Map(),pending=[],reused=new Set();
+async function incrementalManaged(type,c,check,reuse,restricted=false,read=request,onVerified=()=>{},scope=null,eventTypes=[]){
+  const index=await managedVersionIndex(type,c,check,read,scope,eventTypes),rows=new Map(),pending=[],reused=new Set();
   for(const row of index.values()){const cached=reusableRecord(reuse,row,c);if(cached&&(!restricted||ordinaryManagedRecord(cached))){rows.set(row.entity_id,cached);reused.add(row.entity_id);}else pending.push(row);}
   onVerified(rows.size,index.size);
+  // A newly opened feature may contain many uncached rows. Read bounded RPC
+  // pages instead of issuing hundreds of twenty-ID payload requests.
+  if(scope&&(pending.length>100||pending.length&&!feeVisibility?.source_archive_allowed)){
+    const loadedRows=[],seen=new Set();let cursor=null,limit=1000;
+    while(true){
+      const loaded=await readCloudPage(size=>read('rpc/get_managed_record_page',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:c.colonyId,p_entity_type:type,p_scope:scope,p_event_types:eventTypes,p_after:cursor,p_limit:size,p_metadata_only:false}}),limit,check);
+      const page=loaded.page;limit=loaded.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('Cloud records were not returned as a valid page.');
+      for(const value of page){const row=checkedCloudRecord(value,type,c),expected=index.get(row.entity_id);if(!expected||row.version!==expected.version||row.archived!==expected.archived||seen.has(row.entity_id))throw new Error('Cloud records changed during loading. Retry this view.');seen.add(row.entity_id);loadedRows.push(row);}
+      onVerified(loadedRows.length,index.size);if(page.length<limit)break;cursor=page.at(-1).entity_id;
+    }
+    const final=await managedVersionIndex(type,c,check,read,scope,eventTypes);
+    if(loadedRows.length!==index.size||final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Retry this view.');
+    const result=loadedRows.filter(row=>!restricted||ordinaryManagedRecord(row));result.reused=0;return result;
+  }
   const batches=[];
   for(let offset=0;offset<pending.length;){
     const batch=[pending[offset++]];
@@ -951,7 +974,7 @@ async function incrementalManaged(type,c,check,reuse,restricted=false,read=reque
   // A changed payload or missing cached ID still requires the final scan.
   let cachedCount=0;for(const row of reuse.records.values())if(row.entity_type===type)cachedCount++;
   if(pending.length||index.size!==cachedCount){
-    const final=await managedVersionIndex(type,c,check,read);
+    const final=await managedVersionIndex(type,c,check,read,scope,eventTypes);
     if(final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Pull again.');
   }
   const result=[...index.keys()].map(id=>rows.get(id)).filter(row=>!restricted||ordinaryManagedRecord(row));result.reused=result.filter(row=>reused.has(row.entity_id)).length;return result;
@@ -1021,19 +1044,23 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   const finalHead=valid(finalPage[0]);if(finalHead.entity_id!=='reconstruction'||finalHead.archived||finalHead.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const result=[head,...ordered.map(id=>chunks.get(id))];result.reused=Number(headReused)+ordered.length-needed.length;result.archive_versions=[...indexed.values()].map(row=>[`archive:${row.entity_id}`,row.version]);return result;
 }
-async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null,startupSnapshot=null}={}){
+async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null,startupSnapshot=null,currentOnly=false,retainedCoverage=null}={}){
   const generation=authGeneration,context=exportContext(),c=configuration(),policy=await refreshFeeVisibility({notify:false});const result=[];
   const check=()=>{checkScope?.();if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
   let reusable=referencedArchive&&reuse?.identity===syncIdentity()&&stable(reuse.policy)===stable(policy)?reuse:null;
+  if(currentOnly&&readJSON('localStorage',CLOUD_CACHE_KEY)?.startup_cache_version!==STARTUP_CACHE_VERSION)allowPersisted=false;
   if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check,{managedOnly:deferHistory,payloadDigests,startupSnapshot});check();
+  // Cloud 2 retains its existing source-pinned complete reader. Its broker has
+  // no current-record projection RPC; never replay this scoped read there.
+  const currentProjection=currentOnly&&providerSource==='cloud1';
   // Progress measures current records, never old source archive blocks. Prior
   // same-account counts are explicitly estimates until live indexes confirm
   // each table. A logical record block contains at most 1,000 current rows.
   let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
-  const types=MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations');
+  const types=currentProjection?MANAGED:MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations');
   const priorCounts=new Map(types.map(type=>[type,0]));if(reusable)for(const row of reusable.records.values())if(priorCounts.has(row.entity_type))priorCounts.set(row.entity_type,priorCounts.get(row.entity_type)+1);
-  const tableProgress=new Map(types.map(type=>[type,{loaded:0,total:reusable?priorCounts.get(type):null,known:false,complete:false}]));
-  if(!policy.source_archive_allowed)for(const type of ['fee_projection','location_projection'])tableProgress.set(type,{loaded:0,total:null,known:false,complete:false});
+  const tableProgress=new Map(types.map(type=>[type,{loaded:0,total:reusable&&!currentProjection?priorCounts.get(type):null,known:false,complete:false}]));
+  if(!policy.source_archive_allowed&&!currentProjection)for(const type of ['fee_projection','location_projection'])tableProgress.set(type,{loaded:0,total:null,known:false,complete:false});
   const recordProgress=()=>{
     const tables=[...tableProgress.values()],known=tables.every(table=>table.known),counted=tables.every(table=>Number.isInteger(table.total));
     return {recordBlocksLoaded:tables.reduce((n,table)=>n+(table.complete?Math.ceil(table.loaded/RECORD_BLOCK_SIZE):Math.floor(table.loaded/RECORD_BLOCK_SIZE)),0),recordBlocksTotal:counted?tables.reduce((n,table)=>n+Math.ceil(Math.max(table.total,table.loaded)/RECORD_BLOCK_SIZE),0):null,recordBlocksEstimated:!known,recordTablesLoaded:tables.filter(table=>table.complete).length,recordTablesTotal:tables.length,...(counted&&policy.source_archive_allowed?{recordsTotal:tables.reduce((n,table)=>n+Math.max(table.total,table.loaded),0)}:{})};
@@ -1048,7 +1075,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   const active=()=>{check();if(streamFailure)throw streamFailure;};
   const acquire=()=>inFlight<3?(inFlight++,Promise.resolve()):new Promise(resolve=>waiting.push(resolve));
   const release=()=>{const next=waiting.shift();if(next)next();else inFlight--;};
-  const readManaged=async route=>{active();await acquire();try{active();return await request(route);}finally{release();}};
+  const readManaged=async(route,options={})=>{active();await acquire();try{active();return await request(route,{...options,...(currentProjection?{cloudSource:'cloud1'}:{})});}finally{release();}};
   // The small reconstruction head is needed anyway. Read it alongside the
   // current tables using the same three slots, rather than adding a serial
   // round trip afterward. Its previous counts help a first visit estimate
@@ -1056,12 +1083,16 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   let openingHead=null;
   const openingHeadJob=policy.source_archive_allowed&&referencedArchive&&deferHistory?(async()=>{
     openingHead=await readArchiveHead(c,active,readManaged);active();
-    if(!reusable){const counts=openingHead.payload.summary?.counts;if(counts&&typeof counts==='object'){for(const type of types){const table=tableProgress.get(type);if(!table.known&&Number.isSafeInteger(counts[type])&&counts[type]>=0&&counts[type]<=MAX_BASELINE_RECORDS)table.total=counts[type];}progress('records');}}
+    if(!reusable&&!currentProjection){const counts=openingHead.payload.summary?.counts;if(counts&&typeof counts==='object'){for(const type of types){const table=tableProgress.get(type);if(!table.known&&Number.isSafeInteger(counts[type])&&counts[type]>=0&&counts[type]<=MAX_BASELINE_RECORDS)table.total=counts[type];}progress('records');}}
   })().catch(error=>{streamFailure??=error;}):null;
   async function readType(type,read,guard){
+    const managedScope=currentProjection?(retainedCoverage?.full_tables.includes(type)?'full':'current'):null;
     // Restricted locations always come from the sanitized projection RPC.
     if(reusable&&type!=='archive'){
-      progress('records');const rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed,read,(loaded,total)=>observeType(type,loaded,{total}));
+      progress('records');let rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed&&!currentProjection,read,(loaded,total)=>observeType(type,loaded,{total}),managedScope);
+      if(currentProjection&&type==='husbandry_events'&&managedScope!=='full'&&retainedCoverage?.event_types.length){
+       const extra=await incrementalManaged(type,c,guard,reusable,false,read,()=>{},'event_types',retainedCoverage.event_types),combined=new Map(rows.map(row=>[recordKey(row),row]));for(const row of extra)combined.set(recordKey(row),row);const reused=new Set([...rows,...extra].filter(row=>reusableRecord(reusable,row,c)).map(recordKey));rows=[...combined.values()];rows.reused=reused.size;
+      }
       recordsReused+=rows.reused;observeType(type,rows.length,{total:rows.length,complete:true});return rows;
     }
     let cursor=null,limit=type==='archive'?3:1000;const seen=new Set(),rows=[];
@@ -1070,6 +1101,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
       // Reduce only confirmed timeout pages. OFFSET rescans earlier rows and
       // can time out even at LIMIT 1; preserve the primary-key cursor instead.
       const loaded=await readCloudPage(size=>{
+        if(currentProjection)return read('rpc/get_managed_record_page',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:c.colonyId,p_entity_type:type,p_scope:managedScope,p_event_types:[],p_after:cursor,p_limit:size,p_metadata_only:false}});
         const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
         // The top-level gt value is literal PostgREST text, including Unicode.
         if(cursor!==null)query.set('entity_id',`gt.${cursor}`);
@@ -1082,7 +1114,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
         if(seen.has(row.entity_id))throw new Error('Cloud page cursor did not advance. Pull again.');
         seen.add(row.entity_id);
       }
-      const accepted=policy.source_archive_allowed?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r));
+      const accepted=policy.source_archive_allowed||currentProjection?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r));
       if(type==='archive')archiveBlocksLoaded+=accepted.length;else observeType(type,rows.length+accepted.length,{...(page.length<limit?{total:rows.length+accepted.length,complete:true}:{})});
       progress(type==='archive'?'archive':'records');
       rows.push(...accepted);if(page.length<limit)break;
@@ -1114,7 +1146,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
     },reusable);
     result.push(...archive);result.archive_versions=archive.archive_versions;archiveBlocksReused=archive.reused;
   }
-  if(!policy.source_archive_allowed){
+  if(!policy.source_archive_allowed&&!currentProjection){
    let offset=0,limit=250,projectionLoaded=0;while(true){const loaded=await readCloudPage(size=>request('rpc/get_lac_fee_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
     const nextPolicy=checkedFeeVisibility(page?.visibility);if(!sameFeeVisibility(nextPolicy,policy)||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading. Pull again.');
     if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);projectionLoaded+=page.rows.length;observeType('fee_projection',projectionLoaded,{...(page.next_offset===null?{total:projectionLoaded,complete:true}:{})});
@@ -1130,7 +1162,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   recordsTotal=recordsLoaded;archiveBlocksTotal=archiveBlocksLoaded;
   progress('verifying');
   checkExportContext(context);const finalPolicy=await refreshFeeVisibility({notify:false});if(!sameFeeVisibility(finalPolicy,policy))throw new Error('Fee visibility changed while loading. Pull again.');
-  result.fee_visibility=policy;result.sync_summary={recordsDownloaded:result.filter(row=>row.entity_type!=='archive').length-recordsReused,recordsReused,archiveBlocksDownloaded:result.filter(row=>row.entity_type==='archive').length-archiveBlocksReused,archiveBlocksReused};return result;
+  result.fee_visibility=policy;if(currentProjection)result.managed_coverage=retainedCoverage?checkedManagedCoverage(retainedCoverage):managedCoverage({fullTables:['rooms','racks','locations']});result.sync_summary={recordsDownloaded:result.filter(row=>row.entity_type!=='archive').length-recordsReused,recordsReused,archiveBlocksDownloaded:result.filter(row=>row.entity_type==='archive').length-archiveBlocksReused,archiveBlocksReused};return result;
   }catch(error){
     // An older read must not clear a workspace created by a later sign-in.
     const check=()=>{checkScope?.();if(generation!==authGeneration)throw error;checkExportContext(context);};
@@ -1150,7 +1182,7 @@ async function entityRecords(dataset,deferredState=deferredArchiveState,{managed
   }
   if(managedOnly)return records;
   if(data.source_archive_deferred){await assertDeferredData(data,deferredState);records.push(...[...deferredState.records.values()].map(row=>clone(row)));}
-  else if(!data.source_archive_restricted){const archiveData={...data};delete archiveData._cloud_read_context;delete archiveData.fee_visibility;delete archiveData.source_archive_restricted;records.push(...await encodeArchive(archiveData));}
+  else if(!data.source_archive_restricted){if(data.managed_records_deferred)throw new Error('Load the required record tables before preparing a complete workspace.');const archiveData={...data};delete archiveData._cloud_read_context;delete archiveData.fee_visibility;delete archiveData.source_archive_restricted;delete archiveData.managed_records_deferred;records.push(...await encodeArchive(archiveData));}
   return records;
 }
 async function assemble(rows){
@@ -1158,6 +1190,7 @@ async function assemble(rows){
   if(!partial&&!rows.some(r=>r.entity_type==='archive'&&r.entity_id==='reconstruction'))throw new Error('Cloud import is incomplete: its reconstruction manifest is missing. Finish or retry the initial upload before pulling.');
   const data=partial?{tables:{},source_archive_restricted:true,source_projection_version:SOURCE_PROJECTION_VERSION}:await decodeArchive(rows,rows.deferred_archive?{tables:rows.deferred_archive.loaded_tables}:{});
   delete data.source_archive_deferred;
+  delete data.managed_records_deferred;if(rows.managed_coverage)data.managed_records_deferred=checkedManagedCoverage(rows.managed_coverage);
   if(rows.deferred_archive)data.source_archive_deferred=await deferredMarker(rows.find(row=>row.entity_type==='archive'&&row.entity_id==='reconstruction'),rows.deferred_archive.loaded_tables);
   data.tables??={};for(const type of MANAGED)data.tables[type]=[];
   const seen=new Set();
@@ -1170,8 +1203,8 @@ async function assemble(rows){
   }
   if(partial)data.fee_visibility=rows.fee_visibility;return normalizeDataset(data);
 }
-function rememberCloudCache(writeId,baselineHash){const c=configuration();setStorage('localStorage',CLOUD_CACHE_KEY,JSON.stringify({url:c.url,colony:c.colonyId,user:session()?.user?.id,estimate:feeVisibility?.estimate,actual:feeVisibility?.actual,fee_history_allowed:feeVisibility?.history_allowed,fee_history_from:feeVisibility?.history_from,source_projection_version:SOURCE_PROJECTION_VERSION,...(writeId?{write_id:writeId}:{}),...(baselineHash?{baseline_sha256:baselineHash}:{})}));}
-function remember(rows,deferredState=null){deferredArchiveState=deferredState;versions=new Map([...(rows.archive_versions||[]),...rows.map(r=>[recordKey(r),r.version])]);baseline=new Map(rows.map(r=>[recordKey(r),r]));baselineIdentity=syncIdentity();synced=true;}
+function rememberCloudCache(writeId,baselineHash){const c=configuration();setStorage('localStorage',CLOUD_CACHE_KEY,JSON.stringify({url:c.url,colony:c.colonyId,user:session()?.user?.id,estimate:feeVisibility?.estimate,actual:feeVisibility?.actual,fee_history_allowed:feeVisibility?.history_allowed,fee_history_from:feeVisibility?.history_from,source_projection_version:SOURCE_PROJECTION_VERSION,startup_cache_version:STARTUP_CACHE_VERSION,...(writeId?{write_id:writeId}:{}),...(baselineHash?{baseline_sha256:baselineHash}:{})}));}
+function remember(rows,deferredState=null){deferredArchiveState=deferredState;managedReadCoverage=rows.managed_coverage?checkedManagedCoverage(rows.managed_coverage):null;versions=new Map([...(rows.archive_versions||[]),...rows.map(r=>[recordKey(r),r.version])]);baseline=new Map(rows.map(r=>[recordKey(r),r]));baselineIdentity=syncIdentity();synced=true;}
 export async function pullFromCloud(options={}){
  const source=providerSource,revision=providerRevision;
  try{return await pullFromCloudOnce(options);}
@@ -1187,12 +1220,53 @@ export async function refreshCurrentRecords({canCommit=()=>true,source=null}={})
  if(isGuest(session()))return pullGuestRecords({check});
  if(restrictedMouseMember())return pullMemberRecords({check});
  const reuse=synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
- const rows=await allRecords(null,{referencedArchive:true,reuse,allowPersisted:false,checkScope:check,deferHistory:true});check();
+ const rows=await allRecords(null,{referencedArchive:true,reuse,allowPersisted:false,checkScope:check,deferHistory:true,currentOnly:Boolean(managedReadCoverage),retainedCoverage:managedReadCoverage});check();
  if(original&&rows.length===original.size&&rows.every(row=>{const prior=original.get(recordKey(row));return prior?.version===row.version&&prior.archived===row.archived;}))return null;
  const data=await assemble(rows);check();const deferred=await deferredStateOf(rows,data);check();const c=configuration(),mark={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
  const envelope=await baselineEnvelope(rows,mark.id,check,versions,deferred);check();await local('put',data,{check,cacheWrite:mark,syncBaseline:envelope});check();rememberCloudCache(mark.id,envelope?.sha256);remember(rows,deferred);return clone(data);
 }
-async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}={}){
+/** Load only the named managed tables or exact feature event types on demand. */
+export async function ensureManagedTables(dataset,{tables=[],eventTypes=[],onProgress}={}){
+ if(!Array.isArray(tables)||tables.some(type=>!MANAGED.includes(type))||!Array.isArray(eventTypes)||eventTypes.some(type=>!MANAGED_EVENT_TYPES.includes(type)))throw new Error('Choose supported record tables and event types.');
+ if(!dataset?.managed_records_deferred)return clone(dataset);
+ const requested=[...new Set(tables)].filter(type=>getDeferredManagedTables(dataset).includes(type)),events=getDeferredManagedEventTypes(dataset,{eventTypes});
+ if(!requested.length&&!events.length)return clone(dataset);
+ const scope=stable({generation:authGeneration,context:exportContext()});if(activeDatasetSaves.has(scope))throw new Error('Another save or history load is in progress. Try again after it finishes.');
+ activeDatasetSaves.add(scope);
+ try{
+  const before=baseline,identity=syncIdentity(),generation=authGeneration,pull=pullGeneration,context=exportContext(),oldCoverage=managedReadCoverage,oldDeferred=deferredArchiveState,oldVersions=versions,oldPolicy=clone(feeVisibility),c=configuration();
+  const check=()=>{checkExportContext(context);if(!synced||baseline!==before||versions!==oldVersions||identity!==syncIdentity()||generation!==authGeneration||pull!==pullGeneration||managedReadCoverage!==oldCoverage)throw new Error('The account or shared data changed. Reload this view before continuing.');};
+  check();if(providerSource!=='cloud1')throw new Error('This current-record view belongs to Cloud 1. Reload the workspace before continuing.');
+  if(stable(dataset.managed_records_deferred)!==stable(oldCoverage))throw new Error('The current-record coverage changed. Reload shared data.');
+  const dataHash=await cacheDigest(Object.fromEntries(MANAGED.map(type=>[type,dataset.tables?.[type]||[]])));check();
+  const known=normalizeDataset({tables:Object.fromEntries(MANAGED.map(type=>[type,[...before.values()].filter(row=>row.entity_type===type).map(row=>clone(row.payload))]))});
+  if(dataHash!==await cacheDigest(Object.fromEntries(MANAGED.map(type=>[type,known.tables[type]]))))throw new Error('Save or discard your edits before loading more records.');check();
+  await membership();check();const policy=await refreshFeeVisibility({notify:false});check();
+  if(!sameFeeVisibility(policy,oldPolicy)||oldDeferred&&!sameFeeVisibility(oldDeferred.policy,policy))throw new Error('Record access changed. Reload shared data.');
+  const next=new Map([...before].map(([key,row])=>[key,{...row,colony_id:c.colonyId,version:oldVersions.get(key)}])),reuse={records:before,versions:oldVersions};
+  let recordsLoaded=0,recordsTotal=0;
+  const progress=(loaded,total)=>{check();try{onProgress?.(Object.freeze({phase:'records',recordsLoaded:recordsLoaded+loaded,recordsTotal:recordsTotal+total,recordBlocksLoaded:Math.floor((recordsLoaded+loaded)/RECORD_BLOCK_SIZE),recordBlocksTotal:Math.ceil((recordsTotal+total)/RECORD_BLOCK_SIZE),recordBlocksEstimated:false}));}catch{/* Presentation cannot interrupt a verified read. */}};
+  const read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'});
+  for(const type of requested){
+   const rows=await incrementalManaged(type,c,check,reuse,false,read,progress,'full');check();
+   for(const[key,row]of next)if(row.entity_type===type)next.delete(key);for(const row of rows)next.set(recordKey(row),row);recordsLoaded+=rows.length;recordsTotal+=rows.length;
+  }
+  if(events.length&&!requested.includes('husbandry_events')){
+   const rows=await incrementalManaged('husbandry_events',c,check,reuse,false,read,progress,'event_types',events);check();
+   for(const[key,row]of next)if(row.entity_type==='husbandry_events'&&events.includes(row.payload?.event_type))next.delete(key);for(const row of rows)next.set(recordKey(row),row);
+  }
+  const coverage=mergeManagedCoverage(oldCoverage,{fullTables:requested,eventTypes:events}),complete=MANAGED.every(type=>coverage.full_tables.includes(type)),rows=[...next.values()];
+  rows.fee_visibility=policy;rows.managed_coverage=complete?null:coverage;
+  if(oldDeferred){rows.deferred_archive={loaded_tables:[...oldDeferred.loadedTables]};rows.archive_versions=[...oldVersions].filter(([key])=>key.startsWith('archive:'));}
+  const data=await assemble(rows);check();const nextDeferred=await deferredStateOf(rows,data);check();
+  const finalPolicy=await refreshFeeVisibility({notify:false});check();if(!sameFeeVisibility(finalPolicy,policy))throw new Error('Record access changed while loading. Retry this view.');
+  const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
+  try{
+   const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,oldVersions,nextDeferred);check();await local('put',data,{check,cacheWrite,syncBaseline});check();rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,nextDeferred);return clone(data);
+  }catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}
+ }finally{activeDatasetSaves.delete(scope);}
+}
+async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false,currentOnly=false}={}){
   const payloadDigests=new WeakMap();
   const startupSnapshot=!forceFull&&deferHistory?startupCacheSnapshot:null;
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
@@ -1204,7 +1278,7 @@ async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}
   await membership({check});context=exportContext();check();
   if(isGuest(session()))return pullGuestRecords({check,onProgress:progress});
   if(restrictedMouseMember())return pullMemberRecords({check,onProgress:progress});
-  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests,startupSnapshot});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
+  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests,startupSnapshot,currentOnly:currentOnly&&!forceFull});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();const deferredState=await deferredStateOf(rows,data);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
   try{
@@ -1213,7 +1287,7 @@ async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}
     progress({phase:'saving',...completedCounts});
     const syncBaseline=await baselineEnvelope(rows,cacheWrite.id,check,versions,deferredState,payloadDigests);check();
     await local('put',data,{check,cacheWrite,syncBaseline});check();
-    rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,deferredState);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');const counts=rows.sync_summary;statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
+    rememberCloudCache(cacheWrite.id,syncBaseline?.sha256);remember(rows,deferredState);setStorage('localStorage',DEMO_KEY,null);setMode('cloud');feeVisibilityContext=exportContext();const counts=rows.sync_summary;statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected. Downloaded ${counts.recordsDownloaded} records and ${counts.archiveBlocksDownloaded} history blocks; reused ${counts.recordsReused} records and ${counts.archiveBlocksReused} history blocks.`;return clone(data);
   }catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}
 }
 /** Hydrate only requested source tables; managed rows and the archive head stay authoritative. */
@@ -1238,7 +1312,8 @@ export async function ensureHistory(dataset,{tables=null,onProgress}={}){
   const combined=new Map(state.records);for(const row of archive)combined.set(recordKey(row),row);
   const loaded=[...new Set([...state.loadedTables,...requested])].sort(),complete=Object.keys(head.payload.archive_tables).every(table=>loaded.includes(table));
   const rows=[...previousBaseline.values()].filter(row=>MANAGED.includes(row.entity_type)).map(row=>({...row,colony_id:c.colonyId,version:previousVersions.get(recordKey(row))}));rows.push(...combined.values());rows.fee_visibility=policy;rows.archive_versions=archive.archive_versions;
-  if(!complete||tables!==null)rows.deferred_archive={loaded_tables:loaded};
+  if(managedReadCoverage)rows.managed_coverage=clone(managedReadCoverage);
+  if(!complete||tables!==null||managedReadCoverage)rows.deferred_archive={loaded_tables:loaded};
   const data=await assemble(rows);check();const nextState=await deferredStateOf(rows,data);check();
   const finalPolicy=await refreshFeeVisibility({notify:false});check();if(!sameFeeVisibility(finalPolicy,policy))throw new Error('History access changed while loading. Reload shared data.');
   const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
@@ -1275,7 +1350,7 @@ async function writeAtomic(pending,{checkScope}={}){
 }
 async function requireEditor(){const role=await membership();if(role==='viewer')throw new Error('Your colony role is viewer; cloud changes require editor or owner access.');}
 export async function pushToCloud(dataset){
-  if(dataset?.source_archive_deferred)throw new Error('Load all history before an initial upload.');
+  if(dataset?.source_archive_deferred||dataset?.managed_records_deferred)throw new Error('Load all records and history before an initial upload.');
   await requireEditor();if(!(await refreshFeeVisibility()).source_archive_allowed||dataset.source_archive_restricted)throw new Error('Full financial visibility and an unredacted dataset are required for an initial upload.');
   const incoming=await entityRecords(dataset),existing=await allRecords(),byId=new Map(existing.map(r=>[recordKey(r),r]));
   for(const r of incoming){const old=byId.get(recordKey(r));if(old&&(stable(old.payload)!==stable(r.payload)||Boolean(old.archived)!==r.archived))throw new Error(`Cloud record ${r.entity_type}/${r.entity_id} already contains different data. Pull and review it; initial upload will not overwrite it.`);}
@@ -1303,14 +1378,26 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
     if(!dependency||typeof dependency!=='object'||Array.isArray(dependency)||Object.keys(dependency).length!==2||!READ_DEPENDENCY_TYPES.has(dependency.type)||typeof dependency.id!=='string'||!dependency.id||dependency.id.trim()!==dependency.id||dependency.id.length>200)throw new Error('Invalid save dependencies. Reload and review the changes.');
     dependencyKeys.add(`${dependency.type}:${dependency.id}`);
   }
-  const data=normalizeDataset(applyAnimalEntrainmentSync(null,dataset).dataset);
-  if(data.source_archive_deferred&&(localOnly||mode()==='local'))throw new Error('A deferred workspace cannot replace a complete local dataset. Load all history first.');
+  // Current housing includes every Stock mouse. Manual cage/confirmed LocoBox
+  // schedules join those animals by exact mouse ID, so they can propagate now.
+  // Raw light-card tag/DOB matching and reviewed-source overlays require the
+  // complete identity set; an omitted ended animal must not look nonexistent.
+  let synchronized;
+  if(dataset.managed_records_deferred){
+   const coverage=checkedManagedCoverage(dataset.managed_records_deferred),completeExposures=coverage.full_tables.includes('husbandry_events')||coverage.event_types.includes('mouse_entrainment');
+   const exactMice=completeExposures?dataset.tables.mice:(dataset.tables.mice||[]).filter(mouse=>['Stock','Unknown'].includes(mouse.state));
+   const exactOnly=applyAnimalEntrainmentSync(null,{...dataset,tables:{...dataset.tables,mice:exactMice,light_events:[]}},{includeReviewed:false,includeManaged:true});
+   synchronized={...dataset,tables:{...dataset.tables,husbandry_events:exactOnly.dataset.tables.husbandry_events}};
+  }else synchronized=applyAnimalEntrainmentSync(null,dataset).dataset;
+  const data=normalizeDataset(synchronized);
+  if((data.source_archive_deferred||data.managed_records_deferred)&&(localOnly||mode()==='local'))throw new Error('A deferred workspace cannot replace a complete local dataset. Load all history first.');
   if(localOnly||mode()==='local'){
     const generation=authGeneration,context=exportContext();
     const check=()=>{if(generation!==authGeneration||context!==exportContext()||pendingAccount(session())||session()?.passwordRecovery)throw new Error('The account changed while saving. Review your changes again.');};
     await local('put',data,{check});check();setStorage('localStorage',CLOUD_CACHE_KEY,null);if(localOnly){setStorage('localStorage',DEMO_KEY,localKind==='demo'?'true':null);setMode('local');invalidate();}statusMessage='Saved on this device.';return;
   }
   if(!synced||!baseline)throw new Error('Pull the latest cloud data before editing.');
+  if(stable(data.managed_records_deferred||null)!==stable(managedReadCoverage))throw new Error('The current-record coverage changed. Reload shared data before saving.');
   if(deferredArchiveState&&!data.source_archive_deferred)throw new Error('The deferred history marker was removed. Reload shared data before saving.');
   const savingDeferred=deferredArchiveState;
   const context=exportContext(),savePullGeneration=pullGeneration,saveAuthGeneration=authGeneration;
@@ -1321,6 +1408,10 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
   const incoming=await entityRecords(data),map=new Map(incoming.map(r=>[recordKey(r),r]));
   for(const [k,r] of baseline)if(!map.has(k)&&!isArchiveChunk(r))throw new Error(`Record ${r.entity_id} was removed. Archive records instead of deleting them.`);
   const pending=incoming.filter(r=>{const old=baseline.get(recordKey(r));return !old||stable(old.payload)!==stable(r.payload)||old.archived!==r.archived;}).map(r=>[r,versions.get(recordKey(r))??0]);
+  if(managedReadCoverage&&!managedReadCoverage.full_tables.includes('mice')){
+   const identityFields=['physical_tag','date_of_birth','sex','sire_sids','dam_sids','litter_sid'];
+   if(pending.some(([row])=>row.entity_type==='mice'&&(!baseline.has(recordKey(row))||identityFields.some(key=>stable(row.payload[key]??null)!==stable(baseline.get(recordKey(row)).payload[key]??null)))))throw new Error('Open Mice to load complete identity records before adding an animal or changing its tag, birth date, sex or parents. Your cage edits are still here.');
+  }
   // Lock/check unchanged records on which a move was validated, in the same
   // transaction as its mutations. save_record returns exact no-ops unchanged.
   const pendingKeys=new Set(pending.map(([r])=>recordKey(r)));
