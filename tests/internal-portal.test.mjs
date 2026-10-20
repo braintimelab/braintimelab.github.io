@@ -277,7 +277,7 @@ test('published page starts with tools hidden, accessible labels and a Reagents 
 test('Lab tools presents one service card per app without the cloud-links banner', async () => {
   const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
   assert(!/id="cloud[12]-entry"|class="cloud-options"/.test(html));
-  assert.match(html, /<h3>Lab Boards<\/h3>/);
+  assert.match(html, /<h3>Lab Boards &amp; Experiments<\/h3>/);
   assert.match(html, /id="lab-notes-tool"/);
   assert.match(html, /href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/">Lab Boards<\/a>/);
 });
@@ -378,3 +378,4 @@ test('submitting a visible password clears and conceals it before authentication
   assert.ok(![...elements.values()].some(e => e.textContent.includes('synthetic-only-password')));
   waiting.resolve();await submission;
 });
+
