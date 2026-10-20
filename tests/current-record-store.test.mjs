@@ -15,8 +15,8 @@ async function colony(){
  add('locations','slot-one',{location_id:'slot-one',room_id:'room-one',rack_id:'rack-one',label:'Slot'});
  add('husbandry_events','strain-one',{event_id:'strain-one',event_type:'strain_definition',strain_definition:{name:'Synthetic strain'}});
  add('husbandry_events','experiment-draft',{event_id:'experiment-draft',event_type:'experiment',experiment:{status:'unreviewed',title:'Unused imported draft'}});
- add('husbandry_events','experiment-current',{event_id:'experiment-current',event_type:'experiment',experiment:{status:'planned',title:'Current work'}});
- add('husbandry_events','badge-current',{event_id:'badge-current',event_type:'cage_equipment_status'});
+ add('husbandry_events','experiment-current',{event_id:'experiment-current',event_type:'experiment',experiment:{status:'planned',title:'Current work',participants:[{link_status:'confirmed',mouse_sid:'mouse-current'}]}});
+ add('husbandry_events','badge-current',{event_id:'badge-current',event_type:'cage_equipment_status',location_id:'slot-one'});
  return {...f,add};
 }
 const current=store=>store.pullFromCloud({currentOnly:true,deferHistory:true});
@@ -25,7 +25,7 @@ test('current startup requests bounded current pages and leaves ended animals, i
  assert.deepEqual(data.tables.mice.map(r=>r.mouse_sid),['mouse-current']);assert.deepEqual(data.tables.cages.map(r=>r.cage_sid),['cage-current']);
  assert(!data.tables.husbandry_events.some(r=>r.event_id==='experiment-draft'));assert(!data.tables.husbandry_events.some(r=>r.event_id==='strain-one'));
  assert(data.tables.husbandry_events.some(r=>r.event_id==='experiment-current'));
- assert(state.managedPages.length>=9);assert(state.managedPages.every(p=>p.p_scope==='current'&&p.p_limit<=1000));
+ assert(state.managedPages.length>=8);assert(state.managedPages.every(p=>p.p_scope===(['light_events','husbandry_events'].includes(p.p_entity_type)?'cage_cards':'current')&&p.p_limit<=1000));
  assert(store.getDeferredManagedTables(data).includes('mice'));assert(store.getDeferredManagedEventTypes(data,{eventTypes:['strain_definition']}).includes('strain_definition'));
  const scans=state.calls.filter(c=>new URL(c.url).pathname==='/rest/v1/entity_records'&&Number(new URL(c.url).searchParams.get('limit'))>1);assert.equal(scans.length,0);
 });
@@ -48,7 +48,7 @@ test('partial identity edits and forged coverage do not send a write or erase th
 test('warm startup reuses an atomic current cache but still verifies current scope and never scans all events',async()=>{
  const {store,state,reload}=await colony();await current(store);state.managedPages=[];state.calls=[];
  const next=await reload();next.setPrimaryCloudPolicy();const preview=await next.loadStartupCache();assert(preview?.managed_records_deferred);const data=await current(next);
- assert.equal(data.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_metadata_only));assert(state.managedPages.every(p=>p.p_scope==='current'));assert.equal(next.getCloudStatus().activeCloud,'cloud1');
+ assert.equal(data.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_metadata_only));assert(state.managedPages.every(p=>p.p_scope===(['light_events','husbandry_events'].includes(p.p_entity_type)?'cage_cards':'current')));assert.equal(next.getCloudStatus().activeCloud,'cloud1');
  assert(state.calls.filter(c=>new URL(c.url).pathname.endsWith('/rpc/get_managed_record_page')).every(c=>new URL(c.url).origin==='https://cloud.example'));
  assert(!state.calls.some(c=>new URL(c.url).pathname==='/rest/v1/entity_records'&&new URL(c.url).searchParams.get('entity_type')==='eq.husbandry_events'));
 });
@@ -96,13 +96,13 @@ test('legacy full-cache startup skips reading and hashing its large dataset, the
  const {store,state,cache,reload}=await colony();await store.pullFromCloud({deferHistory:true});
  const key='mouse-colony.cloud-cache-context.v1',mark=JSON.parse(localStorage.getItem(key));delete mark.startup_cache_version;localStorage.setItem(key,JSON.stringify(mark));
  const old=structuredClone(cache.get('current'));state.storageReads=[];state.managedPages=[];const next=await reload();next.setPrimaryCloudPolicy();assert.equal(await next.loadStartupCache({currentOnly:true}),null);assert.equal(state.storageReads.length,0);assert.deepEqual(cache.get('current'),old);
- const data=await current(next);assert.equal(data.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_scope==='current'&&!p.p_metadata_only));assert(!state.storageReads.includes('current'));assert(!state.storageReads.includes('current-managed-snapshot'));
+ const data=await current(next);assert.equal(data.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_scope===(['light_events','husbandry_events'].includes(p.p_entity_type)?'cage_cards':'current')&&!p.p_metadata_only));assert(!state.storageReads.includes('current'));assert(!state.storageReads.includes('current-managed-snapshot'));
 });
 test('opening historical identities and imported experiments does not enlarge the next startup sidecar or promote preview coverage',async()=>{
  const {store,state,cache,reload}=await colony();let data=await current(store);data=await store.ensureManagedTables(data,{tables:['mice'],eventTypes:['experiment','strain_definition']});
  assert.equal(data.tables.mice.length,2);assert(data.tables.husbandry_events.some(row=>row.event_id==='experiment-draft'));
- const sidecar=cache.get('current-managed-snapshot');assert.equal(sidecar.schema_version,2);assert.equal(sidecar.data.tables.mice.length,1);assert(!sidecar.data.tables.husbandry_events.some(row=>row.event_id==='experiment-draft'));
- const next=await reload();next.setPrimaryCloudPolicy();const preview=await next.loadStartupCache({currentOnly:true});assert(preview.managed_records_deferred);assert(next.getDeferredManagedTables(preview).includes('mice'));state.managedPages=[];const fresh=await current(next);assert.equal(fresh.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_scope==='current'&&p.p_metadata_only));
+ const sidecar=cache.get('current-managed-snapshot');assert.equal(sidecar.schema_version,3);assert.equal(sidecar.data.tables.mice.length,1);assert(!sidecar.data.tables.husbandry_events.some(row=>row.event_id==='experiment-draft'));
+ const next=await reload();next.setPrimaryCloudPolicy();const preview=await next.loadStartupCache({currentOnly:true});assert(preview.managed_records_deferred);assert(next.getDeferredManagedTables(preview).includes('mice'));state.managedPages=[];const fresh=await current(next);assert.equal(fresh.tables.mice.length,1);assert(state.managedPages.every(p=>p.p_scope===(['light_events','husbandry_events'].includes(p.p_entity_type)?'cage_cards':'current')&&p.p_metadata_only));
 });
 test('sanitized member cache keeps its coverage before financial filtering and reuses verified current records',async()=>{
  const {store,state,cache,reload}=await colony();await store.signOut();state.role='editor';state.feePolicy={version:0,owner:false,estimate:false,actual:false,source_archive_allowed:false};await store.signIn('member@example.test','synthetic-password');

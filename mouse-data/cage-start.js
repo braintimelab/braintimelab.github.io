@@ -3,6 +3,7 @@
 import {cageObservations,cageCardObservation,cageSheetAnimals,todayTaipei} from './cage-observations.js?v=100';
 import {mouseLineAssignments} from './mouse-summary.js?v=146';
 import {roomOrderRank} from './room-order.js?v=100';
+import {checkedManagedCoverage} from './current-record-scope.js?v=174';
 const active=row=>row&&!row.app_archived_at&&row.archived!==true;
 const historical=row=>row?.history_read_only===true||row?.source_historical===true||/^historical_(?:snapshot|assignment)_projection$/.test(row?.record_origin||'');
 const text=value=>typeof value==='string'?value.trim():value==null?'':String(value);
@@ -11,6 +12,14 @@ const equal=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
 export const validCageStartDate=value=>typeof value==='string'&&/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value+'T00:00:00Z'))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 const knownDate=(value,asOf)=>validCageStartDate(value)&&value<=asOf?value:null;
 const unknown=()=>({date:null,basis:'unknown',estimated:false,evidence:[]});
+// Opening Cages contains current cards, not complete historical evidence.
+// Absence in a partial read cannot establish a first sighting or first use.
+function completeStartEvidence(dataset,{tables=[],eventTypes=[]}={}){
+ const marker=dataset?.managed_records_deferred;if(marker==null)return true;
+ let coverage;try{coverage=checkedManagedCoverage(marker);}catch{return false;}
+ if(!tables.every(type=>coverage.full_tables.includes(type)))return false;
+ return coverage.full_tables.includes('husbandry_events')||eventTypes.every(type=>coverage.event_types.includes(type));
+}
 const metadata=record=>record?.cage_start&&typeof record.cage_start==='object'&&!Array.isArray(record.cage_start)&&record.cage_start.schemaVersion===1?record.cage_start:null;
 const sourceFingerprint=position=>{
  const rows=cageObservations(position).animals,dated=rows.filter(row=>validCageStartDate(row.dateOfBirth)).sort((a,b)=>a.dateOfBirth.localeCompare(b.dateOfBirth)||text(a.sourceCell).localeCompare(text(b.sourceCell))),anchor=dated[0]||rows[0];
@@ -81,6 +90,7 @@ export function isCageLitterPlaceholder(row){
 }
 const identifier=value=>text(value).replace(/^(.*?)(?:\s+|-)([MF]\d+)$/,'$1-$2');
 function inferResidentStart(dataset,item,asOf,housing,observationsDataset){
+ if(!completeStartEvidence(dataset,{eventTypes:['animal_sheet_cage_snapshot','animal_sheet_source_change']}))return unknown();
  const {cage,position,origin,card,mice}=housing;if(!origin)return unknown();
  const key=sourceKey(dataset,origin);if(!key)return unknown();
  const samePositions=(dataset?.tables?.locations||[]).filter(p=>active(p)&&!historical(p)&&p.source_current!==false&&sourceKey(dataset,p)===key);if(samePositions.length>1)return unknown();
@@ -173,6 +183,7 @@ export function validateCageStartDrafts(dataset,changes,{at=new Date().toISOStri
 /** Add the Taipei save date only for a never-used app cage's first real entry. */
 export function applyCageEntryStartDates(before,after,{at=new Date().toISOString(),entryDate=null}={}){
  const savedDate=todayTaipei(new Date(at)),date=entryDate??savedDate;if(!validCageStartDate(date)||date>savedDate)throw new Error('Choose a valid cage entry date no later than today.');const t=after?.tables||{},old=before?.tables||{},changed=[];
+ if(!completeStartEvidence(before,{tables:['mice'],eventTypes:['cage_move','cage_assignment']}))return after;
  const resident=(tables,id)=>list(tables.mice).some(m=>active(m)&&!historical(m)&&m.state==='Stock'&&text(m.cage_sid)===id);
  for(const cage of list(t.cages)){
   const id=text(cage.cage_sid),prior=list(old.cages).find(c=>text(c.cage_sid)===id);if(!active(cage)||historical(cage)||cage.record_origin!=='app_created'||!resident(t,id)||resident(old,id)||metadata(cage)||text(cage.start_date)||text(cage.set_up_date))continue;

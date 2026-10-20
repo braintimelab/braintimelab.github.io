@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {normalizeManagerPermissions} from '../mouse-data/permissions.js';
+import {appAllows,mouseAppFeature} from '../mouse-data/app-access.js';
 const source=await readFile(new URL('../mouse-data/app.js',import.meta.url),'utf8');
 const between=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 function fixture(){
  const calls=[],state={status:{email:'owner@example.invalid',role:'owner',signedIn:true,permissions:{genetics:true},mode:'cloud'},fresh:{tables:{husbandry_events:[]}}};
- const c=vm.createContext({state,calls,Error,normalizeManagerPermissions,location:{hash:'#strains'},$:id=>({id}),labUserDirectoryContext:s=>JSON.stringify(s),renderStrainManagement:(container,data,hooks)=>{state.hooks=hooks;},showToast:()=>{},navigate:(...args)=>calls.push(args),deferredHistoryTables:()=>[],store:{getCloudStatus:()=>state.status,loadDataset:async()=>{await state.onLoad?.();return state.fresh;},saveDataset:async next=>{calls.push(next);await state.onSave?.();}},refreshCloud:async()=>{state.refreshes=(state.refreshes||0)+1;}});
- vm.runInContext('let route="strains",pageRenderGeneration=1,cryoHistoryContext="",cryoHistoryIndex=null,cryoLinkFocus=null,cryoLinkRequest=0,dataset={tables:{}},cloud=state.status,brainbotReviewPending=false,startupLoading=false,historyLoadState=null,cloudReady=true;',c);
+ const c=vm.createContext({state,calls,Error,normalizeManagerPermissions,appAllows,mouseAppFeature,isGuest:()=>false,location:{hash:'#strains'},$:id=>({id}),labUserDirectoryContext:s=>JSON.stringify(s),renderStrainManagement:(container,data,hooks)=>{state.hooks=hooks;},showToast:()=>{},navigate:(...args)=>calls.push(args),deferredHistoryTables:()=>[],store:{getCloudStatus:()=>state.status,loadDataset:async()=>{await state.onLoad?.();return state.fresh;},saveDataset:async next=>{calls.push(next);await state.onSave?.();}},refreshCloud:async()=>{state.refreshes=(state.refreshes||0)+1;}});
+ vm.runInContext('let route="strains",pageRenderGeneration=1,cryoHistoryContext="",cryoHistoryIndex=null,cryoLinkFocus=null,cryoLinkRequest=0,dataset={tables:{}},cloud=state.status,brainbotReviewPending=false,startupLoading=false,historyLoadState=null,managedLoadState=null,cloudReady=true;',c);
  vm.runInContext(between('function canEditRecords(','function canEditCryopreservation('),c);
  vm.runInContext(between('function renderStrains(){','function mouseSummaryHTML('),c);
  const run=x=>vm.runInContext(x,c);run('renderStrains()');return{state,calls,run};
@@ -18,7 +19,7 @@ test('Strains is a navigable workspace menu, and the old Mice shortcut opens it'
  assert.match(source,/if\(route==='strains'\)\{renderStrains\(\);return\}/);
  assert.match(source,/function openStrains\(\)\{navigate\('strains'\);\}/);
  // Use the existing genetics audit section while its server vocabulary remains fixed.
- assert.match(source,/route==='strains'\?'planner':route/);
+ assert.match(between('function canEditRecords(','function canEditCryopreservation('),/strains:'genetics'/);
 });
 test('strain writes follow existing genetics permissions',()=>{
  const f=fixture();assert.equal(f.state.hooks.canEdit(),true);

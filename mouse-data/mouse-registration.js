@@ -1,7 +1,7 @@
 import { parseCompactStrainNotation } from './mouse-summary.js?v=146';
 import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=146';
+import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=174';
 import {FOXJ1_STRAIN_NAME} from './strain-registry.js?v=146';
 
 const active=r=>r&&!r.archived&&!r.app_archived_at&&!r.history_read_only&&!r.source_historical;

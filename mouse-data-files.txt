@@ -91,6 +91,7 @@ planner-layout.css
 presence.js
 room-order.js
 site-migration.js
+startup-read.js
 strain-cryo-links.js
 strain-management.css
 strain-management.js

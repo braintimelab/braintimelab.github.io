@@ -7,7 +7,7 @@ const cid='11111111-1111-4111-8111-111111111111',uid='22222222-2222-4222-8222-22
 const configuration={url:'https://cloud.example',anonKey:'sb_publishable_synthetic',usernameAnonKey:'e30.'+Buffer.from(JSON.stringify({role:'anon'})).toString('base64url')+'.synthetic',colonyId:cid,cloud2Url:'https://nas.example/cloud2/api/'};
 class Storage{values=new Map();getItem(k){return this.values.get(k)??null;}setItem(k,v){this.values.set(k,String(v));}removeItem(k){this.values.delete(k);}}
 let sequence=0;
-async function fixture({nas=true,cloud=true}={}){
+async function fixture({nas=true,cloud=true,sourcePath=new URL('../mouse-data/data-store.js',import.meta.url)}={}){
  globalThis.localStorage=new Storage();globalThis.sessionStorage=new Storage();globalThis.location=new URL('https://nas.example/mouse-data/');
  const cache=new Map();globalThis.indexedDB={open(){const request={};queueMicrotask(()=>{request.result={close(){},objectStoreNames:{contains:()=>true},transaction(){const tx={},updates=new Map();let pending=0;const run=fn=>{const r={};pending++;queueMicrotask(()=>{r.result=structuredClone(fn());r.onsuccess?.();if(--pending===0)queueMicrotask(()=>{for(const [k,v] of updates)v===undefined?cache.delete(k):cache.set(k,v);tx.oncomplete?.();});});return r;};tx.objectStore=()=>({get:k=>run(()=>{state.storageReads?.push(k);return updates.has(k)?updates.get(k):cache.get(k);}),put:(v,k)=>run(()=>updates.set(k,structuredClone(v))),delete:k=>run(()=>updates.set(k,undefined))});tx.abort=()=>queueMicrotask(()=>tx.onabort?.());return tx;}};request.onsuccess?.();});return request;}};
  const state={nas,cloud,userId:uid,role:'owner',calls:[],records:new Map(),receipts:new Map(),conflicts:[],loseWrite:false,loseBeforeWrite:false,denyNAS:false};
@@ -24,7 +24,7 @@ async function fixture({nas=true,cloud=true}={}){
    state.managedPages??=[];state.managedPages.push(structuredClone(body));state.onManaged?.(body);
    let rows=[...state.records.values()].filter(r=>r.entity_type===body.p_entity_type);
    if(body.p_scope==='event_types')rows=rows.filter(r=>body.p_event_types.includes(r.payload.event_type));
-   if(body.p_scope==='current'){
+   if(['current','cage_cards'].includes(body.p_scope)){
     const currentMice=[...state.records.values()].filter(r=>r.entity_type==='mice'&&['Stock','Unknown'].includes(r.payload.state));
     const cages=new Set(currentMice.map(r=>r.payload.cage_sid));
     if(body.p_entity_type==='mice')rows=rows.filter(r=>['Stock','Unknown'].includes(r.payload.state));
@@ -34,6 +34,8 @@ async function fixture({nas=true,cloud=true}={}){
     if(body.p_entity_type==='litters')rows=[];
     if(body.p_entity_type==='husbandry_events')rows=rows.filter(r=>!['experiment','strain_definition','cryopreservation_lot','experiment_revision'].includes(r.payload.event_type)||r.payload.event_type==='experiment'&&['planned','in_progress'].includes(r.payload.experiment?.status));
    }
+   if(body.p_scope==='cage_cards'&&body.p_entity_type==='husbandry_events')rows=rows.filter(r=>['locobox_protocol','mouse_entrainment','cage_equipment_status','cage_card_badge_status','cage_summary_options','experiment'].includes(r.payload.event_type));
+   if(body.p_scope==='cage_cards'&&body.p_entity_type==='light_events')rows=rows.filter(r=>r.payload.source_current!==false&&r.payload.source_historical!==true&&r.payload.history_read_only!==true&&r.payload.record_origin!=='historical_google_sheet'||r.payload.cage_sid&&[...state.records.values()].some(m=>m.entity_type==='cages'&&m.entity_id===r.payload.cage_sid&&m.payload.state==='Active'));
    rows=rows.sort((a,b)=>a.entity_id<b.entity_id?-1:a.entity_id>b.entity_id?1:0).filter(r=>body.p_after===null||r.entity_id>body.p_after).slice(0,body.p_limit);
    return body.p_metadata_only?rows.map(({payload,...r})=>r):rows;
   }
@@ -52,7 +54,7 @@ async function fixture({nas=true,cloud=true}={}){
   throw Error('Unexpected write '+route);
  }
  globalThis.fetch=async(url,options={})=>{
-  const u=new URL(url),body=options.body?JSON.parse(options.body):undefined;state.calls.push({url,options,body});
+  const u=new URL(url),body=options.body?JSON.parse(options.body):undefined;state.calls.push({url,options,body});await state.beforeFetch?.(u,body);
   if(u.origin==='https://nas.example'){
    if(!state.nas)return Response.json({error:'NAS unavailable'},{status:503});
    if(state.denyNAS)return Response.json({error:'Denied'},{status:403});
@@ -83,7 +85,7 @@ async function fixture({nas=true,cloud=true}={}){
   if(u.pathname.startsWith('/rest/v1/'))return Response.json(read(u.pathname.slice(9)+u.search,body));
   throw Error('Unexpected Cloud1 endpoint '+url);
  };
- let source=await readFile(new URL('../mouse-data/data-store.js',import.meta.url),'utf8');
+ let source=await readFile(sourcePath,'utf8');
  source=source.replace(/import \{ PUBLIC_CONFIG \} from '[^']+';/,`const PUBLIC_CONFIG=Object.freeze(${JSON.stringify(configuration)});`);
  source=source.replace(/from '([^']+)'/g,(_all,path)=>`from '${new URL(path,new URL('../mouse-data/data-store.js',import.meta.url)).href}'`);
  const reload=()=>import('data:text/javascript;base64,'+Buffer.from(source+`\n//# sourceURL=parallel-store-fixture-${++sequence}.mjs`).toString('base64'));

@@ -6,6 +6,8 @@ import {fileURLToPath} from 'node:url';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const canonical='https://braintimedisk.tail933238.ts.net:10000/qpcr/';
+// A public-only release checkout keeps NAS sources in the enclosing workspace.
+const sourceRoot=await (async()=>{for(const relative of ['../../','../../../../']){const candidate=new URL(relative,import.meta.url);try{if((await stat(new URL('braintime-lab-notes/public/qpcr.html',candidate))).isFile())return candidate;}catch{}}throw Error('The maintained NAS qPCR source is unavailable to this check.');})();
 
 test('retired qPCR entry is a static moved notice with no executable legacy assets or automatic forwarding',async()=>{
   const directory=path.join(root,'qpcr-calculator');
@@ -31,9 +33,9 @@ test('retired qPCR entry is a static moved notice with no executable legacy asse
 test('Lab tools and the current qPCR source retain the NAS calculator and its 96-well designer',async()=>{
   const portal=await readFile(path.join(root,'internal/index.html'),'utf8');
   assert.match(portal,/id="open-qpcr-calculator"[^>]*href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/qpcr\/"/);
-  const current=await readFile(new URL('../../braintime-lab-notes/public/qpcr.html',import.meta.url),'utf8');
+  const current=await readFile(new URL('braintime-lab-notes/public/qpcr.html',sourceRoot),'utf8');
   assert.match(current,/data-tab="plate"/);
   assert.match(current,/id="plate-print"/);
-  assert((await stat(new URL('../../qpcr-calculator/plate.js',import.meta.url))).isFile());
-  assert((await stat(new URL('../../braintime-lab-notes/public/qpcr-plate.js',import.meta.url))).isFile());
+  assert((await stat(new URL('qpcr-calculator/plate.js',sourceRoot))).isFile());
+  assert((await stat(new URL('braintime-lab-notes/public/qpcr-plate.js',sourceRoot))).isFile());
 });

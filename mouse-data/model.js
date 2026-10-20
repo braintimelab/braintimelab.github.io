@@ -1,7 +1,7 @@
 import {validateMouseEntrainment} from './entrainment-history.js?v=132';
 import { validateLocoboxRecord } from './locobox-model.js?v=132';
 import { validateIacucRecord } from './iacuc-model.js?v=132';
-import { validateLacFeeRecord } from './lac-fee-model.js?v=146';
+import { validateLacFeeRecord } from './lac-fee-model.js?v=174';
 import { validateUserAcronym } from './user-acronyms.js?v=100';
 import { validateCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { validateBreedingOptions } from './breeding-options.js?v=100';

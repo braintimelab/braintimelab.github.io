@@ -28,7 +28,8 @@ export function managedRecordPageQuery(query,colonyId){
  if(query?.method!=='POST'||query.route!=='rpc/get_managed_record_page'||!UUID.test(colonyId||''))return null;
  const body=query.body;
  if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['p_colony_id','p_entity_type','p_scope','p_event_types','p_after','p_limit','p_metadata_only'].includes(key)))return null;
- if(body.p_colony_id!==colonyId||!CURRENT_PAGE_TYPES.has(body.p_entity_type)||!['current','full','event_types'].includes(body.p_scope))return null;
+ if(body.p_colony_id!==colonyId||!CURRENT_PAGE_TYPES.has(body.p_entity_type)||!['current','full','event_types','cage_cards'].includes(body.p_scope))return null;
+ if(body.p_scope==='cage_cards'&&!['light_events','husbandry_events'].includes(body.p_entity_type))return null;
  if(body.p_event_types!==undefined&&(!Array.isArray(body.p_event_types)||body.p_event_types.length>64||body.p_event_types.some(type=>typeof type!=='string'||!/^[a-z][a-z0-9_]{0,99}$/.test(type))))return null;
  if(body.p_scope==='event_types'&&(body.p_entity_type!=='husbandry_events'||!body.p_event_types?.length))return null;
  if(body.p_scope!=='event_types'&&body.p_event_types?.length)return null;

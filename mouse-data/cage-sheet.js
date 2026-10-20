@@ -1,13 +1,13 @@
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
-import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=146';
+import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=174';
 import { sortRooms } from './room-order.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
-import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=146';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=174';
+import { mouseManager, validateRecord, buildCageLocationEvent } from './model.js?v=174';
 import { resolveCageEntrainment, planCageEntrainmentEdit, planCageEntrainmentRowsEdit, cageEntrainmentRows, loadCageEntrainmentFromLocobox, planCageEntrainmentToLocobox, applyCageEntrainmentLocoboxDrafts, validateCageEntrainmentDrafts, applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=132';
 import { locoboxEntrainmentCandidates, validTimingDate } from './experiment-timing.js?v=100';
 import { cageObservations, cageCardObservation, cageSheetSourceRows, cageSheetAnimals, createCageObservationContext, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
-import { cageBreedingLayout } from './mouse-registration.js?v=146';
-import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=146';
+import { cageBreedingLayout } from './mouse-registration.js?v=174';
+import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=174';
 import { BADGE_TYPES, WORK_BADGE_STATUSES, badgeLabel, validateWorkBadges, planWorkBadgeEdit, createCageBadgeIndex, cageBadgesForItem, cageNoteBadgesForItem, applyEquipmentBadgeDrafts } from './cage-badges.js?v=132';
 import {sourceBadgeRows,applySourceBadgeDrafts,sourceBadgeReadDependencies} from './cage-note-badges.js?v=103';
 
@@ -64,9 +64,9 @@ function mergedCageNotes(note,warnings=[]){
 }
 let renderSequence=0;
 const dragCleanupByHost=new WeakMap();
-let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),entrainmentForms:new Map(),message:'',error:false};
+let state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),collapsedGroups:new Set(),entrainmentForms:new Map(),message:'',error:false};
 
-export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),entrainmentForms:new Map(),message:'',error:false};}
+export function clearCageSheetDrafts(){clearTimeout(state.searchTimer);state={context:null,drafts:new Map(),room:'',rack:'',search:'',saving:false,selectedCage:null,selectedSlot:null,newCageIds:new Map(),rowCounts:new Map(),expandedDetails:new Set(),expandedGroups:new Set(),collapsedGroups:new Set(),entrainmentForms:new Map(),message:'',error:false};}
 export function hasCageSheetDrafts(){return state.drafts.size>0||[...state.entrainmentForms.values()].some(form=>form.dirty);}
 
 /** Apply only explicit edits to fresh records. Unrelated remote edits survive. */
@@ -188,6 +188,10 @@ export function renderCageSheet(host,dataset,hooks={}){
   const importTitle=()=>state.drafts.size?'Save or discard changes before importing.':'Animal sheet → Mouse Data';
   const canMoveMice=()=>canEdit('mice')&&canEdit('cages')&&canEdit('locations');
   const compact=hooks.layout!=='detailed';
+  // Only small touchscreens defer rack cards. Desktop and exported projections
+  // retain every rack; this changes the interactive DOM, never the dataset.
+  const mobileGroups=typeof hooks.mobileGroups==='boolean'?hooks.mobileGroups:globalThis.matchMedia?.('(pointer: coarse) and (max-width: 900px)')?.matches===true;
+  let printingGroups=false;
   let cachedPreview=null,cachedDataset=null,cachedDrafts=[];
   function preview(){
     const drafts=[...state.drafts.values()];
@@ -433,7 +437,11 @@ export function renderCageSheet(host,dataset,hooks={}){
       if(details.open&&body&&item&&body.dataset.loaded!=='true'){body.innerHTML=cageDetails(item);body.dataset.loaded='true';}
     };
     for(const details of root.querySelectorAll?.('[data-sheet-lazy-group]')||[])details.ontoggle=()=>{
-      const key=details.dataset.sheetLazyGroup;if(details.open)state.expandedGroups.add(key);else state.expandedGroups.delete(key);
+      const key=details.dataset.sheetLazyGroup;
+      if(!printingGroups&&details.dataset.sheetGroupForced!=='true'){
+        if(details.open){state.expandedGroups.add(key);state.collapsedGroups.delete(key);}
+        else{state.expandedGroups.delete(key);state.collapsedGroups.add(key);}
+      }
       const body=details.querySelector?.('[data-sheet-group-body]'),group=lazyGroups.get(key);
       if(details.open&&body&&group&&body.dataset.loaded!=='true'){body.innerHTML=rackHTML(group);body.dataset.loaded='true';wireLazyPanels(body);}
     };
@@ -574,9 +582,11 @@ export function renderCageSheet(host,dataset,hooks={}){
     const groups=projection.groups.filter(g=>(!state.room||g.roomId===state.room)&&(!state.rack||g.rackId===state.rack)).map(g=>({...g,items:g.items.filter(item=>!query||JSON.stringify([g.roomName,g.rackName,item.positionName,item.cage,item.mice,item.position]).toLowerCase().includes(query))})).filter(g=>g.items.length);
     host.innerHTML=`<style>${styles}</style><section class="cage-sheet${hooks.readOnly?' sheet-historical':''}" aria-label="Animal Sheet cage view"><div class="toolbar sheet-toolbar"><input id="cage-sheet-search" type="search" class="search" aria-label="Find cages or animals" placeholder="Find cage, animal, genotype, manager…" value="${esc(state.search)}"><div class="filters">${select('cage-sheet-room','All rooms',rooms,state.room)}${select('cage-sheet-rack','All racks',racks,state.rack)}</div>${!hooks.readOnly?`<div class="sheet-transfer-actions"><button id="cage-sheet-sync" type="button" class="button primary"${state.saving||importing||!hasCageSheetDrafts()?' disabled':''} title="Cage edits → Mouse Data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg><span>${state.saving?'Saving…':`Save to Mouse Data${state.drafts.size?' · '+state.drafts.size:''}`}</span></button>${canImport()?`<button id="cage-sheet-import" type="button" class="button secondary"${state.saving||importing||state.drafts.size?' disabled':''} title="${esc(importTitle())}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>${importing?'Opening…':'Import from Animal sheet'}</span></button>`:''}</div><button type="button" class="button secondary" id="cage-sheet-discard"${!hasCageSheetDrafts()||state.saving||importing?' disabled':''}>Discard</button>`:''}${managersError?'<button type="button" class="text-button" id="cage-sheet-managers-retry">Reload manager list</button>':''}<button type="button" class="text-button" id="cage-sheet-help">Help</button></div>${state.selectedCage||state.selectedSlot?`<div class="sheet-move-notice">Moving cage ${esc(state.selectedSlot?viewRecord('locations',state.selectedSlot)?.label||state.selectedSlot:state.selectedCage)} · choose a destination in any room. <button type="button" class="text-button" id="cage-sheet-cancel-move">Cancel move</button></div>`:''}<p id="cage-sheet-status" class="${state.error?'alert error':'small muted'}" role="status">${esc(state.message|| (state.drafts.size?`${state.drafts.size} pending edits · not yet saved`:statusLabel))}</p>${groups.map(g=>{
       const title=`${g.roomName} / ${g.rackName}`;
-      if(g.roomId||g.rackId)return `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span>${g.items.length} cages / positions</span></div>${rackHTML(g)}</section>`;
-      const key=JSON.stringify([g.roomId,g.rackId,g.roomName,g.rackName]),open=Boolean(query)||state.expandedGroups.has(key),lazy=g.items.length>12;lazyGroups.set(key,g);
-      return `<details class="panel"${lazy?` data-sheet-lazy-group="${esc(key)}"`:''}${open?' open':''}><summary class="panel-head">${esc(title)} · ${g.items.length}</summary>${lazy?`<div data-sheet-group-body data-loaded="${open?'true':'false'}">${open?rackHTML(g):''}</div>`:rackHTML(g)}</details>`;
+      const assigned=Boolean(g.roomId||g.rackId);
+      if(assigned&&!mobileGroups)return `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2><span>${g.items.length} cages / positions</span></div>${rackHTML(g)}</section>`;
+      const key=JSON.stringify([g.roomId,g.rackId,g.roomName,g.rackName]),first=groups[0]===g;
+      const open=printingGroups||Boolean(query)||state.expandedGroups.has(key)||(assigned&&mobileGroups&&first&&!state.collapsedGroups.has(key)),lazy=mobileGroups||g.items.length>12;lazyGroups.set(key,g);
+      return `<details class="panel"${lazy?` data-sheet-lazy-group="${esc(key)}" data-sheet-group-forced="${printingGroups||Boolean(query)?'true':'false'}"`:''}${open?' open':''}><summary class="panel-head">${esc(title)} · ${g.items.length}${assigned?' cages / positions':''}</summary>${lazy?`<div data-sheet-group-body data-loaded="${open?'true':'false'}">${open?rackHTML(g):''}</div>`:rackHTML(g)}</details>`;
     }).join('')||'<div class="empty">No cages match.</div>'}</section>`;
     wireLazyPanels();
     if(host.querySelector('#cage-sheet-managers-retry'))host.querySelector('#cage-sheet-managers-retry').onclick=()=>loadManagers({force:true});
@@ -909,7 +919,11 @@ export function renderCageSheet(host,dataset,hooks={}){
   const touchListeners={touchstart:touchStartHandler,touchmove:touchMoveHandler,touchend:touchEndHandler,touchcancel:touchCancelHandler};
   const touchOptions={passive:false};
   for(const [name,handler] of Object.entries(touchListeners))host.addEventListener?.(name,handler,touchOptions);
-  dragCleanupByHost.set(host,()=>{cancelDrag();for(const [name,handler] of Object.entries(touchListeners))host.removeEventListener?.(name,handler,touchOptions);});
+  const printWindow=host.ownerDocument?.defaultView||globalThis.window;
+  const beforePrint=()=>{if(!mobileGroups||printingGroups||renderToken!==renderSequence||!host.querySelector?.('.cage-sheet'))return;printingGroups=true;paint();};
+  const afterPrint=()=>{if(!printingGroups||renderToken!==renderSequence)return;printingGroups=false;if(host.querySelector?.('.cage-sheet'))paint();};
+  if(mobileGroups){printWindow?.addEventListener?.('beforeprint',beforePrint);printWindow?.addEventListener?.('afterprint',afterPrint);}
+  dragCleanupByHost.set(host,()=>{cancelDrag();for(const [name,handler] of Object.entries(touchListeners))host.removeEventListener?.(name,handler,touchOptions);printWindow?.removeEventListener?.('beforeprint',beforePrint);printWindow?.removeEventListener?.('afterprint',afterPrint);});
   // Retain native HTML dragging for browsers without Pointer Events.
   host.ondragstart=event=>{
     if(pointerDrag||touchCount||Date.now()<lastTouchUntil){event.preventDefault();return;}

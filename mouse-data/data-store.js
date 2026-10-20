@@ -5,11 +5,11 @@ import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
 import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
-import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=169';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=174';
+import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=174';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=174';
 import {createIntentJournal} from './cloud-intents.js?v=137';
-import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=169';
+import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=174';
 export {getDeferredManagedTables,getDeferredManagedEventTypes};
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -23,8 +23,29 @@ const clone=value=>structuredClone(value);
 let feeVisibility=null,feeVisibilityContext=null;
 let authGeneration=0;
 const guardedCacheWrites=new Set(),CACHE_WRITE_KEY='current-cloud-write',BASELINE_CACHE_KEY='current-cloud-baseline';
-const STARTUP_CACHE_KEY='current-managed-snapshot',STARTUP_CACHE_VERSION=2,RECORD_BLOCK_SIZE=1000;
+const STARTUP_CACHE_KEY='current-managed-snapshot',STARTUP_CACHE_VERSION=3,RECORD_BLOCK_SIZE=1000;
 let startupCacheSnapshot=null;
+const openingReads=new Map();
+function openingCancelled(){return Object.assign(new Error('Opening paused while this window was in the background.'),{name:'AbortError',code:'STARTUP_CANCELLED'});}
+// Only an explicitly supplied opening signal can cancel its read. Manual
+// reloads, established edit baselines and writes never join this scope.
+async function openingRead(signal,read){
+ if(!signal)return read(()=>{},()=>true);
+ let cancelled=false,rejectCancelled;
+ const check=()=>{if(cancelled||signal.aborted)throw openingCancelled();};
+ const canCommit=()=>!cancelled&&!signal.aborted;
+ const cancel=()=>{if(cancelled)return;cancelled=true;if(startupCacheSnapshot?.signal===signal)startupCacheSnapshot=null;rejectCancelled(openingCancelled());};
+ const paused=new Promise((_,reject)=>{rejectCancelled=reject;});
+ const scope={cancel};openingReads.set(signal,scope);signal.addEventListener('abort',cancel,{once:true});
+ try{check();return await Promise.race([Promise.resolve().then(()=>read(check,canCommit)),paused]);}
+ finally{signal.removeEventListener('abort',cancel);if(openingReads.get(signal)===scope)openingReads.delete(signal);}
+}
+export function cancelStartupRead({signal}={}){
+ if(!signal)return false;
+ const scope=openingReads.get(signal);scope?.cancel();
+ if(startupCacheSnapshot?.signal===signal)startupCacheSnapshot=null;
+ return Boolean(scope);
+}
 const BASELINE_CACHE_VERSION=1,MAX_BASELINE_RECORDS=250000,MAX_BASELINE_BYTES=32*1024*1024;
 let deferredArchiveState=null;
 let managedReadCoverage=null;
@@ -107,17 +128,20 @@ function ownCacheWrite(mark){
 }
 function startupProjection(data){return currentCacheProjection(data);}
 async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseline=false,managedOnly=false}={}){
+  // The opening sidecar carries only current rows and their matching version
+  // tuples. Reading a full history baseline here defeated the compact cache.
+  const startup=action==='put'&&cacheWrite?await startupCacheValue(value,syncBaseline,cacheWrite.id,check):null;
   const db=await database();check?.();
   return new Promise((resolve,reject)=>{
     const tx=db.transaction('datasets',action==='get'?'readonly':'readwrite'),store=tx.objectStore('datasets');
     let request=action==='get'?store.get(managedOnly?STARTUP_CACHE_KEY:'current'):action==='delete'?store.delete('current'):store.put(clone(value),'current');
     if(action!=='get'){
       if(action==='delete'||!cacheWrite)store.delete(STARTUP_CACHE_KEY);
-      else store.put({schema_version:STARTUP_CACHE_VERSION,write_id:cacheWrite.id,data:startupProjection(value)},STARTUP_CACHE_KEY);
+      else store.put(startup,STARTUP_CACHE_KEY);
     }
     // The sidecar and dataset commit atomically. It never enters a dataset/export.
     const markRequest=action==='get'?store.get(CACHE_WRITE_KEY):cacheWrite?store.put(cacheWrite,CACHE_WRITE_KEY):store.delete(CACHE_WRITE_KEY);
-    const baselineRequest=action==='get'?(readBaseline?store.get(BASELINE_CACHE_KEY):null):syncBaseline?store.put(syncBaseline,BASELINE_CACHE_KEY):store.delete(BASELINE_CACHE_KEY);
+    const baselineRequest=action==='get'?(readBaseline&&!managedOnly?store.get(BASELINE_CACHE_KEY):null):syncBaseline?store.put(syncBaseline,BASELINE_CACHE_KEY):store.delete(BASELINE_CACHE_KEY);
     let result,mark,savedBaseline,guardError,settled=false,managedSnapshot=false;
     const cleanup=()=>{clearTimeout(timer);guardedCacheWrites.delete(cancel);};
     const fail=error=>{if(settled)return;settled=true;cleanup();reject(error);};
@@ -131,7 +155,7 @@ async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseli
         // once; the next verified pull commits the smaller startup snapshot.
         managedOnly=false;request=store.get('current');request.onsuccess=acceptRead;return;
       }
-      if(action==='get'&&managedOnly){managedSnapshot=true;const saved=request.result;result=saved?.schema_version===STARTUP_CACHE_VERSION&&typeof saved.write_id==='string'?saved:null;}
+      if(action==='get'&&managedOnly){managedSnapshot=true;const saved=request.result;result=saved?.schema_version===STARTUP_CACHE_VERSION&&typeof saved.write_id==='string'?saved:null;if(readBaseline)savedBaseline=result?.baseline??null;}
       else result=request.result;
       cancel();
     };
@@ -174,7 +198,11 @@ export async function loadDataset(){
 }
 // An optional startup preview is authorized afresh but never becomes a
 // writable cloud baseline. A denied, stale or incompatible cache stays hidden.
-export async function loadStartupCache({currentOnly=false}={}){
+export async function loadStartupCache({currentOnly=false,signal}={}){
+ return openingRead(signal,(check,canCommit)=>loadStartupCacheOnce({currentOnly,signal,checkOpening:check,canCommit}));
+}
+async function loadStartupCacheOnce({currentOnly=false,signal,checkOpening=()=>{},canCommit=()=>true}={}){
+ checkOpening();
  const initial=session(),c=configuration();
  if(mode()!=='cloud'||!c||!initial?.user?.id||!hasLabSession(initial)||initial.passwordRecovery||pendingAccount(initial))return null;
  const previous=readJSON('localStorage',CLOUD_CACHE_KEY);
@@ -184,20 +212,20 @@ export async function loadStartupCache({currentOnly=false}={}){
  if(currentOnly&&previous.startup_cache_version!==STARTUP_CACHE_VERSION)return null;
  invalidate();
  try{
-  await verifyCloudMembership();
+  await verifyCloudMembership({canCommit});checkOpening();
   const generation=authGeneration,identity=syncIdentity(),context=exportContext();
-  const check=()=>{if(generation!==authGeneration||identity!==syncIdentity()||session()?.passwordRecovery||pendingAccount(session()))throw new Error('The account changed while checking the saved workspace.');checkExportContext(context);};
+  const check=()=>{checkOpening();if(generation!==authGeneration||identity!==syncIdentity()||session()?.passwordRecovery||pendingAccount(session()))throw new Error('The account changed while checking the saved workspace.');checkExportContext(context);};
   check();const mark=readJSON('localStorage',CLOUD_CACHE_KEY);
   if(!mark||mark.url!==c.url||mark.colony!==c.colonyId||mark.user!==initial.user.id)return null;
   const snapshot=await local('get',undefined,{check,readBaseline:true,managedOnly:true});check();const data=snapshot?.data;if(!data)return null;
-  const policy=await refreshFeeVisibility({notify:false});check();
+  const policy=await refreshFeeVisibility({notify:false,canCommit});check();
   if(policy.source_archive_allowed?data.source_archive_restricted:!currentRestrictedCache(data,mark,policy))return null;
   // The preview is read-only until the live pull finishes. Do not normalize
   // source history from a previous visit just to paint the opening screen.
   const preview=normalizeDataset(startupProjection(data));check();
-  startupCacheSnapshot={snapshot,identity:persistentIdentity(),generation,source:providerSource,revision:providerRevision,writeId:mark.write_id};
+  startupCacheSnapshot={snapshot,identity:persistentIdentity(),generation,source:providerSource,revision:providerRevision,writeId:mark.write_id,policy:clone(policy),verifiedAt:Date.now(),signal};
   return preview;
- }catch{return null;}
+ }catch(error){checkOpening();return null;}
 }
 export async function clearDataset(){await local('delete');setStorage('localStorage',CLOUD_CACHE_KEY,null);setStorage('localStorage',DEMO_KEY,null);setMode('local');invalidate();statusMessage='Local dataset cleared.';}
 
@@ -861,8 +889,8 @@ async function readArchiveHead(c,check,read=request){
  if(!Array.isArray(page)||page.length!==1)throw new Error('The reconstruction manifest is missing.');
  const head=checkedCloudRecord(page[0],'archive',c);if(head.entity_id!=='reconstruction'||head.archived)throw new Error('The reconstruction manifest is invalid.');await decodeArchive([head],{tables:[]});check();return head;
 }
-async function verifyArchiveHead(c,head,check){
- const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',entity_id:'eq.reconstruction',limit:'1'}),page=(await readCloudPage(()=>request(`entity_records?${query}`),1,check)).page;
+async function verifyArchiveHead(c,head,check,read=request){
+ const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',entity_id:'eq.reconstruction',limit:'1'}),page=(await readCloudPage(()=>read(`entity_records?${query}`),1,check)).page;
  if(!Array.isArray(page)||page.length!==1)throw new Error('The reconstruction manifest changed during loading. Pull again.');
  const latest=checkedCloudRecord(page[0],'archive',c,false);if(latest.entity_id!=='reconstruction'||latest.archived||latest.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
 }
@@ -889,13 +917,20 @@ async function baselineEnvelope(rows,writeId,check,recordVersions=versions,defer
   if(identity!==persistentIdentity()||stable(policy)!==stable(feeVisibility))throw new Error('Cloud access changed while preparing the saved workspace. Pull again.');
   return {...body,sha256};
 }
+async function startupCacheValue(value,envelope,writeId,check=()=>{}){
+ const data=startupProjection(value),saved={schema_version:STARTUP_CACHE_VERSION,write_id:writeId,data};
+ if(!envelope)return saved;
+ const ids=new Set(MANAGED.flatMap(type=>(data.tables[type]||[]).map(row=>`${type}:${row[ID_FIELDS[type]]}`)));
+ const body={schema_version:BASELINE_CACHE_VERSION,projection_version:SOURCE_PROJECTION_VERSION,write_id:writeId,identity:envelope.identity,policy:clone(envelope.policy),entries:envelope.entries.filter(entry=>ids.has(`${entry[0]}:${entry[1]}`)),managed_coverage:checkedManagedCoverage(data.managed_records_deferred),parent_sha256:envelope.sha256,current_projection:true};
+ check?.();saved.baseline={...body,sha256:await cacheDigest(body)};check?.();return saved;
+}
 async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=null,startupSnapshot=null}={}){
   // Share only this opening's already-read atomic snapshot. Fresh server
   // membership, policy and per-record version checks still run normally.
   const reusable=startupSnapshot&&startupSnapshot.generation===authGeneration&&startupSnapshot.identity===persistentIdentity()&&startupSnapshot.source===providerSource&&startupSnapshot.revision===providerRevision&&startupSnapshot.writeId===readJSON('localStorage',CLOUD_CACHE_KEY)?.write_id;
   const snapshot=reusable?startupSnapshot.snapshot:await local('get',undefined,{check,readBaseline:true,managedOnly});check();
   const envelope=snapshot?.baseline,mark=readJSON('localStorage',CLOUD_CACHE_KEY);
-  if(!snapshot?.data||!envelope||envelope.schema_version!==BASELINE_CACHE_VERSION||envelope.projection_version!==SOURCE_PROJECTION_VERSION||typeof envelope.write_id!=='string'||envelope.write_id!==snapshot.mark?.id||envelope.write_id!==mark?.write_id||envelope.sha256!==mark?.baseline_sha256||envelope.identity!==persistentIdentity()||stable(envelope.policy)!==stable(policy)||!Array.isArray(envelope.entries)||envelope.entries.length>MAX_BASELINE_RECORDS)return null;
+  if(!snapshot?.data||!envelope||envelope.schema_version!==BASELINE_CACHE_VERSION||envelope.projection_version!==SOURCE_PROJECTION_VERSION||typeof envelope.write_id!=='string'||envelope.write_id!==snapshot.mark?.id||envelope.write_id!==mark?.write_id||(managedOnly?envelope.current_projection!==true||envelope.parent_sha256!==mark?.baseline_sha256:envelope.sha256!==mark?.baseline_sha256)||envelope.identity!==persistentIdentity()||stable(envelope.policy)!==stable(policy)||!Array.isArray(envelope.entries)||envelope.entries.length>MAX_BASELINE_RECORDS)return null;
   if(policy.source_archive_allowed?snapshot.data.source_archive_restricted:!currentRestrictedCache(snapshot.data,mark,policy))return null;
   try{
     const {sha256,...body}=envelope;
@@ -1070,8 +1105,8 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   const finalHead=valid(finalPage[0]);if(finalHead.entity_id!=='reconstruction'||finalHead.archived||finalHead.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const result=[head,...ordered.map(id=>chunks.get(id))];result.reused=Number(headReused)+ordered.length-needed.length;result.archive_versions=[...indexed.values()].map(row=>[`archive:${row.entity_id}`,row.version]);return result;
 }
-async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null,startupSnapshot=null,currentOnly=false,retainedCoverage=null}={}){
-  const generation=authGeneration,context=exportContext(),c=configuration(),policy=await refreshFeeVisibility({notify:false});const result=[];
+async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null,startupSnapshot=null,currentOnly=false,retainedCoverage=null,openingPolicy=null,canCommit=()=>true}={}){
+  const generation=authGeneration,context=exportContext(),c=configuration(),policy=openingPolicy?clone(openingPolicy):await refreshFeeVisibility({notify:false,canCommit});const result=[];
   const check=()=>{checkScope?.();if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
   let reusable=referencedArchive&&reuse?.identity===syncIdentity()&&stable(reuse.policy)===stable(policy)?reuse:null;
   if(currentOnly&&readJSON('localStorage',CLOUD_CACHE_KEY)?.startup_cache_version!==STARTUP_CACHE_VERSION)allowPersisted=false;
@@ -1083,7 +1118,9 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   // same-account counts are explicitly estimates until live indexes confirm
   // each table. A logical record block contains at most 1,000 current rows.
   let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
-  const types=currentProjection?MANAGED:MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations');
+  // The reviewed current-record contract always excludes litters. Keep that
+  // table deferred, rather than spending a request to prove an empty scope.
+  const types=currentProjection?MANAGED.filter(type=>type!=='litters'||retainedCoverage?.full_tables.includes(type)):MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations');
   const priorCounts=new Map(types.map(type=>[type,0]));if(reusable)for(const row of reusable.records.values())if(priorCounts.has(row.entity_type))priorCounts.set(row.entity_type,priorCounts.get(row.entity_type)+1);
   const tableProgress=new Map(types.map(type=>[type,{loaded:0,total:reusable&&!currentProjection?priorCounts.get(type):null,known:false,complete:false}]));
   if(!policy.source_archive_allowed&&!currentProjection)for(const type of ['fee_projection','location_projection'])tableProgress.set(type,{loaded:0,total:null,known:false,complete:false});
@@ -1101,7 +1138,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   const active=()=>{check();if(streamFailure)throw streamFailure;};
   const acquire=()=>inFlight<3?(inFlight++,Promise.resolve()):new Promise(resolve=>waiting.push(resolve));
   const release=()=>{const next=waiting.shift();if(next)next();else inFlight--;};
-  const readManaged=async(route,options={})=>{active();await acquire();try{active();return await request(route,{...options,...(currentProjection?{cloudSource:'cloud1'}:{})});}finally{release();}};
+  const readManaged=async(route,options={})=>{active();await acquire();try{active();return await request(route,{...options,canCommit,...(currentProjection?{cloudSource:'cloud1'}:{})});}finally{release();}};
   // The small reconstruction head is needed anyway. Read it alongside the
   // current tables using the same three slots, rather than adding a serial
   // round trip afterward. Its previous counts help a first visit estimate
@@ -1112,7 +1149,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
     if(!reusable&&!currentProjection){const counts=openingHead.payload.summary?.counts;if(counts&&typeof counts==='object'){for(const type of types){const table=tableProgress.get(type);if(!table.known&&Number.isSafeInteger(counts[type])&&counts[type]>=0&&counts[type]<=MAX_BASELINE_RECORDS)table.total=counts[type];}progress('records');}}
   })().catch(error=>{streamFailure??=error;}):null;
   async function readType(type,read,guard){
-    const managedScope=currentProjection?(retainedCoverage?.full_tables.includes(type)?'full':'current'):null;
+    const managedScope=currentProjection?(retainedCoverage?.full_tables.includes(type)?'full':['light_events','husbandry_events'].includes(type)?'cage_cards':'current'):null;
     // Restricted locations always come from the sanitized projection RPC.
     if(reusable&&type!=='archive'){
       progress('records');let rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed&&!currentProjection,read,(loaded,total)=>observeType(type,loaded,{total}),managedScope);
@@ -1161,7 +1198,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   if(policy.source_archive_allowed&&!referencedArchive)result.push(...await readType('archive',request,check));
   if(policy.source_archive_allowed)recordsTotal=recordsLoaded;
   if(policy.source_archive_allowed&&referencedArchive&&deferHistory){
-    const head=openingHead||await readArchiveHead(c,check);await verifyArchiveHead(c,head,check);
+    const head=openingHead||await readArchiveHead(c,check,readManaged);await verifyArchiveHead(c,head,check,readManaged);
     if(head.payload.archive_format===ARCHIVE_MANIFEST_FORMAT){
       const previous=reusable?.deferredState,same=previous&&previous.head.version===head.version&&stable(previous.head.payload)===stable(head.payload),ids=[...new Set(Object.values(head.payload.archive_tables).flatMap(value=>value.chunk_ids))],completeReuse=!previous&&reusable&&ids.every(id=>reusable.records.has('archive:'+id)),archive=same?[head,...[...previous.records.values()].filter(isArchiveChunk)]:completeReuse?[head,...ids.map(id=>({...reusable.records.get('archive:'+id),colony_id:c.colonyId,version:reusable.versions.get('archive:'+id)}))]:[head];
       result.push(...archive);if(!completeReuse)result.deferred_archive={loaded_tables:same?[...previous.loadedTables]:[]};result.archive_versions=archive.map(row=>[recordKey(row),row.version]);
@@ -1187,7 +1224,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   }
   recordsTotal=recordsLoaded;archiveBlocksTotal=archiveBlocksLoaded;
   progress('verifying');
-  checkExportContext(context);const finalPolicy=await refreshFeeVisibility({notify:false});if(!sameFeeVisibility(finalPolicy,policy))throw new Error('Fee visibility changed while loading. Pull again.');
+  checkExportContext(context);const finalPolicy=await refreshFeeVisibility({notify:false,canCommit});if(!sameFeeVisibility(finalPolicy,policy))throw new Error('Fee visibility changed while loading. Pull again.');
   result.fee_visibility=policy;if(currentProjection)result.managed_coverage=retainedCoverage?checkedManagedCoverage(retainedCoverage):managedCoverage({fullTables:['rooms','racks','locations']});result.sync_summary={recordsDownloaded:result.filter(row=>row.entity_type!=='archive').length-recordsReused,recordsReused,archiveBlocksDownloaded:result.filter(row=>row.entity_type==='archive').length-archiveBlocksReused,archiveBlocksReused};return result;
   }catch(error){
     // An older read must not clear a workspace created by a later sign-in.
@@ -1232,6 +1269,9 @@ async function assemble(rows){
 function rememberCloudCache(writeId,baselineHash){const c=configuration();setStorage('localStorage',CLOUD_CACHE_KEY,JSON.stringify({url:c.url,colony:c.colonyId,user:session()?.user?.id,estimate:feeVisibility?.estimate,actual:feeVisibility?.actual,fee_history_allowed:feeVisibility?.history_allowed,fee_history_from:feeVisibility?.history_from,source_projection_version:SOURCE_PROJECTION_VERSION,startup_cache_version:STARTUP_CACHE_VERSION,...(writeId?{write_id:writeId}:{}),...(baselineHash?{baseline_sha256:baselineHash}:{})}));}
 function remember(rows,deferredState=null){deferredArchiveState=deferredState;managedReadCoverage=rows.managed_coverage?checkedManagedCoverage(rows.managed_coverage):null;versions=new Map([...(rows.archive_versions||[]),...rows.map(r=>[recordKey(r),r.version])]);baseline=new Map(rows.map(r=>[recordKey(r),r]));baselineIdentity=syncIdentity();synced=true;}
 export async function pullFromCloud(options={}){
+ return openingRead(options.signal,(checkOpening,canCommit)=>pullFromCloudChecked({...options,checkOpening,canCommit}));
+}
+async function pullFromCloudChecked(options={}){
  const source=providerSource,revision=providerRevision;
  try{return await pullFromCloudOnce(options);}
  catch(error){if(source&&source!==providerSource&&providerRevision!==revision&&operationalProvider?.getState().active&&!['FORBIDDEN','UNAUTHORIZED'].includes(error.code)&&![401,403].includes(error.status))return pullFromCloudOnce(options);throw error;}
@@ -1292,19 +1332,24 @@ export async function ensureManagedTables(dataset,{tables=[],eventTypes=[],onPro
   }catch(error){const cleanup=discardCloudWrite(cacheWrite.id).catch(()=>{});if(error.storageTimeout!==true)await cleanup;throw error;}
  }finally{activeDatasetSaves.delete(scope);}
 }
-async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false,currentOnly=false}={}){
+async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false,currentOnly=false,signal,checkOpening=()=>{},canCommit=()=>true}={}){
+  checkOpening();
   const payloadDigests=new WeakMap();
   const startupSnapshot=!forceFull&&deferHistory?startupCacheSnapshot:null;
+  // Reuse only the immediately preceding live opening check, never a stored
+  // role or a lease carried over phone sleep. Final visibility is still live.
+  const openingAge=Date.now()-startupSnapshot?.verifiedAt;
+  const openingAccess=signal&&startupSnapshot?.signal===signal&&!signal.aborted&&openingAge>=0&&openingAge<=10000&&startupSnapshot.generation===authGeneration&&startupSnapshot.identity===persistentIdentity()&&startupSnapshot.source===providerSource&&startupSnapshot.revision===providerRevision?startupSnapshot:null;
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
   const pull=++pullGeneration;invalidate();
   const generation=authGeneration,config=stable(configuration());let context=null;
-  const check=()=>{if(pull!==pullGeneration||generation!==authGeneration||config!==stable(configuration())||context!==null&&context!==exportContext())throw new Error('The account or colony changed during loading. Open the shared colony again.');};
+  const check=()=>{checkOpening();if(pull!==pullGeneration||generation!==authGeneration||config!==stable(configuration())||context!==null&&context!==exportContext())throw new Error('The account or colony changed during loading. Open the shared colony again.');};
   const progress=value=>{check();if(typeof onProgress==='function'){try{onProgress(Object.freeze({...value}));}catch{/* Presentation cannot interrupt a verified read. */}}};
   progress({phase:'access',recordsLoaded:0,recordsTotal:null,recordsReused:0,archiveBlocksLoaded:0,archiveBlocksTotal:null,archiveBlocksReused:0});
-  await membership({check});context=exportContext();check();
-  if(isGuest(session()))return pullGuestRecords({check,onProgress:progress});
-  if(restrictedMouseMember())return pullMemberRecords({check,onProgress:progress});
-  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests,startupSnapshot,currentOnly:currentOnly&&!forceFull});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
+  if(!openingAccess)await membership({check,canCommit});context=exportContext();check();
+  if(isGuest(session()))return pullGuestRecords({check,onProgress:progress,canCommit});
+  if(restrictedMouseMember())return pullMemberRecords({check,onProgress:progress,canCommit});
+  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests,startupSnapshot,currentOnly:currentOnly&&!forceFull,openingPolicy:openingAccess?.policy,canCommit});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();const deferredState=await deferredStateOf(rows,data);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
   try{
@@ -2235,25 +2280,25 @@ export async function completePasswordRecovery(password){
  }
 }
 
-async function pullGuestRecords({check=()=>{},onProgress=()=>{}}={}){
+async function pullGuestRecords({check=()=>{},onProgress=()=>{},canCommit=()=>true}={}){
  const c=configuration(),rows=[];let offset=0;const expected=stable({level:session()?.guestLevel,permissions:session()?.guestPermissions});
- while(true){check();const page=await request('rpc/get_guest_mouse_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:250}});check();
+ while(true){check();const page=await request('rpc/get_guest_mouse_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:250},canCommit});check();
   if(!page||!Array.isArray(page.rows)||page.rows.length>250||stable({level:page.guest_level,permissions:page.guest_permissions})!==expected)throw new Error('Guest access changed. Reconnect before opening records.');
   for(const row of page.rows){if(row.colony_id!==c.colonyId||!MANAGED.includes(row.entity_type)||row.entity_type==='archive'||row.archived||!Number.isInteger(row.version)||row.version<1||row.payload?.[ID_FIELDS[row.entity_type]]!==row.entity_id)throw new Error('Unverified guest record projection.');rows.push(row);}
   onProgress({phase:'records',recordsLoaded:rows.length,archiveBlocksLoaded:0});if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset!==offset+250)throw new Error('Invalid guest page cursor.');offset=page.next_offset;
  }
- rows.fee_visibility=await refreshFeeVisibility();const data=await assemble(rows);check();data.guest_projection=true;
+ rows.fee_visibility=await refreshFeeVisibility({canCommit});const data=await assemble(rows);check();data.guest_projection=true;
  const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};await local('put',data,{check,cacheWrite});check();rememberCloudCache(cacheWrite.id);remember(rows);deferredArchiveState=null;setMode('cloud');statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected.`;return clone(data);
 }
-async function pullMemberRecords({check=()=>{},onProgress=()=>{}}={}){
+async function pullMemberRecords({check=()=>{},onProgress=()=>{},canCommit=()=>true}={}){
  const c=configuration(),rows=[],expected=stable(appPermissionFields(session(),true).mousePermissions);let offset=0;
- while(true){check();const page=await request('rpc/get_member_mouse_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:250}});check();
+ while(true){check();const page=await request('rpc/get_member_mouse_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:250},canCommit});check();
   if(!page||!Array.isArray(page.rows)||page.rows.length>250||!validAppPermissions('mouse',page.mouse_permissions)||stable(page.mouse_permissions)!==expected)throw new Error('Application permissions changed. Reload the current records.');
   for(const row of page.rows){if(row.colony_id!==c.colonyId||!MANAGED.includes(row.entity_type)||row.archived!==false||!Number.isInteger(row.version)||row.version<1||row.payload?.[ID_FIELDS[row.entity_type]]!==row.entity_id)throw new Error('Unverified member record projection.');rows.push(row);}
   if(rows.length>MAX_BASELINE_RECORDS)throw new Error('The current record projection is too large. Contact the lab manager.');
   onProgress({phase:'records',recordsLoaded:rows.length,archiveBlocksLoaded:0});if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset!==offset+250)throw new Error('Invalid member page cursor.');offset=page.next_offset;
  }
- rows.fee_visibility=await refreshFeeVisibility();check();if(rows.fee_visibility.source_archive_allowed!==false)throw new Error('The projected record policy could not be verified. Reload shared data.');
+ rows.fee_visibility=await refreshFeeVisibility({canCommit});check();if(rows.fee_visibility.source_archive_allowed!==false)throw new Error('The projected record policy could not be verified. Reload shared data.');
  const data=await assemble(rows);check();data.member_projection=true;
  const cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};onProgress({phase:'saving',recordsLoaded:rows.length,archiveBlocksLoaded:0});await local('put',data,{check,cacheWrite});check();rememberCloudCache(cacheWrite.id);remember(rows);deferredArchiveState=null;setStorage('localStorage',DEMO_KEY,null);onProgress({phase:'complete',recordsLoaded:rows.length,archiveBlocksLoaded:0});setMode('cloud');feeVisibilityContext=exportContext();statusMessage=`Cloud ${providerSource==='cloud2'?'2':'1'} connected.`;return clone(data);
 }

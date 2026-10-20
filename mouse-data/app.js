@@ -2,13 +2,13 @@ import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=1
 import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=171';
 import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
-import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=146';
+import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=174';
 import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from './cage-entrainment.js?v=132';
-import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=146';
+import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=174';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
-import * as store from './data-store.js?v=171';
-import * as model from './model.js?v=146';
+import * as store from './data-store.js?v=174';
+import * as model from './model.js?v=174';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
 import { summarizeLitters } from './litter-summary.js?v=100';
@@ -17,25 +17,21 @@ import { summarizeCages } from './cage-summary.js?v=146';
 import { CAGE_SUMMARY_GROUPS, getCageSummaryOptionsStatus, renderCageSummaryOptions } from './cage-summary-options.js?v=100';
 import { summarizeBreeding } from './breeding-summary.js?v=146';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
-import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=146';
+import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=174';
 import * as history from './history-index.js?v=100';
-import { renderUserManagement } from './user-management.js?v=171';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=171';
-import { renderAccessLogs } from './access-logs.js?v=171';
 import { createAccessActivity } from './access-activity.js?v=113';
 import {createPresence,cloudPresenceContext,mergePresenceFeeds} from './presence.js?v=171';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
-import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
+import { projectAnimalSheet } from './animal-sheet-export.js?v=174';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=150';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=174';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
-import { renderAccountSetup, clearAccountSetup } from './account-setup.js?v=162';
-import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=137';
 import {createCloudMonitor} from './cloud-monitor.js?v=167';
 import {createCloudRecovery} from './cloud-recovery.js?v=165';
+import {createStartupReadLifecycle} from './startup-read.js?v=174';
 import {cloudControlsHTML,cloudDataIndicator,cloudIndicatorHTML,showCloud1SignIn} from './cloud-status.js?v=149';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=146';
 import { experimentsForMouse, samplesForMouse } from './experiment-model.js?v=132';
@@ -45,6 +41,47 @@ import { protocolsForEntity } from './iacuc-model.js?v=132';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 import {managedViewNeeds,managedEditorNeeds,pendingManagedNeeds,hasManagedNeeds} from './managed-view.js?v=169';
+
+// Settings code is requested only for a visible, permitted Settings panel.
+// Each mount is fenced by its account, render generation and actual DOM node.
+const settingsComponentModules=new Map(),settingsComponentPending=new Map(),settingsComponentMounts=new WeakMap();
+const settingsComponentLoaders={
+ users:()=>import('./user-management.js?v=171'),
+ members:()=>import('./lab-members.js?v=171'),
+ access:()=>import('./access-logs.js?v=171'),
+ account:()=>import('./account-setup.js?v=162'),
+ acronym:()=>import('./account-acronym.js?v=100'),
+};
+const settingsComponentFunctions={users:['renderUserManagement'],members:['renderLabMembers','clearLabMembers'],access:['renderAccessLogs'],account:['renderAccountSetup','clearAccountSetup'],acronym:['renderAccountAcronym']};
+function loadSettingsComponent(key){
+ if(settingsComponentModules.has(key))return Promise.resolve(settingsComponentModules.get(key));
+ if(settingsComponentPending.has(key))return settingsComponentPending.get(key);
+ const pending=settingsComponentLoaders[key]().then(module=>{settingsComponentModules.set(key,module);return module;}).finally(()=>{if(settingsComponentPending.get(key)===pending)settingsComponentPending.delete(key);});
+ settingsComponentPending.set(key,pending);return pending;
+}
+function clearSettingsComponent(key,container){
+ if(!container)return;
+ const mount=settingsComponentMounts.get(container);mount?.cleanup?.();settingsComponentMounts.delete(container);
+ const clear=settingsComponentFunctions[key]?.[1];if(clear)settingsComponentModules.get(key)?.[clear]?.(container);
+}
+function renderSettingsComponent(key,container,options){
+ if(!container)return ()=>{};
+ clearSettingsComponent(key,container);
+ const generation=pageRenderGeneration,context=settingsAccessContext(),mount={cleanup:null};settingsComponentMounts.set(container,mount);
+ const current=()=>settingsComponentMounts.get(container)===mount&&generation===pageRenderGeneration&&context===settingsAccessContext()&&container.isConnected!==false&&$(container.id)===container;
+ const failed=()=>{if(!current())return;container.innerHTML='<p role="alert">This panel could not load.</p><button type="button" class="button secondary">Retry</button>';container.onclick=event=>{if(event.target.closest?.('button')){event.preventDefault();event.stopPropagation();container.onclick=null;renderSettingsComponent(key,container,options);}};};
+ const draw=module=>{if(!current())return;container.onclick=null;try{const result=module[settingsComponentFunctions[key][0]](container,options);if(typeof result==='function')mount.cleanup=result;else if(result?.catch)void result.catch(failed);}catch{failed();}};
+ if(settingsComponentModules.has(key))draw(settingsComponentModules.get(key));
+ else{container.innerHTML='<p role="status">Opening this panel…</p><div class="workspace-progress"><progress aria-label="Opening settings panel"></progress></div>';void loadSettingsComponent(key).then(draw).catch(failed);}
+ return ()=>{if(settingsComponentMounts.get(container)===mount){mount.cleanup?.();settingsComponentMounts.delete(container);}};
+}
+const renderUserManagement=(container,options)=>renderSettingsComponent('users',container,options);
+const renderLabMembers=(container,options)=>renderSettingsComponent('members',container,options);
+const clearLabMembers=container=>clearSettingsComponent('members',container);
+const renderAccessLogs=(container,options)=>renderSettingsComponent('access',container,options);
+const renderAccountSetup=(container,options)=>renderSettingsComponent('account',container,options);
+const clearAccountSetup=container=>clearSettingsComponent('account',container);
+const renderAccountAcronym=(container,options)=>renderSettingsComponent('acronym',container,options);
 
 // Load specialist screens only when opened. These are public code modules;
 // authorization and the existing record-loading gates still run for every view.
@@ -67,16 +104,16 @@ let renderIacuc=()=>{},iacucHelpHTML=()=>'';
 let renderCageLabelEditor=()=>{};
 const sectionLoaders = {
  review:()=>import('./mouse-review-view.js?v=100').then(module=>({renderMouseReview}=module)),
- reviewRunner:()=>import('./brainbot-review-runner.js?v=146').then(module=>({runBrainbotMouseReview}=module)),
+ reviewRunner:()=>import('./brainbot-review-runner.js?v=174').then(module=>({runBrainbotMouseReview}=module)),
  brainbot:()=>import('./brainbot.js?v=112').then(module=>({renderBrainbot,brainbotHelpHTML}=module)),
  strains:()=>import('./strain-management.js?v=146').then(module=>({renderStrainManagement,hasStrainDrafts,clearStrainManagement}=module)),
  family:()=>import('./family-explorer.js?v=146').then(module=>({renderFamilyExplorer,familyHelpHTML}=module)),
  cryo:()=>import('./cryopreservation.js?v=146').then(module=>({renderCryopreservation,hasCryopreservationDraft,isCryopreservationBusy}=module)),
  experiments:()=>import('./experiments.js?v=132').then(module=>({renderExperiments,experimentHelpHTML,hasExperimentDrafts,resetExperimentSourceView}=module)),
- fees:()=>import('./lac-fees.js?v=146').then(module=>({renderLacFees,lacFeeHelpHTML}=module)),
+ fees:()=>import('./lac-fees.js?v=174').then(module=>({renderLacFees,lacFeeHelpHTML}=module)),
  locobox:()=>import('./locobox.js?v=132').then(module=>({renderLocobox,locoboxHelpHTML}=module)),
  iacuc:()=>import('./iacuc.js?v=132').then(module=>({renderIacuc,iacucHelpHTML}=module)),
- cageLabel:()=>import('./cage-label.js?v=146').then(module=>({renderCageLabelEditor}=module)),
+ cageLabel:()=>import('./cage-label.js?v=174').then(module=>({renderCageLabelEditor}=module)),
 };
 function loadSectionModule(key){
  const existing=sectionModules.get(key);if(existing)return existing;
@@ -116,7 +153,7 @@ const editableTypes = ['mice','matings','litters','cages'];
 let dataset = null, cloud = {}, route = 'cages', detail = null, query = '', filters = {}, page = 0, sortKey = '', sortDesc = false;
 let editor = null, busy = false, cloudReady = true, archiveTable = 'issues', familyFocus = '', selectedMice = new Set(), deferredInstall = null;
 let brainbotReviewPending=false,cloudConnectionBusy=false,cloudRecoveryChecking=false;
-let startupLoading=false,startupMessage='Checking access…',startupProgressValue=null,manualPullPending=false,cloudLoadError='',cachedPreview=false,startupRequest=0;
+let startupLoading=false,startupMessage='Checking access…',startupProgressValue=null,manualPullPending=false,cloudLoadError='',cachedPreview=false,startupRequest=0,startupPreparing=false,startupPreparationOwner=0;
 const pageSize = 50;
 let tableWindowIndex=0,tableUndated=false,tableWindowAnchor=localDate(),tableWindow=null;
 function resetTableWindow(){tableWindowIndex=0;tableUndated=false;tableWindowAnchor=localDate();tableWindow=null;}
@@ -333,10 +370,10 @@ store.subscribeAppAccessStatus?.(renderAccessRecordingStatus);
 const presence=createPresence({app:'mouse',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:!startupLoading&&!cachedPreview&&cloud.mode==='cloud'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const accessPage=()=>route;
 const resumeAccess=()=>{recordPendingMouseEntry();if(document.hidden)return;if(!startupLoading)accessActivity.resume(accessPage());else if(verifiedAccessIdentity&&accessIdentity(store.getCloudStatus())===verifiedAccessIdentity){const view=location.hash.slice(1).split('/')[0];openingAccess=true;try{accessActivity.resume(titles[view]?view:accessPage());}finally{openingAccess=false;}}};
-document.addEventListener('visibilitychange',()=>{if(document.hidden){accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;}else{cloudMonitor.resume();resumeAccess();void cloudRecovery.request();}});
-window.addEventListener('pagehide',()=>{accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;});
-window.addEventListener('pageshow',event=>{cloudMonitor.resume();resumeAccess();void cloudRecovery.request({force:event.persisted===true});});
-window.addEventListener('focus',()=>{resumeAccess();void cloudRecovery.request();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){startupReads.pause();accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;}else{startupReads.resume();cloudMonitor.resume();resumeAccess();void cloudRecovery.request();}});
+window.addEventListener('pagehide',()=>{startupReads.pause();accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;});
+window.addEventListener('pageshow',event=>{startupReads.resume();cloudMonitor.resume();resumeAccess();void cloudRecovery.request({force:event.persisted===true});});
+window.addEventListener('focus',()=>{startupReads.resume();resumeAccess();void cloudRecovery.request();});
 window.addEventListener('online',resumeAccess);
 for(const type of ['pointerdown','keydown'])document.addEventListener(type,event=>{if(event.isTrusted!==false&&!document.hidden&&!startupLoading)accessActivity.touch(accessPage());});
 function clearAccessLogView(){accessLogsCleanup?.();accessLogsCleanup=null;}
@@ -489,9 +526,9 @@ function renderStartupLoading(){
  $('navigation').innerHTML='';$('page-title').textContent='Opening workspace';$('add-button').hidden=true;$('export-button').disabled=true;
  const status=$('workspace-loading-status'),progress=$('workspace-loading-progress');
  if(status?.isConnected&&progress?.isConnected&&$('main').contains?.(status)){
-  status.textContent=startupMessage;progress.innerHTML=startupProgressBar();renderConnection();return;
+  status.textContent=startupMessage;progress.innerHTML=startupProgressBar();const retry=$('main').querySelector?.('[data-action="retry-startup"]');if(retry)retry.disabled=startupPreparing;renderConnection();return;
  }
- $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p><div id="workspace-loading-progress">${startupProgressBar()}</div><p class="subtle">Current records first. History loads when needed. Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}</div></section>`;
+ $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p><div id="workspace-loading-progress">${startupProgressBar()}</div><p class="subtle">Current records first. History loads when needed. Editing is paused until verification finishes.</p><div class="actions">${button('Retry loading','retry-startup',true,startupPreparing?'disabled':'')}${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}</div></section>`;
  renderConnection();
 }
 function startupProgress(value){
@@ -1046,7 +1083,7 @@ async function openExportCenter(options={}){
  dialog.innerHTML='<div class="dialog-heading"><h2>Export</h2><button class="icon-button" id="export-loading-close" aria-label="Close export">×</button></div><div class="dialog-content"><p role="status">Loading export tools…</p></div>';
  $('export-loading-close').onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.showModal();
  try{
-  exportCenterModulePending??=import('./export-center.js?v=154').then(module=>{exportCenterModule=module;return module;}).catch(error=>{exportCenterModulePending=null;throw error;});
+  exportCenterModulePending??=import('./export-center.js?v=174').then(module=>{exportCenterModule=module;return module;}).catch(error=>{exportCenterModulePending=null;throw error;});
   const module=exportCenterModule||await exportCenterModulePending;
   if(request!==exportCenterRequest||!dialog.open)return;
   if(context!==cageSheetContext()||dataset!==snapshot||cachedPreview||startupLoading||!canExportMouseData())throw new Error('Workspace changed. Reopen Export.');
@@ -1093,9 +1130,9 @@ async function action(name,target=null){
  if(name==='managed-retry'){await retryManagedRecords();return;}
  if(name==='cage-reference-history'){await loadCageReferences();return;}
  if(name==='reload-workspace'){location.reload();return;}
+ if(name==='retry-startup'){if(startupPreparing){showToast('Finishing sign-in verification. Please wait.');return;}if(manualPullPending||busy||historyLoadState||managedLoadState||historyDraftOpen()){showToast('Save or cancel changes before reloading.');return;}await start();return;}
  if(startupLoading&&name!=='settings'){showToast('The shared workspace is still loading. Please wait for verification.');return;}
  if((cachedPreview||historyLoadState)&&['retry-startup','cloud-pull','cloud-push','import','import-history','upload-history','download-history','clear-history','clear-workspace','demo','empty-workspace','export'].includes(name)){showToast('Synchronizing. Editing is paused.');return;}
- if(name==='retry-startup'){await start();return;}
  if(name==='cancel-recovery'){await store.signOut();dataset=null;passwordSetupRequired=false;await refreshCloud();navigate('settings');return}if(cloud.passwordRecovery&&name!=='help')throw new Error('Complete or cancel password recovery first.');if(name==='cage-import'){await openCageSheetImport();return}if(name==='cage-current'){setCageDate('');return}if(name==='planner'){navigate('planner');return}if(name==='mouse-entrainment-history'){await loadHistoryTables(['husbandry_events']);render();return;}if(name==='mouse-genotypes'){plannerMouseId=detail?.type==='mice'?detail.id:null;navigate('planner');return}
  if(name==='litter-help'){showHelp(false,false,false,false,true);return}if(name==='overview-help'){showHelp(false,false,false,true);return}if(name==='cage-summary-options'){await openCageSummaryOptions();return}if(name==='cage-summary-help'){showHelp(false,false,true);return}if(name==='breeding-options'){await openBreedingOptions();return}if(name==='breeding-help'){showHelp(false,true);return}if(name==='strains'){await openStrains();return}if(name==='mouse-count-help'){showHelp(true);return}if(name==='help'){showHelp();return}if(name==='close-print'){$('print-preview').close();return}if(name==='system-print'){await printPreparedCards();return}if(name==='import'){$('import-file').click();return}if(name==='import-history'){$('history-file').click();return}if(name==='clear-history'){if(await confirmAction('Remove local history index?','<p class="subtle">Only this browser’s full-cell index will be removed. The shared cloud copy and colony records remain.</p>','Remove local index')){await history.clearHistoryIndex();renderArchive()}return}if(name==='upload-history'){const saved=await history.loadHistoryIndex();if(!saved)throw new Error('Import a full-cell index first.');if(!await confirmAction('Upload source archive to private cloud?',`<p class="subtle">Upload ${count(saved.index.cells.length)} archived source cells to the configured colony’s private Storage bucket. Authorized members can download this history on their devices.</p>`,'Upload private archive'))return;const result=await store.uploadHistoryIndex(saved.index);showToast('Private source archive uploaded.');await refreshCloud();renderArchive();return}if(name==='download-history'){if(!await confirmAction('Download shared source archive?','<p class="subtle">The latest private index in this colony replaces this browser’s full-cell index. Current mouse and breeding records are unchanged.</p>','Download private index'))return;const index=await store.downloadHistoryIndex();await history.saveHistoryIndex(index,'Shared cloud source-cell index');renderArchive();showToast('Private source archive downloaded.');return}if(name==='export'){await exportDataset();return}if(name==='settings'){navigate('settings');return}if(name==='back'){navigate(detail?.type||route);return}if(name==='add'){openEditor(route);return}if(name.startsWith('new-')){openEditor(name.slice(4));return}if(name==='edit-cage-manager'){openEditor('cages',target?.dataset.id);return}if(name==='edit'){openEditor(detail.type,detail.id);return}if(name==='close-modal'){$('record-dialog').close();editor=null;return}
  if(name==='mouse-experiments'){experimentMouseId=detail.id;navigate('experiments');return}
@@ -1112,7 +1149,7 @@ async function action(name,target=null){
  if(name==='reload-shared'){await loadSharedColony({preserveView:true,confirm:false});return}
  if(name==='cloud-push'){if(!dataset)throw new Error('Import or create a dataset first.');if(!await confirmAction('Upload records to shared colony?',`<p class="subtle">This sends the current browser’s records to the configured cloud colony. Authorized members will be able to access them.</p>${kv([['Mouse records',records('mice').length],['Colony UUID',cloud.colonyId]])}<p class="subtle" style="margin-top:15px">Existing-record conflicts are rejected. Only proceed when this is the intended colony.</p>`,'Upload to shared colony'))return;await store.pushToCloud(dataset);dataset=await store.loadDataset();cloudReady=true;await refreshCloud();render();showToast('Upload completed. Shared cloud mode is active.');return}
  if(isLegacySite(location)&&['change-email','resend-link'].includes(name)){navigate('settings');showToast('Request sign-in links at the new lab address.');return}if(name==='change-email'){authPendingEmail='';renderSettings();return}if(name==='resend-link'){if(!authPendingEmail)throw new Error('Enter your email first.');await store.requestEmailLink(authPendingEmail,appRedirectURL());showToast('A new sign-in link was requested.');return}
- if(name==='sign-out'){setSidebarMenuOpen(false);clearSidebarProfile();cloud={...cloud,signedIn:false};renderSidebarAccount();startupRequest++;cachedPreview=false;startupLoading=false;dataset=null;cloudLoadError='';accessActivity.signOut(accessPage());clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));clearCageSheetDrafts();await store.signOut();await refreshCloud();cloudReady=true;render();showToast('Signed out.');return}
+ if(name==='sign-out'){setSidebarMenuOpen(false);clearSidebarProfile();cloud={...cloud,signedIn:false};renderSidebarAccount();startupReads.reset();startupRequest++;cachedPreview=false;startupLoading=false;dataset=null;cloudLoadError='';accessActivity.signOut(accessPage());clearAccessLogView();clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));clearCageSheetDrafts();await store.signOut();await refreshCloud();cloudReady=true;render();showToast('Signed out.');return}
  if(name==='clear-workspace'){clearCageSheetDrafts();if(!await confirmAction('Clear this browser’s workspace?','<p class="subtle">The browser’s local copy will be removed. Shared cloud records remain. Download a backup first if local work has not been shared.</p>','Clear local copy'))return;await store.clearDataset();await history.clearHistoryIndex();dataset=null;cloudReady=true;await refreshCloud();navigate('overview');return}
  if(name==='install'&&deferredInstall){await deferredInstall.prompt();deferredInstall=null;renderSettings()}
 }
@@ -1144,29 +1181,50 @@ window.addEventListener('lac-fee-visibility-changed',async()=>{
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(route==='settings')renderSettings()});
 window.addEventListener('hashchange',()=>{const [view,id]=location.hash.slice(1).split('/');if(titles[view]&&(view!==route||String(detail?.id||'')!==decodeURIComponent(id||''))){route=view;detail=id&&entity[view]?{type:view,id:decodeURIComponent(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;resetTableWindow();selectedMice.clear();render()}});
 window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()||hasStrainDrafts($('main'))){event.preventDefault();event.returnValue='';}});
-window.addEventListener('offline',()=>{cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
-window.addEventListener('online',()=>{cloudMonitor.resume();if(cloud.mode==='cloud')void cloudRecovery.request({force:true});});
+window.addEventListener('offline',()=>{startupReads.pause();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
+window.addEventListener('online',()=>{startupReads.resume();cloudMonitor.resume();if(cloud.mode==='cloud')void cloudRecovery.request({force:true});});
+// iOS may suspend this page as soon as the user switches apps. Discard only
+// that unfinished opening read, then verify the same account again on return.
+const startupReads=createStartupReadLifecycle({
+ cancel:signal=>store.cancelStartupRead?.({signal}),
+ isVisible:()=>!document.hidden,isOnline:()=>navigator.onLine!==false,
+ onPause:()=>{startupRequest++;cloudReady=false;startupMessage='Loading paused. It resumes when you return online.';if(cachedPreview)renderConnection();else renderStartupLoading();},
+ onResume:()=>{void start();},
+});
 async function start(){
- const request=++startupRequest;cachedPreview=false;cloudLoadError='';managedLoadFailure=null;startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
+ // One-time authentication callbacks must finish before a read can be retried.
+ if(startupPreparing)return;
+ startupPreparing=true;
+ startupReads.reset();
+ const request=++startupRequest,previewContext=cageSheetContext(cloud);startupPreparationOwner=request;
+ let opening=null,preservePreview=Boolean(cachedPreview&&dataset);
+ cachedPreview=preservePreview;cloudLoadError='';managedLoadFailure=null;startupLoading=!preservePreview;startupProgressValue=null;startupMessage='Checking access…';if(preservePreview)renderConnection();else renderStartupLoading();
+ const current=()=>request===startupRequest&&(!opening||opening.isCurrent());
+ const checkRequest=()=>{if(!current())throw Object.assign(new Error('Opening read was superseded.'),{code:'BACKGROUND_CANCELLED'});};
+ const progress=value=>{if(current())startupProgress(value);};
  try{
-  await refreshCloud({verifyFees:false});if(!cloud.configured&&PUBLIC_CONFIG.url&&PUBLIC_CONFIG.anonKey&&PUBLIC_CONFIG.colonyId){await store.configureCloud(PUBLIC_CONFIG);await refreshCloud({verifyFees:false})}
-  if(cloud.cloud2Configured&&!cloud.signedIn){await store.resumeCloud2Session?.();await refreshCloud({verifyFees:false});}
-  let callback=null,authError=null;try{callback=await store.consumeAuthCallback?.();if(callback){passwordSetupRequired=callback.needsPasswordSetup===true;await refreshCloud({verifyFees:false})}}catch(error){authError=error}
+  await refreshCloud({verifyFees:false});checkRequest();if(preservePreview&&previewContext!==cageSheetContext(cloud)){preservePreview=false;cachedPreview=false;dataset=null;startupLoading=true;renderStartupLoading();}if(!cloud.configured&&PUBLIC_CONFIG.url&&PUBLIC_CONFIG.anonKey&&PUBLIC_CONFIG.colonyId){await store.configureCloud(PUBLIC_CONFIG);checkRequest();await refreshCloud({verifyFees:false});checkRequest();}
+  if(cloud.cloud2Configured&&!cloud.signedIn){await store.resumeCloud2Session?.();checkRequest();await refreshCloud({verifyFees:false});checkRequest();}
+  let callback=null,authError=null;try{callback=await store.consumeAuthCallback?.();checkRequest();if(callback){passwordSetupRequired=callback.needsPasswordSetup===true;await refreshCloud({verifyFees:false});checkRequest();}}catch(error){checkRequest();authError=error;}
+  startupPreparing=false;
+  opening=cloud.mode==='cloud'||cloud.signedIn?startupReads.begin():null;
+  if(opening&&(document.hidden||navigator.onLine===false)){startupReads.pause();return;}
   const accessContext=()=>{const status=store.getCloudStatus();return JSON.stringify([status.url,status.colonyId,status.email,Boolean(status.signedIn),Boolean(status.passwordRecovery)]);},openingContext=accessContext();
-  const checkOpening=()=>{if(request!==startupRequest||accessContext()!==openingContext)throw new Error('The account or colony changed while opening the workspace. Reopen it after signing in.');};
+  const checkOpening=()=>{checkRequest();if(accessContext()!==openingContext)throw new Error('The account or colony changed while opening the workspace. Reopen it after signing in.');};
   const requestedRoute=(failed=false)=>{const [view,id]=location.hash.slice(1).split('/');route=cloud.role==='pending'||authError||failed||passwordSetupRequired||callback&&cloud.mode!=='cloud'?'settings':titles[view]?view:'cages';detail=id&&entity[route]?{type:route,id:decodeURIComponent(id)}:null;};
-  startupMessage='Checking the saved workspace…';renderStartupLoading();
+  startupMessage='Checking the saved workspace…';if(cachedPreview)renderConnection();else renderStartupLoading();
   const mayPreview=!callback&&!authError&&!passwordSetupRequired&&cloud.mode==='cloud'&&cloud.signedIn&&!cloud.passwordRecovery&&cloud.role!=='pending'&&typeof store.loadStartupCache==='function';
-  dataset=mayPreview?await store.loadStartupCache({currentOnly:true}):await store.loadDataset();checkOpening();
-  if(mayPreview&&dataset){cloud=store.getCloudStatus();cloudReady=false;cachedPreview=true;startupLoading=false;requestedRoute();render();}
+  const saved=mayPreview?await store.loadStartupCache({currentOnly:true,signal:opening?.signal}):await store.loadDataset();checkOpening();dataset=saved;
+  if(mayPreview&&dataset){cloud=store.getCloudStatus();cloudReady=false;cachedPreview=true;startupLoading=false;requestedRoute();if(preservePreview&&route==='settings'&&refreshSettingsConnection())renderConnection();else render();}
   let reconnectFailed=false;
-  if(!cloud.passwordRecovery&&cloud.role!=='pending'&&(cloud.mode==='cloud'||((callback||cloud.signedIn)&&!dataset))){cloudReady=false;try{if(!dataset||store.getCloudStatus().mode!=='cloud'||store.getCloudStatus().readyForEdits!==true){const fresh=await store.pullFromCloud({onProgress:startupProgress,deferHistory:true,currentOnly:true});checkOpening();dataset=fresh;}await refreshCloud({verifyFees:false});if(accessContext()!==openingContext||store.getCloudStatus().readyForEdits===false||!dataset)throw new Error('Access changed during reconnect. Sign in and load the shared colony again.');cloudReady=true;}catch(error){if(request!==startupRequest)return;dataset=null;reconnectFailed=true;cloudLoadError=error.message||String(error);showToast(`Shared reconnect failed: ${error.message}. Editing remains paused.`,true)}}
+  if(!cloud.passwordRecovery&&cloud.role!=='pending'&&(cloud.mode==='cloud'||((callback||cloud.signedIn)&&!dataset))){cloudReady=false;try{if(!dataset||store.getCloudStatus().mode!=='cloud'||store.getCloudStatus().readyForEdits!==true){const fresh=await store.pullFromCloud({onProgress:progress,deferHistory:true,currentOnly:true,signal:opening?.signal});checkOpening();dataset=fresh;}await refreshCloud({verifyFees:false});checkOpening();if(store.getCloudStatus().readyForEdits===false||!dataset)throw new Error('Access changed during reconnect. Sign in and load the shared colony again.');cloudReady=true;}catch(error){if(!current())return;dataset=null;reconnectFailed=true;cloudLoadError=error.message||String(error);showToast(`Shared reconnect failed: ${error.message}. Editing remains paused.`,true);}}
   checkOpening();const preserveSettings=cachedPreview&&route==='settings'&&!reconnectFailed;
   cachedPreview=false;requestedRoute(reconnectFailed);startupLoading=false;
   if(preserveSettings&&refreshSettingsConnection()){navigation();$('export-button').disabled=!dataset||!canExportMouseData();renderConnection();renderSettingsMetadata();}else render();queueSidebarProfile();queueLabUserDirectory();
   if(cloud.passwordRecovery)showToast('Reset link verified. Choose a new password.');else if(authError)showToast(authError.message||'Sign-in could not be verified. Request a new link.',true);else if(callback)showToast(passwordSetupRequired?'Signed in. Set your Braintime account password below.':cloud.mode==='cloud'?'Signed in. Shared colony opened.':'Signed in.');
- }catch(error){if(request!==startupRequest)return;cachedPreview=false;startupLoading=false;dataset=null;cloudReady=false;cloud=store.getCloudStatus();$('main').innerHTML=`<div class="alert error">Workspace could not load: ${esc(error.message||String(error))}</div><div class="actions">${button('Try again','retry-startup',true)}${button('Connection settings','settings')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}`;renderConnection()}
- queueShellCache();
+ }catch(error){if(!current())return;cachedPreview=false;startupLoading=false;dataset=null;cloudReady=false;cloud=store.getCloudStatus();$('main').innerHTML=`<div class="alert error">Workspace could not load: ${esc(error.message||String(error))}</div><div class="actions">${button('Try again','retry-startup',true)}${button('Connection settings','settings')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}`;renderConnection();}
+ finally{if(startupPreparationOwner===request)startupPreparing=false;opening?.finish();}
+ if(current()||request===startupRequest)queueShellCache();
 }
 let shellCacheScheduled=false;
 function queueShellCache(){
