@@ -171,7 +171,7 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(prior){if(prior.body!==key)throw problem('ID_REUSED','This operation ID belongs to different changes.');if(prior.inFlight)throw problem('BUSY','This operation is already being submitted.');if(prior.receipt)return {source:prior.source,...clone(prior.receipt)};throw problem('WRITE_UNCERTAIN','Verify or explicitly retry the unconfirmed operation.');}
     const affected=recordKeys(value);
     for(const entry of operations.values())if((entry.inFlight||entry.outcome==='uncertain')&&(!entry.operation||[...recordKeys(entry.operation)].some(record=>affected.has(record))))throw problem('WRITE_UNCERTAIN','An earlier write to this record needs verification. Keep its operation ID rather than submitting the change again.');
-    if(!active)await refresh();const check=fence(),source=active;
+    if(!active){const opening=fence();await refreshForRead(opening);opening();}const check=fence(),source=active;
     if(!source||!sources[source].canWrite)throw problem('READ_ONLY','No verified writable cloud is available.');
     if(adapters[source].idempotentWrites!==true)throw problem('NOT_READY','Idempotent cloud writes are not configured.');
     const entry={id:value.operation_id,source,operation:value,body:key,outcome:'submitting',inFlight:false,receipt:null};operations.set(entry.id,entry);return send(entry,check);

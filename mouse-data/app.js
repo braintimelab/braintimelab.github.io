@@ -10,7 +10,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=163';
+import * as store from './data-store.js?v=164';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -39,7 +39,7 @@ import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=137';
-import {createCloudMonitor} from './cloud-monitor.js?v=139';
+import {createCloudMonitor} from './cloud-monitor.js?v=164';
 import {cloudControlsHTML,cloudDataIndicator,cloudIndicatorHTML,showCloud1SignIn} from './cloud-status.js?v=149';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=146';
 import { buildFamilyGenotypes } from './family-genotypes.js?v=146';
@@ -52,7 +52,6 @@ import { renderExperimentSheetImport } from './experiment-sheet-import.js?v=126'
 import { renderLocobox, locoboxHelpHTML } from './locobox.js?v=132';
 import { renderIacuc, iacucHelpHTML } from './iacuc.js?v=132';
 import { protocolsForEntity } from './iacuc-model.js?v=132';
-import { renderExportCenter } from './export-center.js?v=154';
 import { datasetFromLocalBackup } from './local-backup.js?v=100';
 import { isLegacySite, migrationNoticeHTML, movedAccountHTML } from './site-migration.js?v=100';
 
@@ -313,7 +312,7 @@ function panel(title,body,action='') { return `<section class="panel"><div class
 function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(text(v))}</dd>`).join('')}</dl>`; }
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { if(!error&&/saved|recorded|updated/i.test(message)&&store.getCloudConnections?.()?.operations?.at(-1)?.outcome==='queued')message+=' Cloud 2 saved; sync pending.'; $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
-async function refreshCloud({verifyFees=true}={}) { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);const previousMouseAccess=JSON.stringify(cloud.mousePermissions??{});cloud=await store.getCloudStatus();if(cloud.mode==='cloud'&&previousMouseAccess!==JSON.stringify(cloud.mousePermissions??{})){dataset=null;cloudReady=false;cachedPreview=false;detail=null;editor=null;$('record-dialog')?.close();$('print-preview')?.close();const prepared=$('print-area');if(prepared)prepared.textContent='';}if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();clearCageManagerDirectory();cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(verifyFees&&cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending'&&appAllows(cloud,'mouse.fees.read'))await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
+async function refreshCloud({verifyFees=route==='fees'}={}) { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);const previousMouseAccess=JSON.stringify(cloud.mousePermissions??{});cloud=await store.getCloudStatus();if(cloud.mode==='cloud'&&previousMouseAccess!==JSON.stringify(cloud.mousePermissions??{})){dataset=null;cloudReady=false;cachedPreview=false;detail=null;editor=null;$('record-dialog')?.close();$('print-preview')?.close();const prepared=$('print-area');if(prepared)prepared.textContent='';}if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();clearCageManagerDirectory();cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(verifyFees&&cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending'&&appAllows(cloud,'mouse.fees.read'))await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
 async function verifyCurrentAppPolicy(){const previous=JSON.stringify(cloud.mousePermissions??{});const result=await store.verifyCloudMembership();await refreshCloud({verifyFees:false});if(previous!==JSON.stringify(cloud.mousePermissions??{}))render();return result;}
 function workspaceCloudIndicator(connections=store.getCloudConnections?.()){return cloudDataIndicator(connections,{mode:cloud.mode,checking:startupLoading||cachedPreview,offline:navigator.onLine===false,legacyConnected:cloud.signedIn&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending'&&cloud.activeCloud!=='cloud2'});}
 function workspaceSourceVerified(source){return cloud.signedIn&&!cloud.passwordRecovery&&cloud.role!=='pending'&&cloudReady&&store.getCloudStatus().readyForEdits!==false&&source.connected;}
@@ -321,6 +320,7 @@ function workspaceConnectionText(connections=store.getCloudConnections?.()){if(c
 function cloudConnectionPanelHTML(){return cloud.cloud2Configured?`<div id="cloud-connections">${cloudControlsHTML(store.getCloudConnections?.(),{allowManualSelection:false})}</div>`:'';}
 function renderCloudConnections(connections=store.getCloudConnections?.()){renderSidebarAccount(connections);const host=$('cloud-connections');if(host&&cloud.cloud2Configured)host.innerHTML=cloudControlsHTML(connections,{allowManualSelection:false});}
 function renderConnection(connections=store.getCloudConnections?.()) {
+ renderCachedSyncProgress();
  void presence.refresh();
  renderCloudConnections(connections);renderSidebarAccount(connections);
  if(startupLoading){$('mode-badge').textContent='Loading workspace';$('mode-badge').classList.toggle('cloud',false);return;}
@@ -364,23 +364,54 @@ function render() {
  if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;$('main').innerHTML=entrainmentReviewHTML()+'<div id="animal-review-content"></div>';$('main').onclick=event=>{const target=event.target.closest?.('[data-entrainment-position]');if(target){locoboxContextKey++;locoboxCage=null;locoboxSourceEvent=null;locoboxPosition=target.dataset.entrainmentPosition;navigate('locobox');}};renderMouseReview($('animal-review-content'),dataset,{canEdit:()=>canEditRecords('review')&&canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
+function workspaceProgressMeasure(value){
+ const fields=value?.phase==='archive'?['archiveBlocksLoaded','archiveBlocksTotal']:value?.phase==='records'?['recordsLoaded','recordsTotal']:null;
+ if(!fields)return null;
+ const valid=(loaded,total)=>Number.isSafeInteger(loaded)&&loaded>=0&&Number.isSafeInteger(total)&&total>0&&loaded<=total;
+ let [loaded,total]=fields.map(key=>value?.[key]);
+ if(value.phase==='records'&&!valid(loaded,total)){loaded=value.recordBlocksLoaded;total=value.recordBlocksTotal;}
+ return valid(loaded,total)?{loaded,total,estimated:value.phase==='records'&&value.recordBlocksEstimated===true}:null;
+}
 function workspaceProgressBar(value,{label='Loading Braintime Mouse Data',describedBy='workspace-loading-status'}={}){
- const loaded=value?.archiveBlocksLoaded,total=value?.archiveBlocksTotal;
- const known=value?.phase==='archive'&&Number.isSafeInteger(loaded)&&loaded>=0&&Number.isSafeInteger(total)&&total>0&&loaded<=total;
- const percent=known?Math.floor(loaded/total*100):null;
- return `<div class="workspace-progress" aria-busy="true"><progress max="100"${percent===null?'':` value="${percent}" aria-valuetext="${percent}%"`} aria-label="${esc(value?.phase==='archive'?'Loading archived history':label)}" aria-describedby="${esc(describedBy)}">${percent===null?'Loading…':`${percent}%`}</progress>${percent===null?'':`<span class="small muted">${percent}%</span>`}</div>`;
+ const measure=workspaceProgressMeasure(value),percent=measure?Math.min(99,Math.floor(measure.loaded/measure.total*100)):null,estimate=measure?.estimated===true;
+ const phaseLabel=value?.phase==='archive'?'Loading archived history':value?.phase==='records'?'Loading current records':label;
+ const progressText=percent===null?'Loading…':`${estimate?'About ':''}${percent}%`;
+ return `<div class="workspace-progress" aria-busy="true"><progress max="100"${percent===null?'':` value="${percent}" aria-valuetext="${esc(progressText)}"`}${estimate?' data-estimated="true"':''} aria-label="${esc(phaseLabel)}" aria-describedby="${esc(describedBy)}">${progressText}</progress>${percent===null?'':`<span class="small muted">${esc(progressText)}</span>`}</div>`;
+}
+function workspaceProgressCounts(value){
+ const measure=workspaceProgressMeasure(value),valid=(loaded,total)=>Number.isSafeInteger(total)&&total>=loaded&&total>=0;
+ const records=value?.recordsLoaded,recordCount=Number.isSafeInteger(records)&&records>=0?`${count(records)}${value.phase==='records'&&valid(records,value.recordsTotal)?` / ${value.recordBlocksEstimated===true?'about ':''}${count(value.recordsTotal)}`:''} records`:'';
+ if(value?.phase==='records'){
+  const loaded=value.recordBlocksLoaded,total=value.recordBlocksTotal,blocks=Number.isSafeInteger(loaded)&&loaded>=0?`${count(loaded)}${valid(loaded,total)?` / ${value.recordBlocksEstimated===true?'about ':''}${count(total)}`:''} record blocks`:'';
+  const tables=!measure&&Number.isSafeInteger(value.recordTablesLoaded)&&value.recordTablesLoaded>=0&&valid(value.recordTablesLoaded,value.recordTablesTotal)?`${count(value.recordTablesLoaded)} / ${count(value.recordTablesTotal)} record tables`:'';
+  return [recordCount,blocks,tables].filter(Boolean).join(' · ');
+ }
+ if(value?.phase==='archive'){
+  const blocks=Number.isSafeInteger(value.archiveBlocksLoaded)&&value.archiveBlocksLoaded>=0?`${count(value.archiveBlocksLoaded)}${measure?` / ${count(measure.total)}`:''} archive blocks`:'';
+  return [recordCount,blocks].filter(Boolean).join(' · ');
+ }
+ return '';
 }
 function startupProgressBar(){return workspaceProgressBar(startupProgressValue);}
+function renderCachedSyncProgress(){
+ const host=$('workspace-sync-progress');if(!host)return;
+ host.hidden=!cachedPreview;
+ if(cachedPreview)host.innerHTML=`<p id="workspace-sync-status" role="status" aria-live="polite">${esc(startupMessage)}</p>${workspaceProgressBar(startupProgressValue,{describedBy:'workspace-sync-status'})}<p class="small muted">Saved records are readable. Editing opens after verification; history loads when needed.</p>`;
+ else host.innerHTML='';
+}
 function renderStartupLoading(){
  $('navigation').innerHTML='';$('page-title').textContent='Opening workspace';$('add-button').hidden=true;$('export-button').disabled=true;
- $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p>${startupProgressBar()}<p class="subtle">Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}</div></section>`;
+ const status=$('workspace-loading-status'),progress=$('workspace-loading-progress');
+ if(status?.isConnected&&progress?.isConnected&&$('main').contains?.(status)){
+  status.textContent=startupMessage;progress.innerHTML=startupProgressBar();renderConnection();return;
+ }
+ $('main').innerHTML=`<section class="panel" aria-labelledby="workspace-loading-title"><div class="panel-head"><h2 id="workspace-loading-title">Loading Braintime Mouse Data</h2></div><div class="panel-body"><p id="workspace-loading-status" role="status" aria-live="polite">${esc(startupMessage)}</p><div id="workspace-loading-progress">${startupProgressBar()}</div><p class="subtle">Current records first. History loads when needed. Editing is paused until verification finishes.</p><div class="actions">${button('Reload page','reload-workspace')}</div>${backupViewerLinkHTML(PUBLIC_CONFIG,{owner:cloud.signedIn&&cloud.role==='owner',parallel:cloud.cloud2Configured})}</div></section>`;
  renderConnection();
 }
 function startupProgress(value){
  if(!startupLoading&&!cachedPreview)return;
- const total=Number.isSafeInteger(value?.archiveBlocksTotal)&&value.archiveBlocksTotal>=value?.archiveBlocksLoaded?value.archiveBlocksTotal:null;
- const counts=Number.isSafeInteger(value?.recordsLoaded)&&value.recordsLoaded>=0&&Number.isSafeInteger(value?.archiveBlocksLoaded)&&value.archiveBlocksLoaded>=0?`${count(value.recordsLoaded)} records · ${count(value.archiveBlocksLoaded)}${total===null?'':` / ${count(total)}`} archive blocks`:'';
- const phase=({access:'Checking access',records:'Loading shared records',archive:'Loading archived history',verifying:'Verifying the complete snapshot',saving:'Saving the verified snapshot on this device'})[value?.phase];
+ const counts=workspaceProgressCounts(value);
+ const phase=({access:'Checking access',records:'Loading current records',archive:'Loading archived history',verifying:'Verifying current records',saving:'Saving verified records on this device'})[value?.phase];
  if(!phase)return;
  startupProgressValue=value;startupMessage=phase+'…'+(counts?' '+counts:'');if(cachedPreview)renderConnection();else renderStartupLoading();
 }
@@ -896,13 +927,24 @@ function showExportPrintPreview(html,exportContext={}){
  frame.onload=async()=>{try{await frame.contentDocument.fonts?.ready;const images=[...frame.contentDocument.images];await Promise.all(images.map(image=>image.complete?Promise.resolve():new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('The lab mark is still loading. Reopen the PDF preview.')),8000);image.onload=()=>{clearTimeout(timer);resolve()};image.onerror=()=>{clearTimeout(timer);reject(new Error('The lab mark did not load.'))};})));if(images.some(image=>!image.naturalWidth))throw new Error('The lab mark did not load.');button.disabled=false}catch(error){showToast(error.message,true)}};
  frame.srcdoc=html;const clearPrint=()=>{frame.srcdoc='';dialog.innerHTML='';if(dialog.open)dialog.close();};$('export-print-close').onclick=clearPrint;dialog.oncancel=event=>{event.preventDefault();clearPrint()};dialog.onclose=()=>{if(!dialog.open){frame.srcdoc='';dialog.innerHTML='';}};button.onclick=async()=>{button.disabled=true;try{exportContext.validateContext?.();const permission=await store.getExportPermission(),previous=exportContext.permission;exportContext.validateContext?.();if(previous&&(permission.level!==previous.level||permission.full_history!==previous.full_history||permission.cutoff_date!==previous.cutoff_date||permission.as_of_date!==previous.as_of_date||permission.local!==previous.local))throw new Error('Export permission changed. Reopen the export preview.');exportContext.validateContext?.();if(!dialog.open||$('export-print-frame')!==frame)return;frame.contentWindow.focus();frame.contentWindow.print()}catch(error){showToast(error.message,true)}finally{button.disabled=false}};dialog.showModal();
 }
+let exportCenterModule=null,exportCenterModulePending=null,exportCenterRequest=0;
 async function openExportCenter(options={}){
  if(cloud.mode==='cloud'&&!canExportMouseData()){showToast('Export is not available for your account.',true);return;}
  if(cachedPreview||startupLoading||historyLoadState){showToast('Synchronizing. Exports are paused.');return;}
  if(!dataset){showToast('Open a workspace before exporting.');return}
  let dialog=$('export-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='export-dialog';document.body.appendChild(dialog)}
- dialog.innerHTML='<div id="export-center"></div>';dialog.oncancel=event=>{event.preventDefault();dialog.querySelector('[data-export-action="close"]')?.click()};dialog.showModal();
- await renderExportCenter($('export-center'),dataset,{isGuest:()=>isGuest(cloud),getPermission:store.getExportPermission,getRecords:store.getExportRecords,getBackup:store.getFullExportBackup,getLocalBackup:store.getLocalBackup,canViewSourceArchive,getSourceArchive:()=>store.getFullSourceExport(async()=>(await history.loadHistoryIndex())?.index),download:downloadExport,print:showExportPrintPreview,close:()=>dialog.close(),toast:showToast},options);
+ const request=++exportCenterRequest,snapshot=dataset,context=cageSheetContext();
+ const close=()=>{if(exportCenterRequest===request)exportCenterRequest++;dialog.close();};
+ dialog.innerHTML='<div class="dialog-heading"><h2>Export</h2><button class="icon-button" id="export-loading-close" aria-label="Close export">×</button></div><div class="dialog-content"><p role="status">Loading export tools…</p></div>';
+ $('export-loading-close').onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.showModal();
+ try{
+  exportCenterModulePending??=import('./export-center.js?v=154').then(module=>{exportCenterModule=module;return module;}).catch(error=>{exportCenterModulePending=null;throw error;});
+  const module=exportCenterModule||await exportCenterModulePending;
+  if(request!==exportCenterRequest||!dialog.open)return;
+  if(context!==cageSheetContext()||dataset!==snapshot||cachedPreview||startupLoading||!canExportMouseData())throw new Error('Workspace changed. Reopen Export.');
+  dialog.innerHTML='<div id="export-center"></div>';dialog.oncancel=event=>{event.preventDefault();dialog.querySelector('[data-export-action="close"]')?.click()};
+  await module.renderExportCenter($('export-center'),snapshot,{isGuest:()=>isGuest(cloud),getPermission:store.getExportPermission,getRecords:store.getExportRecords,getBackup:store.getFullExportBackup,getLocalBackup:store.getLocalBackup,canViewSourceArchive,getSourceArchive:()=>store.getFullSourceExport(async()=>(await history.loadHistoryIndex())?.index),download:downloadExport,print:showExportPrintPreview,close,toast:showToast},options);
+ }catch(error){if(request===exportCenterRequest&&dialog.open){dialog.innerHTML='<div class="dialog-heading"><h2>Export</h2><button class="icon-button" id="export-loading-close" aria-label="Close export">×</button></div><div class="dialog-content"><p role="alert">Export tools could not load. Close and try again.</p></div>';$('export-loading-close').onclick=close;showToast(error.message||'Export tools could not load.',true);}}
 }
 async function exportDataset(){return openExportCenter({scope:'animal-sheet',...(selectedMice.size?{selectedMouseIds:[...selectedMice]}:{})})}
 async function archiveRecord(){if(!canArchiveRecords()){showToast('Archive permission is required.',true);return;}const r=findRecord(detail.type,detail.id),restore=archived(r);if(!await confirmAction(restore?'Restore record?':'Archive record?',`<p class="subtle">${esc(entity[detail.type].singular)} SID ${esc(detail.id)}. ${restore?'The record will return to normal lists.':'This hides the record from normal lists. Its biological state, dates and history stay unchanged. You can restore it later.'}</p>`,restore?'Restore':'Archive'))return;const next=clone(dataset),target=next.tables[detail.type].find(x=>String(x[entity[detail.type].id])===detail.id);target.app_archived_at=restore?null:now();target.app_modified_at=now();const check=model.validateRecord(detail.type,target,dataset,detail.id);if(check.errors?.length)throw new Error(check.errors.join('\n'));await store.saveDataset(next);dataset=await store.loadDataset();render();showToast(restore?'Record restored.':'Record archived.')}
@@ -964,7 +1006,7 @@ async function action(name,target=null){
  if(name==='install'&&deferredInstall){await deferredInstall.prompt();deferredInstall=null;renderSettings()}
 }
 
-async function afterSignIn(){cloudLoadError='';authPendingEmail='';await refreshCloud();if(cloud.role==='pending'){passwordSetupRequired=true;dataset=null;navigate('settings');return;}passwordSetupRequired=false;if(!dataset){try{dataset=await store.pullFromCloud({deferHistory:true});cloudReady=true;await refreshCloud();navigate('overview');queueLabUserDirectory();showToast('Shared colony opened.');return}catch(error){renderSettings();showToast(error.message||String(error),true);return}}renderSettings();queueLabUserDirectory();showToast('Signed in.')}
+async function afterSignIn(){cloudLoadError='';authPendingEmail='';await refreshCloud({verifyFees:false});if(cloud.role==='pending'){passwordSetupRequired=true;dataset=null;navigate('settings');return;}passwordSetupRequired=false;if(!dataset){try{await loadSharedColony({confirm:false,throwOnError:true});queueLabUserDirectory();showToast('Shared colony opened.');return}catch(error){renderSettings();showToast(error.message||String(error),true);return}}renderSettings();queueLabUserDirectory();showToast('Signed in.')}
 
 let searchTimer;
 document.addEventListener('click',event=>{const target=event.target.closest('[data-action],[data-route],[data-open],[data-sort],[data-archive-table],[data-tree-focus],[data-open-experiment]');if(!target)return;const run=async()=>{if(target.dataset.action)await action(target.dataset.action,target);else if(target.dataset.openExperiment){experimentRecordId=target.dataset.openExperiment;navigate('experiments')}else if(target.dataset.route)navigate(target.dataset.route);else if(target.dataset.open)navigate(target.dataset.open,target.dataset.id);else if(target.dataset.sort){const currentSort=sortKey||tableHistoryConfig(route)?.date||'',descending=sortKey?sortDesc:Boolean(tableHistoryConfig(route));sortDesc=currentSort===target.dataset.sort?!descending:false;sortKey=target.dataset.sort;page=0;renderTable()}else if(target.dataset.archiveTable){archiveTable=target.dataset.archiveTable;query='';page=0;renderArchive()}else if(target.dataset.treeFocus){if(!findRecord('mice',target.dataset.treeFocus))throw new Error('That parent ID has no mouse record in this workspace.');familyFocus=target.dataset.treeFocus;renderFamily()}};run().catch(async error=>{try{await refreshCloud()}catch{}showToast(error.message||String(error),true)})});

@@ -2,7 +2,9 @@
 export function createCloudMonitor({getState,refresh,verifyPolicy,verifyOperation,onDataChange,canRefresh=()=>true,onError=()=>{},setTimer=setTimeout,clearTimer=clearTimeout,now=Date.now,healthyMs=15000,backoffMs=60000,policyMs=300000}){
  const nasRevision=state=>{const nas=state?.sources?.cloud2;return nas?.state==='online'&&nas.ready===true&&nas.canRead===true&&nas.enrolled===true?nas.dataRevision??null:null;};
  let disposed=false,timer=null,running=false,previous=getState(),lastNASRevision=nasRevision(previous),policyAt=now(),pendingChange=false;
- const signature=state=>JSON.stringify([state?.active,nasRevision(state)??lastNASRevision]);
+ // Backup replication does not change the current Cloud 1 view. Only the
+ // selected server may invalidate current records; a source change still does.
+ const signature=state=>JSON.stringify([state?.active,state?.active==='cloud2'?(nasRevision(state)??lastNASRevision):null]);
  async function tick(){
   if(disposed||running)return;running=true;let delay=healthyMs;
   try{

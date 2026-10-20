@@ -7,7 +7,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=159';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=164';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -21,6 +21,8 @@ const clone=value=>structuredClone(value);
 let feeVisibility=null,feeVisibilityContext=null;
 let authGeneration=0;
 const guardedCacheWrites=new Set(),CACHE_WRITE_KEY='current-cloud-write',BASELINE_CACHE_KEY='current-cloud-baseline';
+const STARTUP_CACHE_KEY='current-managed-snapshot',STARTUP_CACHE_VERSION=1,RECORD_BLOCK_SIZE=1000;
+let startupCacheSnapshot=null;
 const BASELINE_CACHE_VERSION=1,MAX_BASELINE_RECORDS=250000,MAX_BASELINE_BYTES=32*1024*1024;
 let deferredArchiveState=null;
 let operationalProvider=null,operationalConfig=null,cloud2Identity=null,providerSource=null,providerRevision=0,providerSessionEpoch=0;
@@ -61,7 +63,7 @@ const setupProfileAllowed=p=>!!p?.member&&(p.eligible===true&&p.setup_required==
 const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==false;
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
-function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;}
+function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;startupCacheSnapshot=null;}
 function saveSession(s){const before=session();if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);}
 function stable(value){if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return `{${Object.keys(value).sort().filter(k=>value[k]!==undefined).map(k=>JSON.stringify(k)+':'+stable(value[k])).join(',')}}`;return JSON.stringify(value);}
 function advanceAuthGeneration(){authGeneration++;for(const cancel of guardedCacheWrites)cancel();return authGeneration;}
@@ -90,7 +92,7 @@ async function discardCloudWrite(id){
     const tx=db.transaction('datasets','readwrite'),store=tx.objectStore('datasets'),request=store.get(CACHE_WRITE_KEY);let settled=false;
     const finish=(error=null)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve();};
     const timer=setTimeout(()=>{const error=storageTimeout('checking the cloud cache');try{tx.abort();}catch{}finish(error);closeDatabase(db);},30000);
-    request.onsuccess=()=>{if(!settled&&request.result?.id===id){store.delete('current');store.delete(CACHE_WRITE_KEY);store.delete(BASELINE_CACHE_KEY);}};
+    request.onsuccess=()=>{if(!settled&&request.result?.id===id){store.delete('current');store.delete(CACHE_WRITE_KEY);store.delete(BASELINE_CACHE_KEY);store.delete(STARTUP_CACHE_KEY);}};
     tx.oncomplete=()=>finish();tx.onerror=tx.onabort=()=>finish(new Error('Unable to clear a cancelled cloud cache write.'));
   });
 }
@@ -98,27 +100,44 @@ function ownCacheWrite(mark){
   const c=configuration(),s=session();
   return hasLabSession(s)&&mark.url===c?.url&&mark.colony===c?.colonyId&&mark.user===s.user?.id;
 }
-async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseline=false}={}){
+function startupProjection(data){return {...data,tables:Object.fromEntries(MANAGED.map(type=>[type,data.tables?.[type]||[]]))};}
+async function local(action,value,{check,cacheWrite,syncBaseline=null,readBaseline=false,managedOnly=false}={}){
   const db=await database();check?.();
   return new Promise((resolve,reject)=>{
     const tx=db.transaction('datasets',action==='get'?'readonly':'readwrite'),store=tx.objectStore('datasets');
-    const request=action==='get'?store.get('current'):action==='delete'?store.delete('current'):store.put(clone(value),'current');
+    let request=action==='get'?store.get(managedOnly?STARTUP_CACHE_KEY:'current'):action==='delete'?store.delete('current'):store.put(clone(value),'current');
+    if(action!=='get'){
+      if(action==='delete'||!cacheWrite)store.delete(STARTUP_CACHE_KEY);
+      else store.put({schema_version:STARTUP_CACHE_VERSION,write_id:cacheWrite.id,data:startupProjection(value)},STARTUP_CACHE_KEY);
+    }
     // The sidecar and dataset commit atomically. It never enters a dataset/export.
     const markRequest=action==='get'?store.get(CACHE_WRITE_KEY):cacheWrite?store.put(cacheWrite,CACHE_WRITE_KEY):store.delete(CACHE_WRITE_KEY);
     const baselineRequest=action==='get'?(readBaseline?store.get(BASELINE_CACHE_KEY):null):syncBaseline?store.put(syncBaseline,BASELINE_CACHE_KEY):store.delete(BASELINE_CACHE_KEY);
-    let result,mark,savedBaseline,guardError,settled=false;
+    let result,mark,savedBaseline,guardError,settled=false,managedSnapshot=false;
     const cleanup=()=>{clearTimeout(timer);guardedCacheWrites.delete(cancel);};
     const fail=error=>{if(settled)return;settled=true;cleanup();reject(error);};
     const cancel=()=>{if(settled)return;try{check?.();}catch(error){guardError=error;try{tx.abort();}catch{/* A committed write is removed by its own ID below. */}}};
     const timer=setTimeout(()=>{guardError=storageTimeout(action==='get'?'reading the saved workspace':'saving the workspace');try{tx.abort();}catch{}fail(guardError);closeDatabase(db);},30000);
     if(check)guardedCacheWrites.add(cancel);
-    request.onsuccess=()=>{if(settled)return;result=request.result;cancel();};
+    const acceptRead=()=>{
+      if(settled)return;
+      if(action==='get'&&managedOnly&&!request.result&&!managedSnapshot){
+        // Old installations have no compact sidecar. Read the legacy cache
+        // once; the next verified pull commits the smaller startup snapshot.
+        managedOnly=false;request=store.get('current');request.onsuccess=acceptRead;return;
+      }
+      if(action==='get'&&managedOnly){managedSnapshot=true;const saved=request.result;result=saved?.schema_version===STARTUP_CACHE_VERSION&&typeof saved.write_id==='string'?saved:null;}
+      else result=request.result;
+      cancel();
+    };
+    request.onsuccess=acceptRead;
     markRequest.onsuccess=()=>{if(settled)return;if(action==='get')mark=markRequest.result;cancel();};
     if(baselineRequest)baselineRequest.onsuccess=()=>{if(settled)return;if(action==='get')savedBaseline=baselineRequest.result;cancel();};
     tx.oncomplete=()=>{
       if(settled)return;settled=true;cleanup();
       try{
         check?.();if(guardError)throw guardError;
+        if(action==='get'&&managedSnapshot){if(!result||result.write_id!==mark?.id)result=null;else result=result.data;}
         if(action==='get'&&mark&&(!ownCacheWrite(mark)||mark.id!==readJSON('localStorage',CLOUD_CACHE_KEY)?.write_id)){
           // A matching but not-yet-published write may still be finishing. Hide it.
           // A previous account's write can be discarded by ID without touching a newer cache.
@@ -164,12 +183,14 @@ export async function loadStartupCache(){
   const check=()=>{if(generation!==authGeneration||identity!==syncIdentity()||session()?.passwordRecovery||pendingAccount(session()))throw new Error('The account changed while checking the saved workspace.');checkExportContext(context);};
   check();const mark=readJSON('localStorage',CLOUD_CACHE_KEY);
   if(!mark||mark.url!==c.url||mark.colony!==c.colonyId||mark.user!==initial.user.id)return null;
-  const data=await local('get',undefined,{check});check();if(!data)return null;
+  const snapshot=await local('get',undefined,{check,readBaseline:true,managedOnly:true});check();const data=snapshot?.data;if(!data)return null;
   const policy=await refreshFeeVisibility({notify:false});check();
   if(policy.source_archive_allowed?data.source_archive_restricted:!currentRestrictedCache(data,mark,policy))return null;
   // The preview is read-only until the live pull finishes. Do not normalize
   // source history from a previous visit just to paint the opening screen.
-  const preview=normalizeDataset({...data,tables:Object.fromEntries(MANAGED.map(type=>[type,data.tables?.[type]||[]]))});check();return preview;
+  const preview=normalizeDataset(startupProjection(data));check();
+  startupCacheSnapshot={snapshot,identity:persistentIdentity(),generation,source:providerSource,revision:providerRevision,writeId:mark.write_id};
+  return preview;
  }catch{return null;}
 }
 export async function clearDataset(){await local('delete');setStorage('localStorage',CLOUD_CACHE_KEY,null);setStorage('localStorage',DEMO_KEY,null);setMode('local');invalidate();statusMessage='Local dataset cleared.';}
@@ -763,8 +784,8 @@ async function restoreDeferredState(snapshot,envelope,check){
  const archive=[head,...encoded.filter(isArchiveChunk)];await decodeArchive(archive,{tables:saved.loaded_tables});check();
  return {head:clone(head),loadedTables:[...saved.loaded_tables],marker:clone(snapshot.data.source_archive_deferred),projectionHash:saved.projection_sha256,managedHash:await cacheDigest(Object.fromEntries(MANAGED.map(type=>[type,snapshot.data.tables[type]]))),records:new Map(archive.map(row=>[recordKey(row),row])),identity:syncIdentity(),policy:clone(feeVisibility)};
 }
-async function readArchiveHead(c,check){
- const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',entity_id:'eq.reconstruction',limit:'1'}),page=(await readCloudPage(()=>request(`entity_records?${query}`),1,check)).page;
+async function readArchiveHead(c,check,read=request){
+ const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',entity_id:'eq.reconstruction',limit:'1'}),page=(await readCloudPage(()=>read(`entity_records?${query}`),1,check)).page;
  if(!Array.isArray(page)||page.length!==1)throw new Error('The reconstruction manifest is missing.');
  const head=checkedCloudRecord(page[0],'archive',c);if(head.entity_id!=='reconstruction'||head.archived)throw new Error('The reconstruction manifest is invalid.');await decodeArchive([head],{tables:[]});check();return head;
 }
@@ -795,8 +816,11 @@ async function baselineEnvelope(rows,writeId,check,recordVersions=versions,defer
   if(identity!==persistentIdentity()||stable(policy)!==stable(feeVisibility))throw new Error('Cloud access changed while preparing the saved workspace. Pull again.');
   return {...body,sha256};
 }
-async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=null}={}){
-  const snapshot=await local('get',undefined,{check,readBaseline:true});check();
+async function persistedBaseline(policy,check,{managedOnly=false,payloadDigests=null,startupSnapshot=null}={}){
+  // Share only this opening's already-read atomic snapshot. Fresh server
+  // membership, policy and per-record version checks still run normally.
+  const reusable=startupSnapshot&&startupSnapshot.generation===authGeneration&&startupSnapshot.identity===persistentIdentity()&&startupSnapshot.source===providerSource&&startupSnapshot.revision===providerRevision&&startupSnapshot.writeId===readJSON('localStorage',CLOUD_CACHE_KEY)?.write_id;
+  const snapshot=reusable?startupSnapshot.snapshot:await local('get',undefined,{check,readBaseline:true,managedOnly});check();
   const envelope=snapshot?.baseline,mark=readJSON('localStorage',CLOUD_CACHE_KEY);
   if(!snapshot?.data||!envelope||envelope.schema_version!==BASELINE_CACHE_VERSION||envelope.projection_version!==SOURCE_PROJECTION_VERSION||typeof envelope.write_id!=='string'||envelope.write_id!==snapshot.mark?.id||envelope.write_id!==mark?.write_id||envelope.sha256!==mark?.baseline_sha256||envelope.identity!==persistentIdentity()||stable(envelope.policy)!==stable(policy)||!Array.isArray(envelope.entries)||envelope.entries.length>MAX_BASELINE_RECORDS)return null;
   if(policy.source_archive_allowed?snapshot.data.source_archive_restricted:!currentRestrictedCache(snapshot.data,mark,policy))return null;
@@ -852,9 +876,10 @@ async function managedVersionIndex(type,c,check,read=request){
   }
   return index;
 }
-async function incrementalManaged(type,c,check,reuse,restricted=false,read=request){
+async function incrementalManaged(type,c,check,reuse,restricted=false,read=request,onVerified=()=>{}){
   const index=await managedVersionIndex(type,c,check,read),rows=new Map(),pending=[],reused=new Set();
   for(const row of index.values()){const cached=reusableRecord(reuse,row,c);if(cached&&(!restricted||ordinaryManagedRecord(cached))){rows.set(row.entity_id,cached);reused.add(row.entity_id);}else pending.push(row);}
+  onVerified(rows.size,index.size);
   const batches=[];
   for(let offset=0;offset<pending.length;){
     const batch=[pending[offset++]];
@@ -874,6 +899,7 @@ async function incrementalManaged(type,c,check,reuse,restricted=false,read=reque
       const page=loaded.page,selected=batch.slice(offset,offset+loaded.limit),selectedIds=new Set(selected.map(row=>row.entity_id));
       if(!Array.isArray(page)||page.length!==selected.length)throw new Error('A changed cloud record is missing. Pull again.');
       for(const value of page){const row=checkedCloudRecord(value,type,c),prior=expected.get(row.entity_id);if(!selectedIds.delete(row.entity_id)||!prior||row.version!==prior.version||row.archived!==prior.archived)throw new Error('A cloud record changed during loading. Pull again.');rows.set(row.entity_id,row);}
+      active();onVerified(rows.size,index.size);
       offset+=selected.length;limit=loaded.limit;
     }
   }}catch(error){failure??=error;throw error;}}
@@ -953,29 +979,48 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   const finalHead=valid(finalPage[0]);if(finalHead.entity_id!=='reconstruction'||finalHead.archived||finalHead.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const result=[head,...ordered.map(id=>chunks.get(id))];result.reused=Number(headReused)+ordered.length-needed.length;result.archive_versions=[...indexed.values()].map(row=>[`archive:${row.entity_id}`,row.version]);return result;
 }
-async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null}={}){
+async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,allowPersisted=false,checkScope=null,deferHistory=false,payloadDigests=null,startupSnapshot=null}={}){
   const generation=authGeneration,context=exportContext(),c=configuration(),policy=await refreshFeeVisibility({notify:false});const result=[];
   const check=()=>{checkScope?.();if(generation!==authGeneration)throw new Error('The account or colony changed during loading. Open the shared colony again.');checkExportContext(context);};
   let reusable=referencedArchive&&reuse?.identity===syncIdentity()&&stable(reuse.policy)===stable(policy)?reuse:null;
-  if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check,{managedOnly:deferHistory,payloadDigests});check();
-  // Loaded includes verified cache reuse. Unknown totals remain null rather
-  // than estimating a percentage from earlier snapshots or transfer sizes.
+  if(!reusable&&referencedArchive&&allowPersisted)reusable=await persistedBaseline(policy,check,{managedOnly:deferHistory,payloadDigests,startupSnapshot});check();
+  // Progress measures current records, never old source archive blocks. Prior
+  // same-account counts are explicitly estimates until live indexes confirm
+  // each table. A logical record block contains at most 1,000 current rows.
   let recordsLoaded=0,recordsTotal=null,archiveBlocksLoaded=0,archiveBlocksTotal=null,recordsReused=0,archiveBlocksReused=0;
-  const progress=phase=>{check();onProgress?.({phase,recordsLoaded,recordsTotal,recordsReused,archiveBlocksLoaded,archiveBlocksTotal,archiveBlocksReused});};
+  const types=MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations');
+  const priorCounts=new Map(types.map(type=>[type,0]));if(reusable)for(const row of reusable.records.values())if(priorCounts.has(row.entity_type))priorCounts.set(row.entity_type,priorCounts.get(row.entity_type)+1);
+  const tableProgress=new Map(types.map(type=>[type,{loaded:0,total:reusable?priorCounts.get(type):null,known:false,complete:false}]));
+  if(!policy.source_archive_allowed)for(const type of ['fee_projection','location_projection'])tableProgress.set(type,{loaded:0,total:null,known:false,complete:false});
+  const recordProgress=()=>{
+    const tables=[...tableProgress.values()],known=tables.every(table=>table.known),counted=tables.every(table=>Number.isInteger(table.total));
+    return {recordBlocksLoaded:tables.reduce((n,table)=>n+(table.complete?Math.ceil(table.loaded/RECORD_BLOCK_SIZE):Math.floor(table.loaded/RECORD_BLOCK_SIZE)),0),recordBlocksTotal:counted?tables.reduce((n,table)=>n+Math.ceil(Math.max(table.total,table.loaded)/RECORD_BLOCK_SIZE),0):null,recordBlocksEstimated:!known,recordTablesLoaded:tables.filter(table=>table.complete).length,recordTablesTotal:tables.length,...(counted&&policy.source_archive_allowed?{recordsTotal:tables.reduce((n,table)=>n+Math.max(table.total,table.loaded),0)}:{})};
+  };
+  const progress=phase=>{check();onProgress?.({phase,recordsLoaded,recordsTotal,recordsReused,archiveBlocksLoaded,archiveBlocksTotal,archiveBlocksReused,...recordProgress()});};
+  const observeType=(type,loaded,{total=null,complete=false}={})=>{const table=tableProgress.get(type);recordsLoaded+=loaded-table.loaded;table.loaded=loaded;if(total!==null){table.total=total;table.known=true;}table.complete=complete;progress('records');};
   try{
   // Independent table streams share three request slots, including their
   // changed-record reads. Each stream keeps its own serial keyset cursor.
-  const types=MANAGED.filter(type=>policy.source_archive_allowed||type!=='locations'),streams=new Array(types.length),waiting=[];
+  const streams=new Array(types.length),waiting=[];
   let nextType=0,inFlight=0,streamFailure=null;
   const active=()=>{check();if(streamFailure)throw streamFailure;};
   const acquire=()=>inFlight<3?(inFlight++,Promise.resolve()):new Promise(resolve=>waiting.push(resolve));
   const release=()=>{const next=waiting.shift();if(next)next();else inFlight--;};
   const readManaged=async route=>{active();await acquire();try{active();return await request(route);}finally{release();}};
+  // The small reconstruction head is needed anyway. Read it alongside the
+  // current tables using the same three slots, rather than adding a serial
+  // round trip afterward. Its previous counts help a first visit estimate
+  // work; they never decide which records exist or authorize a save.
+  let openingHead=null;
+  const openingHeadJob=policy.source_archive_allowed&&referencedArchive&&deferHistory?(async()=>{
+    openingHead=await readArchiveHead(c,active,readManaged);active();
+    if(!reusable){const counts=openingHead.payload.summary?.counts;if(counts&&typeof counts==='object'){for(const type of types){const table=tableProgress.get(type);if(!table.known&&Number.isSafeInteger(counts[type])&&counts[type]>=0&&counts[type]<=MAX_BASELINE_RECORDS)table.total=counts[type];}progress('records');}}
+  })().catch(error=>{streamFailure??=error;}):null;
   async function readType(type,read,guard){
     // Restricted locations always come from the sanitized projection RPC.
     if(reusable&&type!=='archive'){
-      progress('records');const rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed,read);
-      recordsLoaded+=rows.length;recordsReused+=rows.reused;progress('records');return rows;
+      progress('records');const rows=await incrementalManaged(type,c,guard,reusable,!policy.source_archive_allowed,read,(loaded,total)=>observeType(type,loaded,{total}));
+      recordsReused+=rows.reused;observeType(type,rows.length,{total:rows.length,complete:true});return rows;
     }
     let cursor=null,limit=type==='archive'?3:1000;const seen=new Set(),rows=[];
     progress(type==='archive'?'archive':'records');
@@ -996,7 +1041,7 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
         seen.add(row.entity_id);
       }
       const accepted=policy.source_archive_allowed?page:page.filter(r=>r.entity_type!=='locations'&&!feeRecord(r));
-      if(type==='archive')archiveBlocksLoaded+=accepted.length;else recordsLoaded+=accepted.length;
+      if(type==='archive')archiveBlocksLoaded+=accepted.length;else observeType(type,rows.length+accepted.length,{...(page.length<limit?{total:rows.length+accepted.length,complete:true}:{})});
       progress(type==='archive'?'archive':'records');
       rows.push(...accepted);if(page.length<limit)break;
       cursor=page.at(-1).entity_id;
@@ -1010,11 +1055,13 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
   // Drain rejected streams before returning so none can publish late progress
   // or continue reading after a failed pull. Flatten in stable table order.
   await Promise.allSettled(Array.from({length:Math.min(3,types.length)},()=>worker()));
+  if(openingHeadJob)await openingHeadJob;
   if(streamFailure)throw streamFailure;check();for(const rows of streams)result.push(...rows);
+  progress('verifying');
   if(policy.source_archive_allowed&&!referencedArchive)result.push(...await readType('archive',request,check));
   if(policy.source_archive_allowed)recordsTotal=recordsLoaded;
   if(policy.source_archive_allowed&&referencedArchive&&deferHistory){
-    const head=await readArchiveHead(c,check);await verifyArchiveHead(c,head,check);
+    const head=openingHead||await readArchiveHead(c,check);await verifyArchiveHead(c,head,check);
     if(head.payload.archive_format===ARCHIVE_MANIFEST_FORMAT){
       const previous=reusable?.deferredState,same=previous&&previous.head.version===head.version&&stable(previous.head.payload)===stable(head.payload),ids=[...new Set(Object.values(head.payload.archive_tables).flatMap(value=>value.chunk_ids))],completeReuse=!previous&&reusable&&ids.every(id=>reusable.records.has('archive:'+id)),archive=same?[head,...[...previous.records.values()].filter(isArchiveChunk)]:completeReuse?[head,...ids.map(id=>({...reusable.records.get('archive:'+id),colony_id:c.colonyId,version:reusable.versions.get('archive:'+id)}))]:[head];
       result.push(...archive);if(!completeReuse)result.deferred_archive={loaded_tables:same?[...previous.loadedTables]:[]};result.archive_versions=archive.map(row=>[recordKey(row),row.version]);
@@ -1026,15 +1073,15 @@ async function allRecords(onProgress=null,{referencedArchive=false,reuse=null,al
     result.push(...archive);result.archive_versions=archive.archive_versions;archiveBlocksReused=archive.reused;
   }
   if(!policy.source_archive_allowed){
-   let offset=0,limit=250;while(true){const loaded=await readCloudPage(size=>request('rpc/get_lac_fee_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
+   let offset=0,limit=250,projectionLoaded=0;while(true){const loaded=await readCloudPage(size=>request('rpc/get_lac_fee_records',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
     const nextPolicy=checkedFeeVisibility(page?.visibility);if(!sameFeeVisibility(nextPolicy,policy)||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading. Pull again.');
-    if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);recordsLoaded+=page.rows.length;progress('records');
+    if(page.rows.some(r=>!feeRecord(r)||r.colony_id!==c.colonyId))throw new Error('Invalid projected fee records.');result.push(...page.rows);projectionLoaded+=page.rows.length;observeType('fee_projection',projectionLoaded,{...(page.next_offset===null?{total:projectionLoaded,complete:true}:{})});
     if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset<=offset)throw new Error('Invalid fee page cursor.');offset=page.next_offset;
    }
-   offset=0;limit=250;while(true){const loaded=await readCloudPage(size=>request('rpc/get_managed_locations',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
+   offset=0;limit=250;projectionLoaded=0;while(true){const loaded=await readCloudPage(size=>request('rpc/get_managed_locations',{method:'POST',body:{p_colony_id:c.colonyId,p_offset:offset,p_limit:size}}),limit,check);const page=loaded.page;limit=loaded.limit;
     const nextPolicy=checkedFeeVisibility(page?.visibility);if(!sameFeeVisibility(nextPolicy,policy)||!Array.isArray(page.rows))throw new Error('Fee visibility changed while loading locations. Pull again.');
     for(const row of page.rows)result.push(checkedManagedLocation(row,c.colonyId));
-    recordsLoaded+=page.rows.length;progress('records');
+    projectionLoaded+=page.rows.length;observeType('location_projection',projectionLoaded,{...(page.next_offset===null?{total:projectionLoaded,complete:true}:{})});
     if(page.next_offset===null)break;if(!Number.isInteger(page.next_offset)||page.next_offset<=offset)throw new Error('Invalid location page cursor.');offset=page.next_offset;
    }
   }
@@ -1105,6 +1152,7 @@ export async function refreshCurrentRecords({canCommit=()=>true}={}){
 }
 async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}={}){
   const payloadDigests=new WeakMap();
+  const startupSnapshot=!forceFull&&deferHistory?startupCacheSnapshot:null;
   const reuse=!forceFull&&synced&&baseline&&baselineIdentity===syncIdentity()?{records:baseline,versions,identity:baselineIdentity,policy:clone(feeVisibility),deferredState:deferredArchiveState}:null;
   const pull=++pullGeneration;invalidate();
   const generation=authGeneration,config=stable(configuration());let context=null;
@@ -1114,7 +1162,7 @@ async function pullFromCloudOnce({onProgress,forceFull=false,deferHistory=false}
   await membership({check});context=exportContext();check();
   if(isGuest(session()))return pullGuestRecords({check,onProgress:progress});
   if(restrictedMouseMember())return pullMemberRecords({check,onProgress:progress});
-  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
+  const rows=await allRecords(progress,{referencedArchive:true,reuse,allowPersisted:!forceFull,checkScope:check,deferHistory:deferHistory&&!forceFull,payloadDigests,startupSnapshot});check();if(!rows.length)throw new Error('The cloud colony is empty. Import and upload a dataset first.');
   const data=await assemble(rows);check();const deferredState=await deferredStateOf(rows,data);check();
   const c=configuration(),cacheWrite={id:crypto.randomUUID(),url:c.url,colony:c.colonyId,user:session().user.id};
   try{
