@@ -19,7 +19,7 @@ export function togglePasswordVisibility(input, button, show = input.type === 'p
 export function createPortalController({store, config, location, navigate, onState = () => {}, timers = globalThis, deadlineMs = 45000, isVisible = () => true}) {
   let generation = 0, pendingCheck = null, pendingAction = null;
   let verifiedIdentity = '';
-  let state = Object.freeze({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
+  let state = Object.freeze({phase: 'signed-out', busy: false, background: false, message: '', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
   const identityKey = current => JSON.stringify([current.url, current.colonyId, current.userId, current.sessionEpoch, current.email, current.role, current.signedIn, current.passwordRecovery, current.setupRequired]);
   const activity = createAccessActivity({app: 'lab-tools', sections: ['tools'], record: store.recordAppAccess,
     // A data-free membership check verifies portal access even before Mouse Data
@@ -36,6 +36,7 @@ export function createPortalController({store, config, location, navigate, onSta
   const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
     const next = {...state, ...update};
+    if (next.phase !== 'checking') next.background = false;
     if (next.phase !== 'member') { next.memberDocuments = false; next.shortcuts = NO_SHORTCUTS; }
     if (!['member', 'checking'].includes(next.phase)) { verifiedIdentity = ''; activity.reset(); }
     state = Object.freeze(next);
@@ -58,7 +59,7 @@ export function createPortalController({store, config, location, navigate, onSta
     if (!current.signedIn) return publish({phase: 'signed-out', busy: false, message: '', error: false, identity: '', hasSession: false});
     if (current.passwordRecovery) return publish({phase: 'recovery', busy: false, message: '', error: false, identity: '', hasSession: true});
     if (current.setupRequired || current.role === 'pending') return publish({phase: 'setup', busy: false, message: '', error: false, identity: '', hasSession: true});
-    current = await store.verifyCloudMembership();
+    current = await store.verifyCloudMembership({canCommit: () => attempt === generation});
     if (attempt !== generation) return state;
     if (!current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
       || current.url !== config.url || current.colonyId !== config.colonyId) throw new Error('Your lab access could not be verified. Sign in again.');
@@ -98,7 +99,7 @@ export function createPortalController({store, config, location, navigate, onSta
     if (pendingCheck) return pendingCheck.promise;
     const check = {attempt: ++generation, promise: null};
     pendingCheck = check;
-    publish({phase: 'checking', busy: true, message: 'Checking your session…', error: false, identity: '', notice: null});
+    publish({phase: 'checking', busy: true, background: true, message: 'Checking your session…', error: false, identity: '', notice: null});
     check.promise = (async () => {
       try {
         configure();
@@ -135,7 +136,7 @@ export function createPortalController({store, config, location, navigate, onSta
       return await bounded(async () => {
         await store.signIn(identifier, password);
         if (action.attempt !== generation) return state;
-        publish({phase: 'checking', message: 'Checking your session…'});
+        publish({phase: 'checking', background: false, message: 'Checking your session…'});
         return resolveAccess(action.attempt);
       }, 'sign-in');
     } catch (error) { return failure(error, action.attempt); }
@@ -167,7 +168,7 @@ export function createPortalController({store, config, location, navigate, onSta
     const request = {attempt: ++generation};
     pendingAction = request;
     pendingCheck = null;
-    publish({busy: true, message: '', error: false, notice: {target, text: 'Requesting your link…'}});
+    publish({phase: 'signed-out', busy: true, message: '', error: false, notice: {target, text: 'Requesting your link…'}});
     try {
       configure();
       await bounded(action, target);
@@ -208,21 +209,24 @@ export function createPortalController({store, config, location, navigate, onSta
   });
 }
 
-export async function mountPortal(document, window) {
-  const {PUBLIC_CONFIG, backupViewerLinkHTML} = await import('../mouse-data/config.js');
+export async function mountPortal(document, window, {
+  loadStore = () => import('../mouse-data/data-store.js?v=175'),
+  loadConfig = () => import('../mouse-data/config.js'),
+  timers = globalThis, loadDeadlineMs = 15000
+} = {}) {
   const element = id => document.getElementById(id);
   togglePasswordVisibility(element('login-password'), element('show-password'), false);
-  const backup = element('backup-viewer');
-  backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
-  backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=175');
-  let presence=null;
-  const controller = createPortalController({
-    store, config: PUBLIC_CONFIG, location: window.location,
-    isVisible: () => !document.hidden,
-    navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),
-    onState(state) {
-      element('sign-in-panel').hidden = state.phase !== 'signed-out';
+  let controller = null, presence = null, loading = null, generation = 0;
+  let pendingCheck = null, pendingAction = null, disposed = false;
+  let state = Object.freeze({phase: 'signed-out', busy: false, background: false, message: '', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
+  // This is only a reason to attempt restoration, never proof of identity or access.
+  const hasSessionHint = () => {
+    try { return Boolean(window.sessionStorage?.getItem('mouse-colony.session.v1')); }
+    catch { return false; }
+  };
+  function render(next) {
+      state = next;
+      element('sign-in-panel').hidden = !['signed-out', 'checking'].includes(state.phase);
       element('tools-panel').hidden = state.phase !== 'member';
       for (const resource of document.querySelectorAll('[data-member-document]')) resource.hidden = state.phase !== 'member' || state.busy || !state.memberDocuments;
       element('member-account').hidden = state.phase !== 'member';
@@ -236,7 +240,7 @@ export async function mountPortal(document, window) {
       for (const link of document.querySelectorAll('[data-portal-tool][data-route]')) link.hidden = state.busy || !state.shortcuts[link.dataset.portalTool + ':' + link.dataset.route];
       element('member-identity').textContent = state.identity;
       element('main').setAttribute('aria-busy', String(state.busy));
-      for (const button of document.querySelectorAll('button')) button.disabled = state.busy;
+      for (const button of document.querySelectorAll('button')) button.disabled = state.busy && !state.background;
       element('reset-status').textContent = state.notice?.target === 'reset' ? state.notice.text : '';
       element('email-link-status').textContent = state.notice?.target === 'email' ? state.notice.text : '';
       const recovery = state.phase === 'recovery';
@@ -246,47 +250,125 @@ export async function mountPortal(document, window) {
         : 'Finish setting up your username and password in Mouse Data to open the lab tools.';
       element('account-link').textContent = recovery ? 'Continue password reset' : 'Continue account setup';
       if(state.phase==='member')void presence?.refresh();else presence?.clear();
+  }
+  function loadController() {
+    if (controller) return Promise.resolve(controller);
+    if (loading) return loading;
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = timers.setTimeout(() => reject(new Error('The sign-in page is taking too long to load. Retry when your connection is available.')), loadDeadlineMs);
+    });
+    const request = Promise.race([Promise.all([Promise.resolve().then(loadStore), Promise.resolve().then(loadConfig)]), deadline]).then(([store, {PUBLIC_CONFIG, backupViewerLinkHTML}]) => {
+      if (disposed) throw new Error('This sign-in page is no longer active.');
+      const backup = element('backup-viewer');
+      backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
+      backup.hidden = !backup.innerHTML;
+      controller = createPortalController({
+        store, config: PUBLIC_CONFIG, location: window.location, timers,
+        isVisible: () => !document.hidden,
+        navigate: (url, {replace}) => replace ? window.location.replace(url) : window.location.assign(url),
+        onState: render
+      });
+      presence = createPresence({app:'lab-tools',container:element('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:controller.getState().phase==='member'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
+      return controller;
+    }).finally(() => {
+      timers.clearTimeout(timer);
+      if (loading === request) loading = null;
+    });
+    loading = request;
+    return request;
+  }
+  function invoke(method, args = []) {
+    if (disposed || state.phase === 'redirecting') return Promise.resolve(state);
+    const background = method === 'start' || method === 'checkAccess';
+    if (pendingAction && method !== 'signOut') return Promise.resolve(state);
+    if (controller) {
+      if (!background) { generation++; pendingCheck = null; }
+      return controller[method](...args);
     }
+    if (background && pendingCheck) return pendingCheck.promise;
+    const operation = {attempt: ++generation, promise: null};
+    if (background) pendingCheck = operation; else { pendingAction = operation; pendingCheck = null; }
+    render(Object.freeze({...state, phase: background ? 'checking' : 'signed-out', busy: true, background,
+      error: false, identity: '', memberDocuments: false, shortcuts: NO_SHORTCUTS, notice: null,
+      hasSession: hasSessionHint(), message: background ? 'Checking your session…' : 'Loading sign-in…'}));
+    operation.promise = (async () => {
+      try {
+        const ready = await loadController();
+        if (disposed || operation.attempt !== generation) return state;
+        return await ready[method](...args);
+      } catch {
+        if (!disposed && operation.attempt === generation) render(Object.freeze({...state, phase: 'signed-out', busy: false, background: false,
+          error: true, identity: '', memberDocuments: false, shortcuts: NO_SHORTCUTS,
+          message: 'The sign-in page could not load. Check your connection and retry.'}));
+        return state;
+      } finally {
+        if (pendingCheck === operation) pendingCheck = null;
+        if (pendingAction === operation) pendingAction = null;
+      }
+    })();
+    return operation.promise;
+  }
+  const facade = Object.freeze({
+    start: () => invoke('start'), checkAccess: () => invoke('checkAccess'),
+    signIn: (identifier, password) => invoke('signIn', [identifier, password]),
+    signOut: () => invoke('signOut'), requestReset: identifier => invoke('requestReset', [identifier]),
+    sendEmailLink: email => invoke('sendEmailLink', [email]),
+    openMouseData: route => invoke('openMouseData', [route]), openReagents: route => invoke('openReagents', [route]),
+    suspendActivity: () => controller?.suspendActivity(),
+    dispose: () => { disposed = true; generation++; controller?.dispose(); presence?.destroy(); },
+    getState: () => state
   });
-  presence=createPresence({app:'lab-tools',container:element('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:controller.getState().phase==='member'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
+  // Bind the form before loading the shared scientific-data module. Typing and
+  // password-manager filling stay available while an old session is checked.
   element('sign-in-form').addEventListener('submit', async event => {
     event.preventDefault();
     const password = element('login-password').value;
     element('login-password').value = '';
     togglePasswordVisibility(element('login-password'), element('show-password'), false);
-    await controller.signIn(element('login-id').value.trim(), password);
+    await facade.signIn(element('login-id').value.trim(), password);
   });
   element('show-password').addEventListener('click', () => togglePasswordVisibility(element('login-password'), element('show-password')));
   element('reset-form').addEventListener('submit', event => {
     event.preventDefault();
-    void controller.requestReset(element('reset-id').value.trim());
+    void facade.requestReset(element('reset-id').value.trim());
   });
   element('email-link-form').addEventListener('submit', event => {
     event.preventDefault();
-    void controller.sendEmailLink(element('link-email').value.trim());
+    void facade.sendEmailLink(element('link-email').value.trim());
   });
-  for (const button of document.querySelectorAll('[data-sign-out]')) button.addEventListener('click', () => void controller.signOut());
-  element('retry-access').addEventListener('click', () => void controller.checkAccess());
+  for (const button of document.querySelectorAll('[data-sign-out]')) button.addEventListener('click', () => void facade.signOut());
+  element('retry-access').addEventListener('click', () => void facade.checkAccess());
   for (const link of document.querySelectorAll('[data-portal-tool]')) {
     link.addEventListener('click', event => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
       event.preventDefault();
-      const open = link.dataset.portalTool === 'mouse-data' ? controller.openMouseData : controller.openReagents;
+      const open = link.dataset.portalTool === 'mouse-data' ? facade.openMouseData : facade.openReagents;
       void open(link.dataset.route || '');
     });
   }
   const concealPassword = () => togglePasswordVisibility(element('login-password'), element('show-password'), false);
 
   const recheck = () => {
-    if (!document.hidden && !controller.getState().busy) void controller.checkAccess();
+    if (!document.hidden && !state.busy && (controller || hasSessionHint())) void facade.checkAccess();
   };
   window.addEventListener('focus', recheck);
   window.addEventListener('pageshow', event => { concealPassword(); if (event.persisted) recheck(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { concealPassword(); controller.suspendActivity(); } recheck(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { concealPassword(); facade.suspendActivity(); } recheck(); });
   window.addEventListener('online', recheck);
   window.addEventListener('storage', event => { if (event.key === 'mouse-colony.cloud.v1') recheck(); });
-  await controller.start();
-  return controller;
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (CALLBACK_KEYS.some(key => fragment.has(key))) {
+    // Forward secure callbacks before importing the store; Mouse Data remains
+    // the single callback/recovery handler. Never copy these values into state.
+    render(Object.freeze({...state, phase: 'redirecting', busy: true, message: 'Opening your secure sign-in link…'}));
+    window.location.replace(`${new URL('../mouse-data/', window.location.href).href}${window.location.hash}`);
+  } else if (hasSessionHint()) {
+    void facade.start();
+  } else {
+    render(state);
+  }
+  return facade;
 }
 
 if (typeof document !== 'undefined' && typeof window !== 'undefined') {
@@ -299,3 +381,4 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
     retry.addEventListener('click', () => window.location.reload(), {once: true});
   });
 }
+

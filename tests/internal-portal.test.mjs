@@ -129,7 +129,7 @@ test('mounted portal hides all document groups for Guests and reveals them only 
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
   const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: config});
   vm.runInContext(source, context);
-  const controller = await context.mountPortal(document, window);
+  const controller = await context.mountPortal(document, window, {loadStore: () => store, loadConfig: () => ({PUBLIC_CONFIG: config, backupViewerLinkHTML: () => ""})});
   for (const guestLevel of ['guest1', 'guest2', 'guest3']) {
     status = member({role: 'viewer', guestLevel});
     await controller.checkAccess();
@@ -353,7 +353,7 @@ test('password visibility is opt-in, accessible, and never reads or modifies the
 test('submitting a visible password clears and conceals it before authentication completes', async () => {
   const waiting = deferred(), elements = new Map(), calls = [];
   const element = id => {
-    if (!elements.has(id)) elements.set(id, {type: id === 'login-password' ? 'password' : '', value: '', textContent: '', hidden: false, dataset: {}, attributes: new Map(), listeners: new Map(),
+    if (!elements.has(id)) elements.set(id, {type: id === 'login-password' ? 'password' : '', value: '', textContent: '', innerHTML: '', hidden: id === 'backup-viewer', dataset: {}, attributes: new Map(), listeners: new Map(),
       setAttribute(name, value) { this.attributes.set(name, value); }, addEventListener(name, callback) { this.listeners.set(name, callback); }});
     return elements.get(id);
   };
@@ -366,7 +366,7 @@ test('submitting a visible password clears and conceals it before authentication
     .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
   const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout, clearTimeout, testStore: store, testConfig: {...config, backupViewerUrl:'https://backup.example/'}, testBackupLink:backupViewerLinkHTML});
   vm.runInContext(source, context);
-  await context.mountPortal(document, window);
+  await context.mountPortal(document, window, {loadStore: () => store, loadConfig: () => ({PUBLIC_CONFIG: config, backupViewerLinkHTML})});
   assert.equal(element('backup-viewer').hidden,true);assert.equal(element('backup-viewer').innerHTML,'');assert.equal(calls.length,0);
   element('login-id').value = ' lab.member ';element('login-password').value = 'synthetic-only-password';
   element('show-password').listeners.get('click')();assert.equal(element('login-password').type, 'text');
@@ -374,8 +374,10 @@ test('submitting a visible password clears and conceals it before authentication
   const submission = element('sign-in-form').listeners.get('submit')({preventDefault() { prevented = true; }});
   assert.equal(prevented, true);assert.equal(element('login-password').value, '');assert.equal(element('login-password').type, 'password');
   assert.equal(element('show-password').attributes.get('aria-label'), 'Show password');assert.equal(element('show-password').attributes.get('aria-pressed'), 'false');
+  await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(calls, [{identifier: 'lab.member', password: 'synthetic-only-password'}]);
   assert.ok(![...elements.values()].some(e => e.textContent.includes('synthetic-only-password')));
   waiting.resolve();await submission;
 });
+
 

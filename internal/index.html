@@ -10,7 +10,7 @@
   <title>Lab tools · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
   <link rel="stylesheet" href="./portal.css?v=17">
-  <script type="module" src="./portal.js?v=175"></script>
+  <script type="module" src="./portal.js?v=177"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -33,11 +33,11 @@
       <div id="member-account" class="account" hidden><span id="member-identity"></span><button class="text-button" type="button" data-sign-out>Sign out</button></div>
     </div>
 
-    <div class="portal-feedback"><p id="portal-status" class="status" role="status" aria-live="polite">Checking your session…</p><button id="retry-access" class="button secondary portal-retry" type="button" hidden>Retry</button></div>
-    <progress id="portal-progress" class="portal-progress" aria-label="Loading lab tools">Loading…</progress>
+    <div class="portal-feedback"><p id="portal-status" class="status" role="status" aria-live="polite"></p><button id="retry-access" class="button secondary portal-retry" type="button" hidden>Retry</button></div>
+    <progress id="portal-progress" class="portal-progress" aria-label="Loading lab tools" hidden>Loading…</progress>
     <div id="backup-viewer" hidden></div>
 
-    <section id="sign-in-panel" class="sign-in-layout" hidden aria-labelledby="sign-in-heading">
+    <section id="sign-in-panel" class="sign-in-layout" aria-labelledby="sign-in-heading">
       <div class="sign-in-card">
         <h2 id="sign-in-heading">Lab sign-in</h2>
         <p class="small"><span class="availability">Cloud 1</span></p>
@@ -157,4 +157,5 @@
   <footer class="site-footer"><a href="../">Braintime Laboratory</a><span>Internal use only</span></footer>
 </body>
 </html>
+
 
