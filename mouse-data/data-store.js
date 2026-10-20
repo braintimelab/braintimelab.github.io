@@ -7,7 +7,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=146';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=146';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=167';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=168';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
@@ -261,11 +261,13 @@ async function authRequest(route,body,token,timeoutMs=30000){
   return result;
 }
 function normalizeSession(s){if(!s?.access_token||!s?.refresh_token)throw new Error('The server did not return a complete session.');return {...s,expires_at:s.expires_at??Math.floor(Date.now()/1000)+(s.expires_in??3600)};}
-async function accessToken(timeoutMs=30000){
+async function accessToken(){
   let s=session();if(!s?.access_token)throw new Error('Sign in before using cloud data.');
   if(s.expires_at<=Date.now()/1000+60){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token},undefined,timeoutMs).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);cloud1SessionSuspended=false;return next;}).catch(e=>{
+    // Token renewal is shared by optional and core requests. An optional read's
+    // shorter timeout must not shorten the session-wide authentication budget.
+    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);cloud1SessionSuspended=false;return next;}).catch(e=>{
       if(current()){
         // An independent, verified NAS session does not depend on renewing
         // Supabase credentials. This failure still rejects the Cloud 1 action.
@@ -282,7 +284,7 @@ async function accessToken(timeoutMs=30000){
 async function cloud1Request(route,{method='GET',body,timeoutMs=30000}={}){
   if(session()?.passwordRecovery)throw new Error('Finish resetting your password before opening colony data.');
   const c=configuration();if(!c)throw new Error('Configure the cloud project first.');publicKey(c.anonKey);
-  const token=await accessToken(timeoutMs);
+  const token=await accessToken();
   const {response,result}=await cloudJSON(`${c.url}/rest/v1/${route}`,{method,cache:'no-store',redirect:'error',headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(method==='POST'?{Prefer:'return=representation'}:{})},body:body===undefined?undefined:JSON.stringify(body)},timeoutMs);
   if(!response.ok)throw apiError(response,result);return result;
 }
@@ -439,10 +441,21 @@ export async function verifyCloudMembership({source=null,canCommit=()=>true}={})
   }catch(error){if(action.current()&&([401,403].includes(error?.status)||['UNAUTHORIZED','FORBIDDEN'].includes(error?.code)||error?.guestAccessUnavailable)){invalidate();feeVisibility=null;feeVisibilityContext=null;}throw error;}
 }
 /** Resume a suspended browser connection without reloading history or replaying a save. */
-export async function recoverCloudConnection({source=providerSource||'cloud1',canCommit=()=>true}={}){
+export async function recoverCloudConnection({source=providerSource||'cloud1',canCommit=()=>true,coreOnly=false}={}){
   if(!canCommit())throw Object.assign(new Error('Connection recovery postponed while editing.'),{code:'BACKGROUND_CANCELLED'});
+  // Only a routine check of this exact, already verified baseline can omit the
+  // unrelated fee read. Initial recovery and changed access still verify fees;
+  // every fee, history, export and save operation keeps its own fresh checks.
+  const verifiedBaseline=()=>{
+    const status=getCloudStatus(),identity=syncIdentity(),context=exportContext();
+    if(!coreOnly||!synced||!baseline||baselineIdentity!==identity||status.mode!=='cloud'||status.readyForEdits!==true||status.activeCloud!==source||!verifiedIntentPolicy?.policyKey||!feeVisibility||feeVisibilityContext!==context)return null;
+    return {baseline,feeVisibility,key:stable({identity,context,source,user:session()?.user?.id,generation:authGeneration,epoch:providerSessionEpoch,policy:verifiedIntentPolicy.policyKey})};
+  };
+  const before=verifiedBaseline();
   await verifyCloudMembership({source,canCommit});const action=passiveAuthAction(source);
-  await refreshFeeVisibility({cloudSource:source,canCommit});action.check();const status=getCloudStatus();
+  const after=verifiedBaseline();
+  if(!before||!after||before.baseline!==after.baseline||before.feeVisibility!==after.feeVisibility||before.key!==after.key)await refreshFeeVisibility({cloudSource:source,canCommit});
+  action.check();const status=getCloudStatus();
   if(!canCommit())throw Object.assign(new Error('Connection recovery postponed while editing.'),{code:'BACKGROUND_CANCELLED'});
   return {status,dataset:null};
 }
@@ -1724,7 +1737,7 @@ export async function listNasAppAccess(filters={}){
  const check=()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id)throw new Error('The account changed. Reopen Access logs.');if(session()?.role!=='owner'||session()?.passwordRecovery||session()?.setupRequired)throw denied();};
  const endpoint=new URL('/api/owner/access-logs',PUBLIC_CONFIG.cloud2Url),query=new URLSearchParams({limit:String(value.limit),exclude_owner:String(value.excludeOwner)});
  for(const[key,v]of Object.entries({app:value.app,user_id:value.userId,event:value.event,from:value.from,to:value.to,before:value.before}))if(v!==null)query.set(key,v);
- const token=await accessToken(8000);check();
+ const token=await accessToken();check();
  const {response,result}=await cloudJSON(endpoint.href+'?'+query,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();
  if(!response.ok)throw apiError(response,result);
  if(result?.source!=='nas'||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Lab Notes access logs could not be verified.');
@@ -1757,7 +1770,7 @@ export function recordAppPresence(payload){
  if(service?.getState().active==='cloud2')return Promise.reject(Object.assign(new Error('Online presence is unavailable on Cloud 2.'),{code:'PRESENCE_UNAVAILABLE'}));
  if(!s.access_token)return Promise.resolve(null);
  const send=token=>Promise.resolve(fetch(`${c.url}/rest/v1/rpc/record_app_presence`,{method:'POST',cache:'no-store',credentials:'omit',redirect:'error',keepalive:true,headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body),...(typeof globalThis.AbortSignal?.timeout==='function'?{signal:globalThis.AbortSignal.timeout(5000)}:{})})).then(async response=>response.ok?checked(await responseJSON(response)):null).catch(()=>null);
- try{if(payload.present&&s.expires_at<=Date.now()/1000+60)return accessToken(5000).then(token=>unchanged()?send(token):null).catch(()=>null);return send(s.access_token);}catch{return Promise.resolve(null);}
+ try{if(payload.present&&s.expires_at<=Date.now()/1000+60)return accessToken().then(token=>unchanged()?send(token):null).catch(()=>null);return send(s.access_token);}catch{return Promise.resolve(null);}
 }
 function ownerPresenceContext(){
  const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch;
@@ -1777,7 +1790,7 @@ export async function listNasPresence(){
  const {c,check}=ownerPresenceContext();
  if(provider()?.getState().active==='cloud2')throw Object.assign(new Error('Online presence is unavailable on Cloud 2.'),{code:'PRESENCE_UNAVAILABLE'});
  if(c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)throw new Error('BraintimeDisk online members are unavailable for this workspace.');
- const token=await accessToken(8000);check();const endpoint=new URL('/api/owner/presence',PUBLIC_CONFIG.cloud2Url);
+ const token=await accessToken();check();const endpoint=new URL('/api/owner/presence',PUBLIC_CONFIG.cloud2Url);
  const {response,result}=await cloudJSON(endpoint.href,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();if(!response.ok)throw apiError(response,result);return presenceEnvelope(result,'nas');
 }
 

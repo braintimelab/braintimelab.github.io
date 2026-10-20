@@ -1,4 +1,4 @@
-import {createCloudBridge} from './cloud-bridge.js?v=167';
+import {createCloudBridge,optionalPrimaryRead} from './cloud-bridge.js?v=168';
 
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const READ_RPCS=new Set(['get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','get_member_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
@@ -6,13 +6,14 @@ export const CLOUD_COMMAND_KINDS=Object.freeze(Object.fromEntries(['save_records
 const clone=value=>structuredClone(value);
 const problem=(code,message,details={})=>Object.assign(new Error(message),{code,...details});
 const CURRENT_TYPES=new Set(['mice','matings','litters','cages','rooms','racks','locations','light_events','husbandry_events']);
-const RECOVERY_RPCS=new Set(['get_lac_fee_visibility','get_export_permission','get_local_backup_permission','get_my_lab_member']);
 
 /** Recovery never replays an export or loads archive payloads on a status poll. */
 export function cloud1RecoveryQuery(query,colonyId){
  if(!UUID.test(colonyId||''))return null;
  if(query===null)return {route:'entity_records?'+new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${colonyId}`,entity_type:'eq.mice',limit:'1'}),method:'GET'};
- if(query?.method==='POST'&&RECOVERY_RPCS.has(query.route?.slice(4))&&query.route.startsWith('rpc/')&&query.body?.p_colony_id===colonyId)return clone(query);
+ // A metadata endpoint may stay unavailable after current records recover.
+ // Failback verifies the core data path without replaying that optional read.
+ if(optionalPrimaryRead(query)&&query.body?.p_colony_id===colonyId)return cloud1RecoveryQuery(null,colonyId);
  if(query?.method!=='GET'||!query.route?.startsWith('entity_records?'))return null;
  const params=new URLSearchParams(query.route.slice('entity_records?'.length)),type=params.get('entity_type')?.slice(3);
  if(params.get('colony_id')!==`eq.${colonyId}`||params.get('entity_type')!==`eq.${type}`||!CURRENT_TYPES.has(type))return null;

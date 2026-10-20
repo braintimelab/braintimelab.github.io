@@ -16,7 +16,18 @@ const empty=source=>({source,state:'unknown',ready:false,canRead:false,canWrite:
 const problem=(code,message)=>Object.assign(new Error(message),{code});
 const failure=error=>['UNAVAILABLE','UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED','NOT_READY'].includes(error?.code)?error.code:'UNKNOWN';
 const failureState=error=>({UNAVAILABLE:'unavailable',UNAUTHORIZED:'signed_out',FORBIDDEN:'denied',NOT_ENROLLED:'not_enrolled',NOT_READY:'not_ready'}[failure(error)]||'error');
-const optionalPrimaryRead=query=>query?.method==='POST'&&['rpc/get_my_lab_member','rpc/get_lab_user_directory'].includes(query.route);
+// Failure of one display/status or read-policy endpoint is not by itself a
+// current-record outage. Each exception still requires fresh membership and
+// a bounded core read below, and the failed optional action remains rejected.
+const OPTIONAL_PRIMARY_READS=new Set(['get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','list_guest_access','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_lac_fee_visibility','get_export_permission','get_local_backup_permission']);
+export const optionalPrimaryRead=query=>query?.method==='POST'&&typeof query.route==='string'&&query.route.startsWith('rpc/')&&OPTIONAL_PRIMARY_READS.has(query.route.slice(4));
+const CURRENT_PAGE_TYPES=new Set(['mice','matings','litters','cages','rooms','racks','locations','light_events','husbandry_events']);
+function shrinkingPrimaryPage(query,colonyId){
+ if(query?.method!=='GET'||!query.route?.startsWith('entity_records?'))return false;
+ const params=new URLSearchParams(query.route.slice('entity_records?'.length)),limit=params.get('limit');
+ if([...params.keys()].some(key=>!['select','colony_id','entity_type','order','limit','entity_id'].includes(key)||params.getAll(key).length!==1))return false;
+ return /^[1-9]\d{0,3}$/.test(limit||'')&&Number(limit)>1&&Number(limit)<=1000&&params.get('colony_id')===`eq.${colonyId}`&&CURRENT_PAGE_TYPES.has(params.get('entity_type')?.slice(3))&&params.get('entity_type')?.startsWith('eq.')&&['colony_id,entity_type,entity_id,version,archived','colony_id,entity_type,entity_id,payload,version,archived'].includes(params.get('select'));
+}
 const authDenied=value=>['signed_out','denied'].includes(value?.state);
 const authorizationFailure=value=>Object.assign(problem(value.state==='signed_out'?'UNAUTHORIZED':'FORBIDDEN','The cloud account could not be verified.'),{status:value.state==='signed_out'?401:403});
 const foreground=canCommit=>{if(!canCommit())throw problem('BACKGROUND_CANCELLED','The background connection check was postponed.');};
@@ -132,6 +143,11 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
       check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){if(fixedPrimary&&source==='cloud1'){primaryReadFailure++;primaryReadFailureState=failureState(error);}sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
       if(authDenied(sources[source]))throw authorizationFailure(sources[source]);
       foreground(canCommit);
+      // The server completed authorization and reported this page's exact SQL
+      // statement timeout. Let the existing bounded reader halve its page,
+      // without invalidating other in-flight tables. A one-row failure keeps
+      // the ordinary outage path; network failures never use this exception.
+      if(source==='cloud1'&&fixedPrimary&&error.statementTimeout===true&&shrinkingPrimaryPage(query,context.colonyId))throw error;
       // A failed optional profile/directory read is not proof that current
       // colony data is down. Keep the primary only after fresh authorization
       // and a bounded current-record probe both succeed; the optional read
