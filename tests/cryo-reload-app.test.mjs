@@ -29,11 +29,12 @@ function fixture(){
   loadHistoryTables:async tables=>{calls.push({sourceTables:tables});if(state.historyError)throw state.historyError;vm.runInContext('dataset=state.shared',context);return state.shared;},
   loadCryoHistory:async()=>{calls.push({sourceIndex:true});if(state.indexError)throw state.indexError;return state.index??null;},
  });
- vm.runInContext('let dataset=state.original,route="cryo",detail={type:"cryo",id:"source-case"},cloud={...status},cloudReady=true,manualPullPending=false,startupLoading=false,cachedPreview=false,editor=null,busy=false,historyLoadState=null,managedLoadState=null,managedLoadFailure=null,cloudLoadError="",startupProgressValue=null,startupMessage="",brainbotReviewPending=false,sidebarProfile=null,sidebarProfileContext="",cryoLinkFocus=null,cryoRenderToken=0,cryoHistoryContext="",cryoHistoryIndex=null;const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id]);',context);
+ vm.runInContext('let dataset=state.original,route="cryo",detail={type:"cryo",id:"source-case"},cloud={...status},cloudReady=true,manualPullPending=false,startupLoading=false,cachedPreview=false,editor=null,busy=false,historyLoadState=null,managedLoadState=null,managedLoadFailure=null,cloudLoadError="",startupProgressValue=null,startupMessage="",brainbotReviewPending=false,sidebarProfile=null,sidebarProfileContext="",cryoLinkFocus=null,cryoRenderToken=0,cryoHistoryContext="",cryoHistoryIndex=null,cryoHistoryDataset=null;const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id]);',context);
  vm.runInContext(between('const deferredHistoryTables=','const historyViewKey='),context);
  vm.runInContext(between('function canEditRecords(','function canArchiveRecords('),context);
  vm.runInContext(between('function renderSidebarAccount(','function adoptSidebarProfile('),context);
  vm.runInContext(between('async function loadSharedColony(','async function renderPlanner('),context);
+ vm.runInContext(between('function cryoSourceContext(){','async function loadCryoHistory(){'),context);
  vm.runInContext(between('function renderCryo(){','function renderExperimentSection('),context);
  const run=code=>vm.runInContext(code,context);
  return {elements,calls,status,state,run,reload:options=>run(`loadSharedColony(${JSON.stringify(options??{})})`)};
@@ -70,16 +71,17 @@ test('a failed shared pull keeps the existing draft and supports retry',async()=
  f.state.pullError=null;await f.reload({preserveView:true,confirm:false,throwOnError:true});assert.equal(f.run('cloudReady'),true);assert.equal(f.state.cryoDraft,draft);assert(!f.calls.some(call=>call.history));
 });
 
-test('cryo loads the verified source-cell index before considering general historical observations',async()=>{
- const f=fixture();f.state.cryoDraft=null;f.state.index={sources:[],sheets:[],cells:[]};f.run('dataset=state.shared;renderCryo()');await f.state.cryoHooks.loadHistory();
+test('cryo loads the verified compact register before considering general historical observations',async()=>{
+ const f=fixture();f.state.cryoDraft=null;f.state.index={format:'braintime-cryo-register'};f.run('dataset=state.shared;renderCryo()');await f.state.cryoHooks.loadHistory();
  assert.deepEqual(f.calls.filter(call=>call.sourceIndex||call.sourceTables),[{sourceIndex:true}]);assert.equal(f.state.cryoHooks.historyIndex,f.state.index);assert.equal(f.state.cryoHooks.historyDeferred,false);assert.equal(f.run('dataset.source_archive_deferred.loaded_tables.includes("historical_observations")'),false);
  const fallback=fixture();fallback.state.cryoDraft=null;fallback.run('dataset=state.shared;renderCryo()');await fallback.state.cryoHooks.loadHistory();
  assert.deepEqual(JSON.parse(JSON.stringify(fallback.calls.filter(call=>call.sourceIndex||call.sourceTables))),[{sourceIndex:true},{sourceTables:['historical_observations']}]);assert.equal(fallback.state.cryoHooks.historyDeferred,false);
 });
 
-test('a cached verified cryo index remains usable after a lightweight shared reload',()=>{
- const f=fixture();f.state.index={sources:[],sheets:[],cells:[]};f.run('dataset=state.shared;cryoHistoryContext=labUserDirectoryContext(store.getCloudStatus());cryoHistoryIndex=state.index;renderCryo()');
+test('a verified compact register is scoped to the current dataset and reloaded after replacement',()=>{
+ const f=fixture();f.state.index={format:'braintime-cryo-register'};f.run('dataset=state.shared;cryoHistoryContext=cryoSourceContext();cryoHistoryDataset=dataset;cryoHistoryIndex=state.index;renderCryo()');
  assert.equal(f.state.cryoHooks.historyIndex,f.state.index);assert.equal(f.state.cryoHooks.historyDeferred,false);assert(!f.calls.some(call=>call.sourceIndex||call.sourceTables||call.history));
+ f.run('dataset={...state.shared};renderCryo()');assert.equal(f.state.cryoHooks.historyIndex,null);assert(!f.calls.some(call=>call.sourceIndex||call.sourceTables||call.history),'replacement invalidates the register without eagerly loading source data');
 });
 
 test('reload rejects other open record or cage drafts and concurrent history/module operations',async()=>{

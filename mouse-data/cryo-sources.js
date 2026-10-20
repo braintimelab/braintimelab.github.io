@@ -1,3 +1,4 @@
+import { readVerifiedCryoRegister } from './cryo-register.js?v=178';
 /* Read-only reconstruction of cryopreservation source tables.
  * Reported historical balances are never current, verified inventory.
  * A case with several batch IDs retains one aggregate count.
@@ -126,6 +127,8 @@ function partialSources(dataset,covered) {
  * Sources are deduplicated by exact case + complete batch list, never by strain.
  */
 export function discoverCryoSources(dataset,historyIndex=null) {
+  const registered=readVerifiedCryoRegister(historyIndex);if(registered)return registered;
+  if(historyIndex?.format==='braintime-cryo-register')throw new Error('Verify the cryopreservation register before viewing it.');
   const valid=Boolean(historyIndex&&Array.isArray(historyIndex.sources)&&Array.isArray(historyIndex.sheets)&&Array.isArray(historyIndex.cells));
   const targetSheets=new Map(),covered=new Set(),versions=new Set(),observations=[],planObservations=[];let sourceSheetCount=0;
   if(valid) {

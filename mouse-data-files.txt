@@ -36,6 +36,7 @@ cloud-provider.js
 cloud-recovery.js
 cloud-status.js
 config.js
+cryo-register.js
 cryo-sources.js
 cryopreservation-model.js
 cryopreservation.js

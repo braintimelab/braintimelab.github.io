@@ -1,5 +1,5 @@
 import { getStrainRegistry, buildStrainDefinition, INSERTION_TYPES, STRAIN_DETAIL_FIELDS, strainNamingHelpHTML } from './strain-registry.js?v=146';
-import { getStrainCryoLinks } from './strain-cryo-links.js?v=118';
+import { getStrainCryoLinks } from './strain-cryo-links.js?v=178';
 
 const mounts=new WeakMap();
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

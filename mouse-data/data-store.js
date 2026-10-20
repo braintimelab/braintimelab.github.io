@@ -1724,20 +1724,7 @@ export async function getFullExportBackup(){
   if(final.local!==permission.local)throw new Error('The workspace changed. Reopen Export.');
   return {...data,app_backup_at:new Date().toISOString(),export_permission:{level:permission.level,as_of_date:permission.as_of_date}};
 }
-export async function getFullSourceExport(localLoader){
-  const context=exportContext(),c=configuration();
-  // Source history has separate storage and must never inherit a demo's grant.
-  const authorize=async()=>{
-    if(!c)return assertFullExportPermission();
-    const value=checkedExportPermission(await request('rpc/assert_full_export_permission',{method:'POST',body:{p_colony_id:c.colonyId}}));
-    checkExportContext(context);if(value.level!=='max')throw new Error('Full-history permission is required for a full source archive.');
-    return value;
-  };
-  await authorize();checkExportContext(context);
-  const index=c?await downloadHistoryIndex():await localLoader();checkExportContext(context);
-  if(!index)throw new Error('No full source archive is loaded. Open Source archive to load it first.');
-  await authorize();checkExportContext(context);return index;
-}
+export async function getFullSourceExport(){throw new Error('Raw source archive storage and export have been retired.');}
 
 /** User administration is authenticated here and independently authorized by the Edge function. */
 export async function manageColonyUsers(action,payload={}) {
@@ -1956,65 +1943,11 @@ export async function listNasPresence(){
  const {response,result}=await cloudJSON(endpoint.href,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();if(!response.ok)throw apiError(response,result);return presenceEnvelope(result,'nas');
 }
 
-const HISTORY_BUCKET='colony-history';
-function historyIndex(value){
-  if(!value||typeof value!=='object'||!Array.isArray(value.sources)||!Array.isArray(value.sheets)||!Array.isArray(value.cells))throw new Error('A history index must contain sources, sheets, and cells arrays.');
-  return value;
-}
-function historyPath(path){
-  const c=configuration();if(!c)throw new Error('Configure the cloud project first.');
-  const prefix=`${c.colonyId}/history/`,name=typeof path==='string'&&path.startsWith(prefix)?path.slice(prefix.length):'';
-  if(!/^[a-f0-9]{64}\.json$/.test(name))throw new Error('History path must identify a SHA-256 JSON archive in the configured colony.');
-  return name.slice(0,64);
-}
-async function sha256(text){
-  if(!globalThis.crypto?.subtle)throw new Error('Secure hashing is unavailable. Open the app over HTTPS or localhost.');
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-function rememberHistory(path){const c=configuration();if(c)setStorage('localStorage',CONFIG_KEY,JSON.stringify({...c,historyPath:path}));}
-async function storageRequest(route,{method='GET',body}={}){
-  const c=configuration();if(!c)throw new Error('Configure the cloud project first.');publicKey(c.anonKey);
-  const token=await accessToken();
-  // Private authenticated Storage route; never create a public or signed link.
-  return fetch(`${c.url}/storage/v1/${route}`,{method,cache:'no-store',redirect:'error',headers:{apikey:c.anonKey,Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body});
-}
-export async function fetchHistoryArchive(path){
-  const expected=historyPath(path);await membership();
-  const response=await storageRequest(`object/authenticated/${HISTORY_BUCKET}/${path.split('/').map(encodeURIComponent).join('/')}`);
-  if(!response.ok)throw apiError(response,await responseJSON(response));
-  const text=await response.text();
-  if(await sha256(text)!==expected)throw new Error('History archive checksum does not match its filename. It was not loaded.');
-  let data;try{data=JSON.parse(text);}catch{throw new Error('The history archive is not valid JSON.');}
-  historyIndex(data);rememberHistory(path);return data;
-}
-export async function uploadHistoryIndex(index){
-  historyIndex(index);await requireEditor();if(!(await refreshFeeVisibility()).source_archive_allowed)throw new Error('Full financial visibility is required to upload a source archive.');
-  const text=JSON.stringify(index),digest=await sha256(text),path=`${configuration().colonyId}/history/${digest}.json`;
-  const response=await storageRequest(`object/${HISTORY_BUCKET}/${path}`,{method:'POST',body:text});
-  if(!response.ok){
-    const error=await responseJSON(response);
-    // Storage returns 400 or 409 for an existing immutable object. Verify the
-    // bytes before treating a repeated upload as successful.
-    if(response.status!==409&&!(response.status===400&&/duplicate|already exists/i.test(String(error?.message??error?.error??''))))throw apiError(response,error);
-  }
-  await fetchHistoryArchive(path);
-  return {bucket:HISTORY_BUCKET,path,sha256:digest,bytes:new TextEncoder().encode(text).length,cellCount:index.cells.length};
-}
-export async function downloadHistoryIndex(){
-  if(await membership()!=='owner')throw new Error('Only the owner can view source archives.');const c=configuration(),prefix=`${c.colonyId}/history`;
-  // Immutable versions can be discovered on a new device without local config.
-  let offset=0;
-  while(true){
-    const response=await storageRequest(`object/list/${HISTORY_BUCKET}`,{method:'POST',body:JSON.stringify({prefix,limit:100,offset,sortBy:{column:'created_at',order:'desc'}})});
-    const rows=await responseJSON(response);if(!response.ok)throw apiError(response,rows);
-    if(!Array.isArray(rows))throw new Error('The history archive list was not returned as a list.');
-    const first=rows.find(r=>/^[a-f0-9]{64}\.json$/.test(r.name??''));
-    if(first)return fetchHistoryArchive(`${prefix}/${first.name}`);
-    if(rows.length<100)throw new Error('No history archive has been uploaded for this colony.');
-    offset+=rows.length;
-  }
-}
-
+// Compatibility errors prevent old controls from retaining a raw workbook again.
+const rawArchiveRetired=()=>{throw new Error('Raw source archive storage and export have been retired.');};
+export async function fetchHistoryArchive(){return rawArchiveRetired();}
+export async function uploadHistoryIndex(){return rawArchiveRetired();}
+export async function downloadHistoryIndex(){return rawArchiveRetired();}
 
 // Private roster never enters the colony dataset, IndexedDB, backups or exports.
 export async function listLabMembers(){

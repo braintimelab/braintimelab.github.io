@@ -7,7 +7,7 @@ async function graph(root){const seen=new Map(),pending=[root];while(pending.len
 const initial=await graph(appURL);
 
 test('Cages startup does not request specialist screen or label-designer code',()=>{
- for(const name of ['mouse-review-view','brainbot-review-runner','brainbot','strain-management','family-explorer','cryopreservation','experiments','lac-fees','locobox','iacuc','cage-label'])assert(![...initial.keys()].some(path=>path.split('?')[0].endsWith('/'+name+'.js')),name);
+ for(const name of ['mouse-review-view','brainbot-review-runner','brainbot','strain-management','family-explorer','cryopreservation','cryo-register','experiments','lac-fees','locobox','iacuc','cage-label'])assert(![...initial.keys()].some(path=>path.split('?')[0].endsWith('/'+name+'.js')),name);
  assert(initial.size<=67);
 });
 test('all startup and lazy screen imports retain one datastore and auth module URL',async()=>{

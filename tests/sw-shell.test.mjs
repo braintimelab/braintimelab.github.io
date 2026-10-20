@@ -159,10 +159,10 @@ test('release install reuses exact immutable URLs including saved optional menus
 });
 
 test('same path with a changed release token is fetched, while absent optional menus remain on demand',async()=>{
- const h=harness();await h.store('colony-shell-v174').put('./guest-access.js?v=174',basicResponse('old validator'));
+ const h=harness();await h.store('colony-shell-v174').put('./data-store.js?v=174',basicResponse('old datastore'));
  await h.lifecycle('install');
- assert(h.fetched.some(([url])=>url===scope+'guest-access.js?v='+releaseVersion));
- assert.equal(await(await h.store(h.config.CACHE).match('./guest-access.js?v='+releaseVersion)).text(),'online');
+ assert(h.fetched.some(([url])=>url===scope+'data-store.js?v='+releaseVersion));
+ assert.equal(await(await h.store(h.config.CACHE).match('./data-store.js?v='+releaseVersion)).text(),'online');
  assert.equal(await h.store(h.config.CACHE).match('./experiments.js?v=132'),undefined);
  assert(!h.fetched.some(([url])=>url.includes('experiments.js')));
 });
