@@ -36,14 +36,28 @@ async function currentShell(){
   const versioned=new Set([...referenced].filter(path=>path.includes('?')).map(path=>path.split('?')[0]));
   return [...paths].filter(path=>!versioned.has(path)||referenced.has(path)).sort();
 }
-const expected=await currentShell();
+async function starterShell(){
+ const pending=['./','./index.html'],seen=new Set();
+ while(pending.length){
+  const path=pending.pop();if(seen.has(path))continue;seen.add(path);
+  const local=path==='./'?'index.html':path.slice(2).split('?')[0];
+  const source=await readFile(new URL(local,web),'utf8');let refs=[];
+  if(local.endsWith('.js'))refs=[...source.matchAll(/(?:\bfrom|\bimport)\s*['"](\.\/?[^'"]+)['"]/g)].map(m=>m[1]);
+  else if(local.endsWith('.html'))refs=[...source.matchAll(/<(?:link|script|img)\b[^>]*(?:href|src)="(\.[^"]+)"[^>]*>/g)].map(m=>m[1]);
+  else if(local.endsWith('.css'))refs=[...source.matchAll(/url\(\s*['"]?(\.[^"')\s]+)['"]?\s*\)/g)].map(m=>m[1]);
+  else if(local.endsWith('.webmanifest'))refs=JSON.parse(source).icons.map(icon=>icon.src);
+  for(const ref of refs){const target=new URL(ref,new URL(local,scope));assert(target.href.startsWith(scope));const result='./'+target.pathname.slice(new URL(scope).pathname.length)+target.search;if(result!=='./sw.js')pending.push(result);}
+ }
+ return [...seen].sort();
+}
+const expected=await currentShell(),starter=await starterShell();
 const indexSource=await readFile(new URL('index.html',web),'utf8');
 const releaseVersion=indexSource.match(/src="\.\/app\.js\?v=(\d+)"/)?.[1];
 const appPath=`./app.js?v=${releaseVersion}`;
 if(process.argv.includes('--update-shell')){
   assert(releaseVersion,'The index requires an explicit app release version.');
   const source=await readFile(worker,'utf8');
-  await writeFile(worker,source.replace(/^const CACHE = .*;$/m,`const CACHE = 'colony-shell-v${releaseVersion}';`).replace(/^const SHELL = .*;$/m,`const SHELL = ${JSON.stringify(expected)};`));
+  await writeFile(worker,source.replace(/^const CACHE = .*;$/m,`const CACHE = 'colony-shell-v${releaseVersion}';`).replace(/^const SHELL = .*;$/m,`const SHELL = ${JSON.stringify(expected)};`).replace(/^const PRECACHE = .*;$/m,`const PRECACHE = ${JSON.stringify(starter)};`));
 }
 const source=await readFile(worker,'utf8');
 function harness({network=async()=>new Response('online')}={}){
@@ -54,7 +68,7 @@ function harness({network=async()=>new Response('online')}={}){
     return {async addAll(paths){installed.push(...paths);for(const path of paths)rows.set(absolute(path),new Response('installed'));},async put(request,response){writes.push(absolute(request));rows.set(absolute(request),response);},async match(request){return rows.get(absolute(request));},async keys(){return [...rows.keys()].map(url=>({url}));},async delete(request){return rows.delete(absolute(request));}};
   };
   const context={URL,Response,fetch:network,caches:{async open(name){return store(name);},async keys(){return [...stores.keys()];},async delete(name){deleted.push(name);return stores.delete(name);}},self:{registration:{scope},addEventListener:(type,handler)=>listeners.set(type,handler),async skipWaiting(){},clients:{async claim(){}}}};
-  vm.runInNewContext(source+'\nglobalThis.shellConfig={CACHE,SHELL};',context);
+  vm.runInNewContext(source+'\nglobalThis.shellConfig={CACHE,SHELL,PRECACHE};',context);
   return {listeners,stores,store,writes,deleted,installed,config:context.shellConfig,async lifecycle(type){let pending;listeners.get(type)({waitUntil(value){pending=value;}});await pending;},async request(url,{method='GET'}={}){let response,pending=[];listeners.get('fetch')({request:{url:new URL(url,scope).href,method},respondWith(value){response=value;},waitUntil(value){pending.push(value);}});const result=response===undefined?undefined:await response;await Promise.all(pending);return result;}};
 }
 
@@ -69,10 +83,12 @@ test('shell is the current public files plus exact referenced versions, with no 
   assert(modules.every(path=>/\?v=\d+$/.test(path)),'each cached module has an explicit version');
 });
 
-test('install preloads the complete current offline dependency closure',async()=>{
+test('install preloads only the starter dependency closure and leaves optional sections on demand',async()=>{
   const h=harness();await h.lifecycle('install');
-  assert.deepEqual(h.installed,expected);
-  for(const path of expected)assert(await h.store(h.config.CACHE).match(path),path);
+  assert.deepEqual(h.installed,starter);
+  assert.deepEqual([...h.config.PRECACHE],starter);
+  for(const name of ['experiments.js','cryopreservation.js','brainbot.js','locobox.js','lac-fees.js','iacuc.js','breeding-planner.js','cage-label.js'])assert(!starter.some(path=>path.startsWith('./'+name+'?')),name);
+  for(const path of starter)assert(await h.store(h.config.CACHE).match(path),path);
 });
 
 test('activate deletes old shell caches and stale aliases while preserving unrelated/private caches',async()=>{

@@ -6,7 +6,7 @@ const body=app.slice(app.indexOf('async function renderPlanner(){'),app.indexOf(
 assert.ok(body.includes("import('./breeding-planner.js?v="));
 function harness(){
  let resolve,reject,loads=0;const rendering=[],history=[],main={innerHTML:''};
- const env={dataset:{tables:{}},plannerRenderToken:0,plannerModule:null,plannerModulePending:null,plannerMouseId:null,plannerTargetDraft:null,route:'planner',cloud:{mode:'cloud'},$:()=>main,panel:(name,text)=>name+text,button:label=>label,deferredHistoryTables:()=>['mouse_genes','historical_observations'],navigate(){},showToast(){},canEditRecords(){return true;},model:{validateRecord(){}},loadHistoryTables:async tables=>{history.push(tables);return env.dataset;},store:{},loadPlannerFixture:()=>{loads++;return new Promise((yes,no)=>{resolve=yes;reject=no;});}};
+ const env={dataset:{tables:{}},plannerRenderToken:0,plannerModule:null,plannerModulePending:null,plannerMouseId:null,plannerTargetDraft:null,route:'planner',cloud:{mode:'cloud'},loadSectionStyle:()=>{},$:()=>main,panel:(name,text)=>name+text,button:label=>label,deferredHistoryTables:()=>['mouse_genes','historical_observations'],navigate(){},showToast(){},canEditRecords(){return true;},model:{validateRecord(){}},loadHistoryTables:async tables=>{history.push(tables);return env.dataset;},store:{},loadPlannerFixture:()=>{loads++;return new Promise((yes,no)=>{resolve=yes;reject=no;});}};
  const run=new Function('env',`with(env){return (${body.replace(/import\('\.\/breeding-planner\.js\?v=\d+'\)/,'loadPlannerFixture()')});}`)(env);
  return{env,main,run,rendering,history,get loads(){return loads;},resolve(){resolve({renderBreedingPlanner:(...args)=>rendering.push(args)});},reject(){reject(new Error('offline'));}};
 }
