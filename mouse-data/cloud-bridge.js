@@ -16,6 +16,10 @@ const empty=source=>({source,state:'unknown',ready:false,canRead:false,canWrite:
 const problem=(code,message)=>Object.assign(new Error(message),{code});
 const failure=error=>['UNAVAILABLE','UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED','NOT_READY'].includes(error?.code)?error.code:'UNKNOWN';
 const failureState=error=>({UNAVAILABLE:'unavailable',UNAUTHORIZED:'signed_out',FORBIDDEN:'denied',NOT_ENROLLED:'not_enrolled',NOT_READY:'not_ready'}[failure(error)]||'error');
+const optionalPrimaryRead=query=>query?.method==='POST'&&['rpc/get_my_lab_member','rpc/get_lab_user_directory'].includes(query.route);
+const authDenied=value=>['signed_out','denied'].includes(value?.state);
+const authorizationFailure=value=>Object.assign(problem(value.state==='signed_out'?'UNAUTHORIZED':'FORBIDDEN','The cloud account could not be verified.'),{status:value.state==='signed_out'?401:403});
+const foreground=canCommit=>{if(!canCommit())throw problem('BACKGROUND_CANCELLED','The background connection check was postponed.');};
 
 export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=null,primaryPolicy=false}){
   if(typeof getContext!=='function'||!adapters?.cloud1||!adapters?.cloud2)throw new TypeError('Two cloud adapters and a verified context provider are required.');
@@ -75,49 +79,80 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(!enrolled)return {...normalized,state:'not_enrolled'};
     return {...normalized,enrolled,ready:value.ready===true,canRead:value.canRead===true,canWrite:value.canWrite===true,pending:count(value.pending),conflicts:count(value.conflicts),lastSyncAt:date(value.lastSyncAt),dataRevision:count(value.dataRevision),capabilities:value.capabilities&&typeof value.capabilities==='object'&&!Array.isArray(value.capabilities)?clone(value.capabilities):null,replicationCaughtUp:source==='cloud2'&&value.replicationCaughtUp===true};
   }
-  async function recoverPrimary(check,query=failedPrimaryRead,{fromRead=false}={}){
+  async function recoverPrimary(check,query=failedPrimaryRead,{fromRead=false,canCommit=()=>true}={}){
     if(!fixedPrimary||!fallbackEngaged||!readable('cloud1')||!caughtUp())return;
     recoveryVerified=false;
     if(typeof adapters.cloud1.recover!=='function'){recoveryBlocked=true;return;}
-    try{const result=await invoke('cloud1','recover',{query:query?clone(query):null,fromRead},check);recoveryVerified=result?.verified===true;recoveryBlocked=!recoveryVerified;}
-    catch(error){check();recoveryBlocked=false;sources.cloud1={...empty('cloud1'),state:failureState(error)};}
+    try{const result=await invoke('cloud1','recover',{query:query?clone(query):null,fromRead},check);foreground(canCommit);recoveryVerified=result?.verified===true;recoveryBlocked=!recoveryVerified;}
+    catch(error){check();if(!canCommit()&&!['UNAUTHORIZED','FORBIDDEN'].includes(failure(error)))throw problem('BACKGROUND_CANCELLED','The background connection check was postponed.');recoveryBlocked=false;sources.cloud1={...empty('cloud1'),state:failureState(error)};if(!canCommit())throw error;}
   }
-  async function refresh({recover=true}={}){
+  async function refresh({recover=true,canCommit=()=>true}={}){
     synchronize();if(refreshing)return refreshing;
     const check=fence(),readFailure=primaryReadFailure;
     const checkedResult=(source,result)=>fixedPrimary&&source==='cloud1'&&readFailure!==primaryReadFailure&&(result.state==='online'||['signed_out','denied'].includes(primaryReadFailureState))?{...empty(source),state:primaryReadFailureState}:result;
     let primaryDone;primaryProbe=new Promise(resolve=>{primaryDone=resolve;});
     const task=(async()=>{
-      const results=await Promise.allSettled(SOURCES.map(async source=>{try{const value=await invoke(source,'status',{},check);if(source==='cloud1'&&fixedPrimary&&!fallbackEngaged&&!pendingNAS()){sources.cloud1=checkedResult(source,status(source,value));emit();}return value;}finally{if(source==='cloud1')primaryDone();}}));
-      check();for(let i=0;i<SOURCES.length;i++){const source=SOURCES[i],result=results[i];sources[source]=checkedResult(source,result.status==='fulfilled'?status(source,result.value):{...empty(source),state:failureState(result.reason)});}
-      if(fixedPrimary&&fallbackEngaged){recoveryVerified=false;if(recover)await recoverPrimary(check);}
+      const results=await Promise.allSettled(SOURCES.map(async source=>{
+        try{const value=await invoke(source,'status',{},check),normalized=status(source,value);if(source==='cloud1'&&fixedPrimary&&(authDenied(normalized)||!fallbackEngaged&&!pendingNAS()&&canCommit())){sources.cloud1=checkedResult(source,normalized);emit();}return value;}
+        catch(error){if(source==='cloud1'&&fixedPrimary&&['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){sources.cloud1={...empty(source),state:failureState(error)};emit();}throw error;}
+        finally{if(source==='cloud1')primaryDone();}
+      }));
+      check();const resolved=SOURCES.map((source,i)=>{const result=results[i];return checkedResult(source,result.status==='fulfilled'?status(source,result.value):{...empty(source),state:failureState(result.reason)});});
+      if(!canCommit()){
+        const selected=active||(fixedPrimary?'cloud1':preferred);for(let i=0;i<SOURCES.length;i++)if(authDenied(resolved[i]))sources[SOURCES[i]]=resolved[i];
+        const denied=sources[selected];emit();if(authDenied(denied))throw authorizationFailure(denied);foreground(canCommit);
+      }
+      for(let i=0;i<SOURCES.length;i++)sources[SOURCES[i]]=resolved[i];
+      if(fixedPrimary&&fallbackEngaged){recoveryVerified=false;if(recover)await recoverPrimary(check,failedPrimaryRead,{canCommit});}
+      foreground(canCommit);
       return emit();
     })();
     refreshing=task;emit();
     try{await task;}finally{if(refreshing===task){refreshing=null;emit();}}
     return getState();
   }
-  async function refreshForRead(check){
-    const task=refresh();void task.catch(()=>{});
-    if(fixedPrimary&&!fallbackEngaged&&!pendingNAS()&&primaryProbe){await primaryProbe;check();if(readable('cloud1'))return;}
-    await task;check();
+  async function refreshForRead(check,{canCommit=()=>true}={}){
+    const task=refresh({canCommit});void task.catch(()=>{});
+    if(fixedPrimary&&primaryProbe){await primaryProbe;check();if(!canCommit()){if(authDenied(sources.cloud1))throw authorizationFailure(sources.cloud1);await task;check();foreground(canCommit);}if(!fallbackEngaged&&!pendingNAS()&&readable('cloud1'))return;}
+    await task;check();foreground(canCommit);
   }
-  async function prepareRead(){const check=fence();await refreshForRead(check);check();return getState();}
+  async function prepareRead({canCommit=()=>true}={}){const check=fence();await refreshForRead(check,{canCommit});check();foreground(canCommit);return getState();}
   function getState(){synchronize();return snapshot();}
   function setPrimaryCloudPolicy(){synchronize();fixedPrimary=true;preferred='cloud1';if(active==='cloud2')fallbackEngaged=true;return emit();}
   function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
-  async function read(query,{source:requiredSource=null}={}){
+  async function read(query,{source:requiredSource=null,canCommit=()=>true}={}){
     if(requiredSource!==null&&!SOURCES.includes(requiredSource))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');
-    synchronize();const check=fence();if(!active)await refreshForRead(check);check();
+    synchronize();const check=fence();if(!active)await refreshForRead(check,{canCommit});check();foreground(canCommit);
     if(requiredSource!==null&&active!==requiredSource)throw problem('SOURCE_CHANGED','The original cloud is unavailable. Retry when it reconnects.');
-    if(requiredSource===null&&fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true});check();emit();}
+    if(requiredSource===null&&fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true,canCommit});check();foreground(canCommit);emit();}
     const source=active;
     if(!source)throw problem('NOT_READY','No verified cloud data source is available.');
-    try{const data=await invoke(source,'read',{query:clone(query)},check);if(active!==source)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
+    try{const data=await invoke(source,'read',{query:clone(query)},check);foreground(canCommit);if(active!==source)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
     catch(error){
       check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){if(fixedPrimary&&source==='cloud1'){primaryReadFailure++;primaryReadFailureState=failureState(error);}sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
+      if(authDenied(sources[source]))throw authorizationFailure(sources[source]);
+      foreground(canCommit);
+      // A failed optional profile/directory read is not proof that current
+      // colony data is down. Keep the primary only after fresh authorization
+      // and a bounded current-record probe both succeed; the optional read
+      // still fails and no read or save is retried on another server.
+      if(source==='cloud1'&&fixedPrimary&&optionalPrimaryRead(query)&&typeof adapters.cloud1.recover==='function'){
+        const priorFailure=primaryReadFailure;let optionalHealthy=false;
+        try{
+          const verifiedStatus=status('cloud1',await invoke('cloud1','status',{},check));
+          if(authDenied(verifiedStatus))throw authorizationFailure(verifiedStatus);
+          foreground(canCommit);
+          if(verifiedStatus.state==='online'&&verifiedStatus.ready&&verifiedStatus.canRead){const probe=await invoke('cloud1','recover',{query:null,fromRead:true},check);foreground(canCommit);optionalHealthy=probe?.verified===true&&priorFailure===primaryReadFailure&&active==='cloud1'&&readable('cloud1');}
+        }catch(probeError){
+          check();
+          if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(probeError))){sources.cloud1={...empty('cloud1'),state:failureState(probeError)};primaryReadFailure++;primaryReadFailureState=failureState(probeError);emit();throw probeError;}
+          foreground(canCommit);
+        }
+        if(optionalHealthy)throw error;
+      }
+      if(authDenied(sources[source]))throw authorizationFailure(sources[source]);
       if(fixedPrimary&&source==='cloud1'){failedPrimaryRead=clone(query);primaryReadFailure++;primaryReadFailureState='unavailable';recoveryVerified=false;recoveryBlocked=false;}
-      sources[source]={...empty(source),state:'unavailable'};emit();await refresh({recover:false});check();
+      sources[source]={...empty(source),state:'unavailable'};emit();await refresh({recover:false,canCommit});check();foreground(canCommit);
       // A minimal status check can succeed while the requested data endpoint
       // is unavailable. Preserve that verified read failure for this selection,
       // but never replace a new authorization rejection with an outage state.
@@ -125,7 +160,7 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
       // Retry a read only after verifying a different, enrolled source. Never
       // retry an arbitrary error or silently interpret a permission denial.
       if(requiredSource!==null||!active||active===source)throw error;
-      const fallback=active,data=await invoke(fallback,'read',{query:clone(query)},check);if(active!==fallback)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source:fallback,data};
+      const fallback=active,data=await invoke(fallback,'read',{query:clone(query)},check);foreground(canCommit);if(active!==fallback)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source:fallback,data};
     }
   }
   function validateOperation(operation){

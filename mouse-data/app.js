@@ -10,7 +10,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=165';
+import * as store from './data-store.js?v=167';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -39,7 +39,7 @@ import { renderAccountAcronym } from './account-acronym.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';
 import { PUBLIC_CONFIG, backupViewerLinkHTML } from './config.js?v=137';
-import {createCloudMonitor} from './cloud-monitor.js?v=165';
+import {createCloudMonitor} from './cloud-monitor.js?v=167';
 import {createCloudRecovery} from './cloud-recovery.js?v=165';
 import {cloudControlsHTML,cloudDataIndicator,cloudIndicatorHTML,showCloud1SignIn} from './cloud-status.js?v=149';
 import { renderFamilyExplorer, familyHelpHTML } from './family-explorer.js?v=146';
@@ -252,9 +252,9 @@ store.subscribeAppAccessStatus?.(renderAccessRecordingStatus);
 const presence=createPresence({app:'mouse',container:$('member-presence'),getContext:()=>cloudPresenceContext(store.getCloudStatus(),{enabled:!startupLoading&&!cachedPreview&&cloud.mode==='cloud'}),record:store.recordAppPresence,list:async()=>{const feeds=await Promise.allSettled([store.listAppPresence(),...(store.getCloudStatus().activeCloud==='cloud2'?[]:[store.listNasPresence()])]);return mergePresenceFeeds(feeds.filter(feed=>feed.status==='fulfilled').map(feed=>feed.value));}});
 const accessPage=()=>route;
 const resumeAccess=()=>{recordPendingMouseEntry();if(document.hidden)return;if(!startupLoading)accessActivity.resume(accessPage());else if(verifiedAccessIdentity&&accessIdentity(store.getCloudStatus())===verifiedAccessIdentity){const view=location.hash.slice(1).split('/')[0];openingAccess=true;try{accessActivity.resume(titles[view]?view:accessPage());}finally{openingAccess=false;}}};
-document.addEventListener('visibilitychange',()=>{if(document.hidden){accessActivity.suspend();cloudRecovery.pause();cloudRecoveryChecking=false;}else{resumeAccess();void cloudRecovery.request();}});
-window.addEventListener('pagehide',()=>{accessActivity.suspend();cloudRecovery.pause();cloudRecoveryChecking=false;});
-window.addEventListener('pageshow',event=>{resumeAccess();void cloudRecovery.request({force:event.persisted===true});});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;}else{cloudMonitor.resume();resumeAccess();void cloudRecovery.request();}});
+window.addEventListener('pagehide',()=>{accessActivity.suspend();cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;});
+window.addEventListener('pageshow',event=>{cloudMonitor.resume();resumeAccess();void cloudRecovery.request({force:event.persisted===true});});
 window.addEventListener('focus',()=>{resumeAccess();void cloudRecovery.request();});
 window.addEventListener('online',resumeAccess);
 for(const type of ['pointerdown','keydown'])document.addEventListener(type,event=>{if(event.isTrusted!==false&&!document.hidden&&!startupLoading)accessActivity.touch(accessPage());});
@@ -314,7 +314,7 @@ function kv(pairs) { return `<dl class="keyvals">${pairs.map(([k,v])=>`<dt>${esc
 function mouseChip(id,ambiguous=false) { return `<button class="chip${ambiguous?' amber':''}" data-open="mice" data-id="${esc(id)}">${esc(mouseName(id))}</button>`; }
 function showToast(message,error=false) { if(!error&&/saved|recorded|updated/i.test(message)&&store.getCloudConnections?.()?.operations?.at(-1)?.outcome==='queued')message+=' Cloud 2 saved; sync pending.'; $('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>$('toast').hidden=true,error?8500:4500); }
 async function refreshCloud({verifyFees=route==='fees'}={}) { const previousSheetContext=cageSheetContext(),previousMemberContext=labUserDirectoryContext(cloud),previousIdentityContext=sidebarIdentityContext(cloud);const previousMouseAccess=JSON.stringify(cloud.mousePermissions??{});cloud=await store.getCloudStatus();if(cloud.mode==='cloud'&&previousMouseAccess!==JSON.stringify(cloud.mousePermissions??{})){dataset=null;cloudReady=false;cachedPreview=false;detail=null;editor=null;$('record-dialog')?.close();$('print-preview')?.close();const prepared=$('print-area');if(prepared)prepared.textContent='';}if(previousIdentityContext!==sidebarIdentityContext(cloud))clearSidebarProfile();if(previousMemberContext!==labUserDirectoryContext(cloud)){labUserDirectoryRequest++;setLabUserDirectory([]);clearLabMembersView();clearAccountSetup($('account-setup'));clearStrainManagement($('main'));cryoLinkFocus=null;}if(cageSheetContext()!==previousSheetContext){clearCageSheetDrafts();clearCageManagerDirectory();cageNoteHintCache={context:'',at:0,rows:[]};cageNoteHintRequest=null;}cageLabelSession?.invalidateIfChanged();if(cageImportSession&&!cageImportSession.valid())cageImportSession.close();if(experimentImportSession&&!experimentImportSession.valid())experimentImportSession.close();if(!cloud.signedIn)setLabUserDirectory([]);if(cloud.mode==='cloud'&&cloud.readyForEdits===false)cloudReady=false;if(verifyFees&&cloud.mode==='cloud'&&cloud.signedIn&&cloud.role!=='pending'&&appAllows(cloud,'mouse.fees.read'))await store.getLacFeeVisibility?.();renderConnection();queueSidebarProfile(); }
-async function verifyCurrentAppPolicy(){const previous=JSON.stringify(cloud.mousePermissions??{});const result=await store.verifyCloudMembership();await refreshCloud({verifyFees:false});if(previous!==JSON.stringify(cloud.mousePermissions??{}))render();return result;}
+async function verifyCurrentAppPolicy({canCommit=()=>true}={}){const previous=JSON.stringify(cloud.mousePermissions??{});const result=await store.verifyCloudMembership({canCommit});await refreshCloud({verifyFees:false});if(previous!==JSON.stringify(cloud.mousePermissions??{}))render();return result;}
 function workspaceCloudIndicator(connections=store.getCloudConnections?.()){return cloudDataIndicator(connections,{mode:cloud.mode,checking:startupLoading||cachedPreview,offline:navigator.onLine===false,legacyConnected:cloud.signedIn&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending'&&cloud.activeCloud!=='cloud2'});}
 function workspaceSourceVerified(source){return cloud.signedIn&&!cloud.passwordRecovery&&cloud.role!=='pending'&&cloudReady&&store.getCloudStatus().readyForEdits!==false&&source.connected;}
 function workspaceConnectionText(connections=store.getCloudConnections?.()){if(cloud.mode!=='cloud')return 'Local only';const source=workspaceCloudIndicator(connections);return workspaceSourceVerified(source)?`${source.label} connected`:'Reconnect to edit';}
@@ -1035,8 +1035,8 @@ window.addEventListener('lac-fee-visibility-changed',async()=>{
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(route==='settings')renderSettings()});
 window.addEventListener('hashchange',()=>{const [view,id]=location.hash.slice(1).split('/');if(titles[view]&&(view!==route||String(detail?.id||'')!==decodeURIComponent(id||''))){route=view;detail=id&&entity[view]?{type:view,id:decodeURIComponent(id)}:null;query='';filters={};page=0;sortKey='';sortDesc=false;resetTableWindow();selectedMice.clear();render()}});
 window.addEventListener('beforeunload',event=>{if(hasCageSheetDrafts()||hasStrainDrafts($('main'))){event.preventDefault();event.returnValue='';}});
-window.addEventListener('offline',()=>{cloudRecovery.pause();cloudRecoveryChecking=false;if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
-window.addEventListener('online',()=>{if(cloud.mode==='cloud')void cloudRecovery.request({force:true});});
+window.addEventListener('offline',()=>{cloudRecovery.pause();cloudMonitor.pause();cloudRecoveryChecking=false;if(cloud.mode==='cloud'){cloudReady=false;renderConnection();showToast('Offline. Shared editing is paused; saved records remain readable.')}});
+window.addEventListener('online',()=>{cloudMonitor.resume();if(cloud.mode==='cloud')void cloudRecovery.request({force:true});});
 async function start(){
  const request=++startupRequest;cachedPreview=false;cloudLoadError='';startupLoading=true;startupProgressValue=null;startupMessage='Checking access…';renderStartupLoading();
  try{
@@ -1105,13 +1105,14 @@ const cloudRecovery=createCloudRecovery({
   cloudReady=false;renderConnection();
  }
 });
-async function refreshConnectionHealth(){
- const state=await store.refreshCloudConnections();
+async function refreshConnectionHealth({canCommit=()=>true}={}){
+ const state=await store.refreshCloudConnections({canCommit});
+ if(!canCommit())return state;
  // A later successful health check can recover after the foreground retry
  // budget was exhausted, without rereading records or switching providers.
  if(!cloudReady&&dataset&&!cloudRecoveryChecking&&state?.active===cloud.activeCloud&&!currentSourceDenied(state))void cloudRecovery.request({force:true});
  return state;
 }
 store.subscribeCloudConnections?.(connections=>{renderConnection(connections);if(route==='settings'&&settingsConnectionContext===settingsAccessContext()){const status=$('workspace-connection-state');if(status)status.textContent=workspaceConnectionText(connections);}});
-createCloudMonitor({healthyMs:window.matchMedia?.('(pointer: coarse)')?.matches?45000:15000,getState:()=>store.getCloudConnections?.(),refresh:refreshConnectionHealth,verifyPolicy:verifyCurrentAppPolicy,verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:()=>!cloudConnectionBusy&&!cloudRecoveryChecking&&cloud.cloud2Configured&&cloud.signedIn&&!document.hidden&&!startupLoading&&!cachedPreview&&!historyLoadState&&!historyDraftOpen()&&!document.querySelector('dialog[open]'),onDataChange:async()=>{const state=store.getCloudConnections?.();if(currentSourceDenied(state)){cloud=store.getCloudStatus();clearUnavailableAccess();return;}if(!state?.active){cloudReady=false;renderConnection();void cloudRecovery.request({force:true});return;}if(!cloudReady&&dataset&&state.active===cloud.activeCloud){await cloudRecovery.request({force:true});return;}const source=state.active,clear=()=>!cloudConnectionBusy&&!cloudRecoveryChecking&&!historyDraftOpen()&&!document.querySelector('dialog[open]');const fresh=await store.refreshCurrentRecords({source,canCommit:clear});if(!clear())return;if(fresh)dataset=fresh;cloudReady=store.getCloudStatus().readyForEdits;await refreshCloud();if(fresh)render();},onError:error=>{cloud=store.getCloudStatus();if([401,403].includes(error.status)||currentSourceDenied())clearUnavailableAccess();else renderConnection();}});
+const cloudMonitor=createCloudMonitor({healthyMs:window.matchMedia?.('(pointer: coarse)')?.matches?45000:15000,getState:()=>store.getCloudConnections?.(),refresh:refreshConnectionHealth,verifyPolicy:verifyCurrentAppPolicy,verifyOperation:id=>store.verifyCloudOperation(id),canRefresh:()=>!cloudConnectionBusy&&!cloudRecoveryChecking&&cloud.cloud2Configured&&cloud.signedIn&&navigator.onLine!==false&&!document.hidden&&!startupLoading&&!cachedPreview&&!historyLoadState&&!historyDraftOpen()&&!document.querySelector('dialog[open]'),onDataChange:async()=>{const state=store.getCloudConnections?.();if(currentSourceDenied(state)){cloud=store.getCloudStatus();clearUnavailableAccess();return;}if(!state?.active){cloudReady=false;renderConnection();void cloudRecovery.request({force:true});return;}if(!cloudReady&&dataset&&state.active===cloud.activeCloud){await cloudRecovery.request({force:true});return;}const source=state.active,clear=()=>!document.hidden&&navigator.onLine!==false&&!cloudConnectionBusy&&!cloudRecoveryChecking&&!historyDraftOpen()&&!document.querySelector('dialog[open]');const fresh=await store.refreshCurrentRecords({source,canCommit:clear});if(!clear())return;if(fresh)dataset=fresh;cloudReady=store.getCloudStatus().readyForEdits;await refreshCloud();if(fresh)render();},onError:error=>{cloud=store.getCloudStatus();if([401,403].includes(error.status)||currentSourceDenied())clearUnavailableAccess();else renderConnection();}});
 start();
