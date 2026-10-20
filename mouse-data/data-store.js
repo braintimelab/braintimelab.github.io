@@ -465,16 +465,42 @@ export async function recoverCloudConnection({source=providerSource||'cloud1',ca
 }
 // Shared lab-tool transport; authorization and history limits are enforced again by each RPC.
 const REAGENT_ACTIONS=new Set(['list','save','history','sources','observations','import','record_usage','access','set_access',
- 'order_search','order_list','order_submit','order_transition','order_locations','order_set_location','order_import_offers']);
+ 'order_search','order_list','order_submit','order_transition','order_locations','order_set_location','order_import_offers',
+ 'sheet_order_preview','sheet_order_commit','sheet_order_list']);
 export async function callReagents(action,args={}){
  if(!REAGENT_ACTIONS.has(action)||!args||Array.isArray(args)||typeof args!=='object')throw new Error('Unsupported reagent operation.');
  const generation=authGeneration,c=configuration(),identity=session()?.user?.id;
  const denied=message=>Object.assign(new Error(message),{reagentsAccessChanged:true});
  if(!c||!identity||session()?.setupRequired||session()?.role==='pending'||session()?.passwordRecovery)throw denied('Sign in and complete your account before opening Reagents.');
+ if(action.startsWith('sheet_order_')){
+  const sheetCheck=reagentSheetOwnerFence();sheetCheck();
+  const result=await cloud1Request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},timeoutMs:30000});sheetCheck();return result;
+ }
  const check=()=>{if(generation!==authGeneration||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==identity)throw denied('Your account changed. Reopen Reagents.');};
  try{await membership({check});check();}catch(error){error.reagentsAccessChanged=true;throw error;}
  try{const result=await request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId}});check();return result;}
  catch(error){check();if(/session expired|sign.in|permission for this cloud operation/i.test(error.message))error.reagentsAccessChanged=true;throw error;}
+}
+function reagentSheetOwnerFence(){
+ const c=configuration(),s=session(),generation=authGeneration,epoch=providerSessionEpoch;
+ const check=()=>{
+  if(!c||!s?.access_token||!s.user?.id||s.role!=='owner'||s.passwordRecovery||s.setupRequired)throw new Error('Only the signed-in owner can refresh sheet orders.');
+  if(generation!==authGeneration||epoch!==providerSessionEpoch||configuration()?.url!==c.url||configuration()?.colonyId!==c.colonyId||session()?.user?.id!==s.user.id||session()?.role!=='owner'||session()?.setupRequired||session()?.passwordRecovery)throw new Error('Your account changed. Reopen the sheet import.');
+  if((operationalProvider?.getState()?.active??providerSource)==='cloud2')throw new Error('Sheet order updates are available when Cloud 1 reconnects.');
+ };check();return check;
+}
+export async function fetchReagentSheetOrders(){
+ const check=reagentSheetOwnerFence(),c=configuration(),s=session();
+ const live=await cloud1Request(`memberships?select=role,active&user_id=eq.${encodeURIComponent(s.user.id)}&colony_id=eq.${encodeURIComponent(c.colonyId)}`,{timeoutMs:10000});check();
+ if(!Array.isArray(live)||live.length!==1||live[0].active!==true||live[0].role!=='owner')throw new Error('Owner access could not be verified.');
+ const token=await accessToken();check();
+ const {response,result}=await cloudJSON(`${c.url}/functions/v1/read-reagent-orders`,{method:'POST',cache:'no-store',redirect:'error',headers:{apikey:publicKey(c.anonKey),Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({colony_id:c.colonyId})},30000);check();
+ if(!response.ok){
+  const labels={source_access_denied:'The sheet reader does not have access to the Reagent sheet. Ask the owner to connect read-only access.',source_timeout:'The Reagent sheet did not respond in time. Retry loading it.',source_layout_changed:'The Reagent sheet layout changed. Review the import mapping before updating orders.',source_too_large:'The order tabs exceed the import limit. Ask the owner to review the source range.',owner_required:'Only the owner can import sheet orders.',sign_in_required:'Sign in again before importing sheet orders.',not_configured:'The Reagent sheet connection is not configured yet.'};
+  throw new Error(labels[result?.code]||'The Reagent sheet could not load. Retry without changing existing orders.');
+ }
+ if(!Array.isArray(result?.rows)||result.rows.length>1500||!Array.isArray(result.warnings)||!result.summary||new TextEncoder().encode(JSON.stringify(result)).byteLength>1000000)throw new Error('The Reagent sheet response could not be verified.');
+ return result;
 }
 async function establishMembershipOrSetup(action){
   const c=configuration(),s=session();
