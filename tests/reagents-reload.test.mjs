@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import * as model from '../reagents/model.js';
+import {bindSheetOrderImportDialog} from '../reagents/orders.js';
 import * as sorting from '../reagents/table-sort.js';
 import * as inventoryExports from '../reagents/inventory-export.js';
 import * as usage from '../reagents/usage.js';
@@ -16,7 +17,7 @@ function fixture(){
  const permissions={role:'owner',can_write:true,can_import:true,can_manage_safety:true,export_level:'max'},config={url:'https://synthetic.supabase.co',colonyId:'synthetic-colony'},state={...config,configured:true,signedIn:true,email:'owner@example.invalid',name:'Synthetic Owner',role:'owner',exportLevel:'max'},gates={};
  const store={getCloudStatus:()=>({...state}),verifyCloudMembership:async()=>{calls.push('verify');await gates.verify?.promise;return {...state};},callReagents:async action=>{calls.push(action);await gates[action]?.promise;return action==='access'?{permissions,members:[]}:{rows:[],total:0,next_offset:null};},signOut:async()=>{calls.push('sign-out');state.signedIn=false;}};
  const location=new URL('https://synthetic.invalid/reagents/#inventory');
- const context=vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),document:{hidden:false,getElementById:element,querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('#main input')?controls:[],addEventListener:(name,fn)=>events.set(`document:${name}`,fn)},window:{addEventListener(){},confirm:message=>{prompts.push(message);return gates.confirm===true;}},location,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createAccessActivity:()=>({observe(){},reset(){},signOut(){calls.push('activity-sign-out');}})});
+ const context=vm.createContext({bindSheetOrderImportDialog,createPresence:()=>({refresh(){},clear(){},destroy(){}}),...model,...sorting,...inventoryExports,...usage,store,PUBLIC_CONFIG:config,cloudControlsHTML,cloudIndicatorHTML,showCloud1SignIn,createCloudMonitor:()=>({dispose(){}}),document:{hidden:false,getElementById:element,querySelector:()=>null,querySelectorAll:selector=>selector.startsWith('#main input')?controls:[],addEventListener:(name,fn)=>events.set(`document:${name}`,fn)},window:{addEventListener(){},confirm:message=>{prompts.push(message);return gates.confirm===true;}},location,setTimeout,clearTimeout,URL,Blob,backupViewerLinkHTML:()=>'',renderAccessLogs:()=>()=>{},createAccessActivity:()=>({observe(){},reset(){},signOut(){calls.push('activity-sign-out');}})});
  vm.runInContext(source.replace(/^import .*;\n/gm,'').replace(/await start\(\);\s*$/,'')+'\nglobalThis.app={start,reloadShared,signOut,rpc,setImporting,hasUnsavedChanges,state:()=>({member,reloadPending,pendingWrites})};',context);
  return {app:context.app,element,events,calls,controls,prompts,gates,location,state};
 }

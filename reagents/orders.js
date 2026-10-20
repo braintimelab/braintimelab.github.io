@@ -47,7 +47,16 @@ export function sheetOrderPreviewHTML(preview){
  const rows=Array.isArray(preview?.rows)?preview.rows:[];
  return `<div class="pill-row">${sheetCounts(preview?.summary)}</div><p class="small muted">Updates preserve edits made in Reagents. Conflicts and review-only rows are kept for review.</p><details class="sheet-change-details"><summary>Review ${rows.length.toLocaleString()} rows</summary><div class="table-wrap"><table><thead><tr><th>Item / source</th><th>Change</th><th>Fields / review</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.name||'Item not recorded')}<span class="secondary-line">${esc(sheetSource(row))}</span></td><td><span class="badge ${['conflict','review'].includes(row.action)?'warn':''}">${esc(SHEET_ACTION_LABELS[row.action]||'Review only')}</span></td><td>${esc(sheetReason(row))}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
-// This controller exists only while the owner has the import dialog open.
+// Dismissing the dialog is independent of a request's outcome. The owning app
+// retains this controller in memory until its verified account changes.
+export function bindSheetOrderImportDialog({dialog,getImportUI,isLegacyImportBusy=()=>false,onDismiss=()=>{},onBlocked=()=>{}}){
+ const blocked=()=>isLegacyImportBusy()&&!getImportUI()?.isBusy();
+ function click(event){const button=event.target.closest('button[data-close]');if(!button||button.disabled||button.closest('dialog')!==dialog)return;event.preventDefault();event.stopPropagation();if(blocked()){onBlocked();return;}dialog.close();}
+ function cancel(event){if(blocked()){event.preventDefault();onBlocked();}}
+ function close(){onDismiss(getImportUI());}
+ dialog.addEventListener('click',click);dialog.addEventListener('cancel',cancel);dialog.addEventListener('close',close);
+ return ()=>{dialog.removeEventListener('click',click);dialog.removeEventListener('cancel',cancel);dialog.removeEventListener('close',close);};
+}
 // Unknown commit outcomes retain the exact reviewed payload in memory for Retry.
 export function createSheetOrderImportUI({host,rpc,fetchRows,getPermissions,getCloudStatus,isCurrent,onBusy=()=>{},onApplied=()=>{},document:doc=globalThis.document}){
  let alive=true,busy=false,preview=null,capture=null,submission=null,message='',failed=false,done=false,warningCount=0,warnings=[];
@@ -73,13 +82,13 @@ export function createSheetOrderImportUI({host,rpc,fetchRows,getPermissions,getC
    if(!submission)submission=freezeSheetPayload({p_rows:capture,p_capture_hash:preview.capture_hash,p_expected_revision:preview.revision,p_expected_versions:preview.expected_versions});
    const result=await call('sheet_order_commit',submission);check();if(!result||result.capture_hash!==submission.p_capture_hash||!Number.isInteger(result.revision))throw Error('The update response could not be verified.');
    preview={...preview,summary:result.summary||preview.summary};submission=null;capture=null;done=true;message=`Sheet orders ${result.replayed?'confirmed':'updated'}. No purchase emails were sent.`;onApplied();
-  }catch(error){if(active()){failed=true;if(error.status===409||error.code==='40001'||/Sheet orders? changed\. Preview|Preview (?:the capture|this exact Sheet capture)/i.test(error.message)){submission=null;capture=null;preview=null;message=error.message+' Read the sheet again to review current changes.';}else message=submission?`${error.message} Retry to confirm this same update. Your reviewed rows are retained.`:error.message;}}
-  finally{busy=false;if(active()){onBusy(Boolean(submission));paint();}}
+  }catch(error){if(active()){failed=true;if(error.status===409||error.code==='40001'||/Sheet orders? changed\. Preview|Preview (?:the capture|this exact Sheet capture)/i.test(error.message)){submission=null;capture=null;preview=null;message=error.message+' Read the sheet again to review current changes.';}else message=submission?`${error.code==='57014'||/statement timeout/i.test(error.message)?'The sheet update timed out.':error.message} Retry to confirm this same update, or close this window. Your reviewed rows are retained.`:error.message;}}
+  finally{busy=false;if(active()){onBusy(false);paint();}}
  }
  async function click(event){const button=event.target.closest('[data-sheet-import]');if(!button||button.disabled||!active())return;if(button.dataset.sheetImport==='read')return read();if(button.dataset.sheetImport==='apply')return apply();}
  function mount(){check();host.addEventListener('click',click);paint();}
  function dispose(){alive=false;capture=null;preview=null;submission=null;warnings=[];warningCount=0;host.removeEventListener('click',click);host.innerHTML='';}
- return {mount,dispose,canClose:()=>!busy&&!submission};
+ return {mount,dispose,canClose:()=>true,isCurrent:active,isBusy:()=>busy,hasPendingSubmission:()=>Boolean(submission)};
 }
 
 // Each mount is tied to the verified account and route. No private drafts or
