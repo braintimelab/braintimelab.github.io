@@ -1,4 +1,4 @@
-import {GUEST_PERMISSION_KEYS,isGuest,guestAllows} from './guest-access.js?v=163';
+import {GUEST_PERMISSION_KEYS,isGuest,guestAllows} from './guest-access.js?v=171';
 
 export const APP_PERMISSION_KEYS=Object.freeze({
  notes:Object.freeze([...GUEST_PERMISSION_KEYS.filter(key=>key.startsWith('notes.')),'notes.duties.write']),

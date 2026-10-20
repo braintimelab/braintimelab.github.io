@@ -1,5 +1,5 @@
-import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=157';
-import {guestAllows} from '../mouse-data/guest-access.js?v=158';
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from '../mouse-data/presence.js?v=171';
+import {guestAllows} from '../mouse-data/guest-access.js?v=171';
 import {createAccessActivity} from '../mouse-data/access-activity.js?v=152';
 
 const MEMBER_ROLES = new Set(['owner', 'manager', 'editor', 'viewer']);
@@ -215,7 +215,7 @@ export async function mountPortal(document, window) {
   const backup = element('backup-viewer');
   backup.innerHTML = backupViewerLinkHTML(PUBLIC_CONFIG);
   backup.hidden = !backup.innerHTML;
-  const store = await import('../mouse-data/data-store.js?v=165');
+  const store = await import('../mouse-data/data-store.js?v=171');
   let presence=null;
   const controller = createPortalController({
     store, config: PUBLIC_CONFIG, location: window.location,

@@ -135,7 +135,7 @@ test('unconfirmed sign-out stays hidden and does not falsely claim successful cl
 
 test('daily shortcuts use verified Guest defaults, explicit overrides and fail-closed malformed levels', async () => {
   for (const [level, allowed] of [
-    ['guest1', ['mouse-data:cages']],
+    ['guest1', ['mouse-data:cages', 'reagents:orders']],
     ['guest2', ['mouse-data:cages', 'reagents:orders']],
     ['guest3', ['mouse-data:cages', 'mouse-data:mice', 'reagents:orders', 'reagents:inventory']],
     ['unknown', []], [undefined, []]
@@ -144,7 +144,7 @@ test('daily shortcuts use verified Guest defaults, explicit overrides and fail-c
     assert.deepEqual(Object.keys(f.controller.getState().shortcuts).filter(key => f.controller.getState().shortcuts[key]), allowed);
     assert.equal(f.controller.getState().memberDocuments, false);
   }
-  const f = fixture({status: member({role: 'viewer', guestLevel: 'guest1', guestPermissions: {'mouse.cages.read': false, 'mouse.mice.read': true, 'reagents.inventory.read': true}})});
+  const f = fixture({status: member({role: 'viewer', guestLevel: 'guest1', guestPermissions: {'mouse.cages.read': false, 'mouse.mice.read': true, 'reagents.inventory.read': true, 'reagents.orders.read': false}})});
   await f.controller.start();
   assert.deepEqual(f.controller.getState().shortcuts, {'mouse-data:cages': false, 'mouse-data:mice': true, 'reagents:orders': false, 'reagents:inventory': true});
   assert.equal(f.controller.getState().memberDocuments, false);

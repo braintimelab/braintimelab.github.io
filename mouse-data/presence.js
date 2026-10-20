@@ -1,6 +1,6 @@
 // Current presence only. No page contents, browser storage or activity history.
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const APPS={mouse:'Mouse Data',reagents:'Reagents','lab-tools':'Lab tools',notes:'Lab Notes',calculator:'Calculator',qpcr:'qPCR'};
+const APPS={mouse:'Mouse Data',reagents:'Reagents','lab-tools':'Lab tools',notes:'Lab Boards',calculator:'Calculator',qpcr:'qPCR'};
 const TTL=90000,INTERVAL=30000;
 
 export function cloudPresenceContext(status,{enabled=true}={}){

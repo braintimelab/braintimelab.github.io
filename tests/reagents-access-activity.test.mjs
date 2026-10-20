@@ -73,17 +73,19 @@ test('trusted interactions update only the current allowlisted section and never
 });
 
 
-test('Guest-1 skips inventory loads and cannot visit restricted orders or scientific views',async()=>{
+test('an explicitly restricted Guest-1 cannot visit blocked Orders or scientific views',async()=>{
  const f=fixture({role:'viewer',guestLevel:'guest1',allowedSections:['settings']});await f.app.start();
  assert.equal(f.calls.filter(action=>action==='list').length,0);assert.ok(!f.calls.includes('orders-mount'));
  assert.doesNotMatch(f.element('navigation').innerHTML,/data-section="(?:inventory|orders|history|review)"/);
  f.location.hash='#inventory';await f.app.render();assert.match(f.element('main').innerHTML,/not available/);assert.equal(f.calls.filter(action=>action==='list').length,0);
 });
-test('Guest-2 loads only own-order interface and never preloads inventory',async()=>{
- const f=fixture({role:'viewer',guestLevel:'guest2',allowedSections:['settings','orders']});await f.app.start();
+test('Guest-1 and Guest-2 load only the order interface and never preload inventory',async()=>{
+ for(const guestLevel of ['guest1','guest2']){
+ const f=fixture({role:'viewer',guestLevel,allowedSections:['settings','orders']});await f.app.start();
  assert.ok(f.calls.includes('orders-mount'));assert.equal(f.calls.filter(action=>action==='list').length,0);
  assert.doesNotMatch(f.element('navigation').innerHTML,/data-section="(?:inventory|safety|usage|history|review)"/);
  f.location.hash='#usage';await f.app.render();assert.match(f.element('main').innerHTML,/not available/);
+ }
 });
 test('Guest-3 current-data sections remain read only and omit export controls',async()=>{
  const f=fixture({role:'viewer',route:'inventory',guestLevel:'guest3',allowedSections:['settings','orders','inventory','safety','usage','vendors','equipment']});await f.app.start();

@@ -1,5 +1,5 @@
-import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=163';
-import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=163';
+import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=171';
+import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=171';
 import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
 import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=146';
@@ -10,7 +10,7 @@ import { renderMouseReview } from './mouse-review-view.js?v=100';
 import { runBrainbotMouseReview } from './brainbot-review-runner.js?v=146';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
 import { renderBrainbot, brainbotHelpHTML } from './brainbot.js?v=112';
-import * as store from './data-store.js?v=169';
+import * as store from './data-store.js?v=171';
 import * as model from './model.js?v=146';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -23,11 +23,11 @@ import { summarizeBreeding } from './breeding-summary.js?v=146';
 import { getBreedingOptions, getBreedingOptionsStatus, renderBreedingOptions } from './breeding-options.js?v=100';
 import { renderHousing, scheduleApplies, lightClock } from './husbandry.js?v=146';
 import * as history from './history-index.js?v=100';
-import { renderUserManagement } from './user-management.js?v=163';
-import { renderLabMembers, clearLabMembers } from './lab-members.js?v=163';
-import { renderAccessLogs } from './access-logs.js?v=170';
+import { renderUserManagement } from './user-management.js?v=171';
+import { renderLabMembers, clearLabMembers } from './lab-members.js?v=171';
+import { renderAccessLogs } from './access-logs.js?v=171';
 import { createAccessActivity } from './access-activity.js?v=113';
-import {createPresence,cloudPresenceContext,mergePresenceFeeds} from './presence.js?v=157';
+import {createPresence,cloudPresenceContext,mergePresenceFeeds} from './presence.js?v=171';
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=146';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
@@ -249,7 +249,7 @@ function renderSidebarAccount(connections=store.getCloudConnections?.()){
  const words=name.includes('@')?[name]:name.split(/\s+/).filter(Boolean),code=typeof profile?.acronym==='string'?profile.acronym.trim().split(/[-_]/)[0]:'',initials=(code||(words.length>1?words[0][0]+words.at(-1)[0]:words[0].slice(0,2))).slice(0,3).toUpperCase();
  const role=visibleRoleLabel(cloud.role),connected=!startupLoading&&!cachedPreview&&cloud.mode==='cloud'&&cloudReady&&cloud.role!=='pending'&&cloud.activeCloud!=='cloud2';
  const indicator=cloudIndicatorHTML(connections,{mode:cloud.mode,checking:startupLoading||cachedPreview,offline:navigator.onLine===false,legacyConnected:connected});
- container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="sidebar-account-status">${role?`<span class="sidebar-role">${esc(role)}</span>`:''}${indicator}</span>${isGuest(cloud)?`<span class="small muted sidebar-quota" title="Personal space in Lab Notes. Guest history is limited to one year.">${esc(guestQuotaLabel(cloud))}<br>History: 1 year</span>`:''}</div><button class="sidebar-reload" type="button" data-action="reload-shared" aria-label="Reload shared data" title="Reload shared data"${manualPullPending||startupLoading||cachedPreview?' disabled':''}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 8V3l-3 3a8 8 0 1 0 2.3 10M20 8h-5"/></svg></button>`;container.hidden=false;
+ container.innerHTML=`<span class="sidebar-avatar" aria-hidden="true">${esc(initials)}</span><div class="sidebar-identity"><strong title="${esc(name)}">${esc(name)}</strong><span class="sidebar-account-status">${role?`<span class="sidebar-role">${esc(role)}</span>`:''}${indicator}</span>${isGuest(cloud)?`<span class="small muted sidebar-quota" title="Personal space in Lab Boards. Guest history is limited to one year.">${esc(guestQuotaLabel(cloud))}<br>History: 1 year</span>`:''}</div><button class="sidebar-reload" type="button" data-action="reload-shared" aria-label="Reload shared data" title="Reload shared data"${manualPullPending||startupLoading||cachedPreview?' disabled':''}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 8V3l-3 3a8 8 0 1 0 2.3 10M20 8h-5"/></svg></button>`;container.hidden=false;
 }
 function adoptSidebarProfile(result,context=sidebarIdentityContext(cloud)){
  if(context!==sidebarIdentityContext(cloud)||context!==sidebarIdentityContext(store.getCloudStatus())||!cloud.signedIn)return;

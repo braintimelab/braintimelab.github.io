@@ -1,5 +1,5 @@
-import {APP_PERMISSION_KEYS,validAppPermissions} from './app-access.js?v=163';
-import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=163';
+import {APP_PERMISSION_KEYS,validAppPermissions} from './app-access.js?v=171';
+import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=171';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
 import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
@@ -1818,9 +1818,9 @@ export async function listAppAccess(filters={}){
 // No NAS credentials, cookies, note contents or browser caches are involved.
 export async function listNasAppAccess(filters={}){
  const c=configuration(),s=session(),generation=authGeneration;
- const denied=()=>new Error('Sign in as the owner to view Lab Notes access logs.');
+ const denied=()=>new Error('Sign in as the owner to view Lab Boards access logs.');
  if(!c||!s?.user?.id||s.role!=='owner'||s.passwordRecovery||s.setupRequired)throw denied();
- if(c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)throw new Error('Lab Notes access logs are unavailable for this workspace.');
+ if(c.url!==PUBLIC_CONFIG.url||c.colonyId!==PUBLIC_CONFIG.colonyId)throw new Error('Lab Boards access logs are unavailable for this workspace.');
  if(!filters||typeof filters!=='object'||Array.isArray(filters)||Object.keys(filters).some(k=>!['app','userId','excludeOwner','event','from','to','before','limit'].includes(k)))throw new Error('Unsupported access log filters.');
  const value={app:null,userId:null,excludeOwner:false,event:null,from:null,to:null,before:null,limit:50,...filters};
  const time=v=>v===null||typeof v==='string'&&v.length<=40&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(v)&&Number.isFinite(Date.parse(v));
@@ -1831,7 +1831,7 @@ export async function listNasAppAccess(filters={}){
  const token=await accessToken();check();
  const {response,result}=await cloudJSON(endpoint.href+'?'+query,{method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'omit',redirect:'error'},10000);check();
  if(!response.ok)throw apiError(response,result);
- if(result?.source!=='nas'||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Lab Notes access logs could not be verified.');
+ if(result?.source!=='nas'||!Array.isArray(result.events)||result.events.length>value.limit||typeof result.has_more!=='boolean')throw new Error('Lab Boards access logs could not be verified.');
  return result;
 }
 
