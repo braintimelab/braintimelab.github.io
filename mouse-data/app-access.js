@@ -1,4 +1,4 @@
-import {GUEST_PERMISSION_KEYS,isGuest,guestAllows} from './guest-access.js?v=171';
+import {GUEST_PERMISSION_KEYS,isGuest,guestAllows} from './guest-access.js?v=175';
 
 export const APP_PERMISSION_KEYS=Object.freeze({
  notes:Object.freeze([...GUEST_PERMISSION_KEYS.filter(key=>key.startsWith('notes.')),'notes.duties.write']),
@@ -13,10 +13,13 @@ export function validAppPermissions(app,value){return Object.hasOwn(APP_PERMISSI
 // A restriction layer only: callers retain their role, ownership and data checks.
 export function appAllows(context,key){
  const app=typeof key==='string'?key.split('.')[0]:'';if(!context||!APP_PERMISSION_KEYS[app]?.includes(key))return false;
+ if(context.active===false)return false;
  if(key==='notes.announcements.write'&&!announcementPostingEligible(context))return false;
+ if(['notes.boards.common.write','notes.boards.projects.write'].includes(key)&&(context.guestLevel??context.guest_level)!=null&&!isGuest(context))return false;
  if(isGuest(context))return guestAllows(context,key);
  if(context.role==='owner')return true;
  const camel=app+'Permissions',snake=app+'_permissions',permissions=Object.hasOwn(context,camel)?context[camel]:Object.hasOwn(context,snake)?context[snake]:{};
+ if(['notes.boards.common.write','notes.boards.projects.write'].includes(key))return ['manager','editor','viewer'].includes(context.role)&&validAppPermissions(app,permissions)&&permissions['notes.boards.read']!==false&&(Object.hasOwn(permissions,key)?permissions[key]:permissions['notes.boards.write']!==false);
  return validAppPermissions(app,permissions)&&permissions[key]!==false;
 }
 export function mouseAppFeature(section){return ({matings:'breeding',locobox:'housing',locations:'housing',rooms:'housing',racks:'housing',light_events:'housing'})[section]||section;}

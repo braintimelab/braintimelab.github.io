@@ -60,16 +60,18 @@ if(process.argv.includes('--update-shell')){
   await writeFile(worker,source.replace(/^const CACHE = .*;$/m,`const CACHE = 'colony-shell-v${releaseVersion}';`).replace(/^const SHELL = .*;$/m,`const SHELL = ${JSON.stringify(expected)};`).replace(/^const PRECACHE = .*;$/m,`const PRECACHE = ${JSON.stringify(starter)};`));
 }
 const source=await readFile(worker,'utf8');
-function harness({network=async()=>new Response('online')}={}){
-  const listeners=new Map(),stores=new Map(),writes=[],deleted=[],installed=[];
+function basicResponse(body){const response=new Response(body);Object.defineProperty(response,'type',{value:'basic'});return response;}
+function cloneResponse(response){const copy=response.clone();if(response.type==='basic'&&copy.type!=='basic')Object.defineProperty(copy,'type',{value:'basic'});return copy;}
+function harness({network=async()=>basicResponse('online')}={}){
+  const listeners=new Map(),stores=new Map(),writes=[],deleted=[],installed=[],fetched=[];let skipped=0;
   const absolute=value=>typeof value==='string'?new URL(value,scope).href:value.url;
   const store=name=>{
     if(!stores.has(name))stores.set(name,new Map());const rows=stores.get(name);
-    return {async addAll(paths){installed.push(...paths);for(const path of paths)rows.set(absolute(path),new Response('installed'));},async put(request,response){writes.push(absolute(request));rows.set(absolute(request),response);},async match(request){return rows.get(absolute(request));},async keys(){return [...rows.keys()].map(url=>({url}));},async delete(request){return rows.delete(absolute(request));}};
+    return {async addAll(paths){installed.push(...paths);for(const path of paths)rows.set(absolute(path),new Response('installed'));},async put(request,response){writes.push(absolute(request));rows.set(absolute(request),cloneResponse(response));},async match(request){return rows.get(absolute(request))?cloneResponse(rows.get(absolute(request))):undefined;},async keys(){return [...rows.keys()].map(url=>({url}));},async delete(request){return rows.delete(absolute(request));}};
   };
-  const context={URL,Response,fetch:network,caches:{async open(name){return store(name);},async keys(){return [...stores.keys()];},async delete(name){deleted.push(name);return stores.delete(name);}},self:{registration:{scope},addEventListener:(type,handler)=>listeners.set(type,handler),async skipWaiting(){},clients:{async claim(){}}}};
+  const context={URL,Response,fetch:async(request,options)=>{fetched.push([absolute(request),options]);return network(request,options);},caches:{async open(name){return store(name);},async keys(){return [...stores.keys()];},async delete(name){deleted.push(name);return stores.delete(name);}},self:{registration:{scope},addEventListener:(type,handler)=>listeners.set(type,handler),async skipWaiting(){skipped++;},clients:{async claim(){}}}};
   vm.runInNewContext(source+'\nglobalThis.shellConfig={CACHE,SHELL,PRECACHE};',context);
-  return {listeners,stores,store,writes,deleted,installed,config:context.shellConfig,async lifecycle(type){let pending;listeners.get(type)({waitUntil(value){pending=value;}});await pending;},async request(url,{method='GET'}={}){let response,pending=[];listeners.get('fetch')({request:{url:new URL(url,scope).href,method},respondWith(value){response=value;},waitUntil(value){pending.push(value);}});const result=response===undefined?undefined:await response;await Promise.all(pending);return result;}};
+  return {listeners,stores,store,writes,deleted,installed,fetched,get skipped(){return skipped;},config:context.shellConfig,async lifecycle(type){let pending;listeners.get(type)({waitUntil(value){pending=value;}});await pending;},async request(url,{method='GET'}={}){let response,pending=[];listeners.get('fetch')({request:{url:new URL(url,scope).href,method},respondWith(value){response=value;},waitUntil(value){pending.push(value);}});const result=response===undefined?undefined:await response;await Promise.all(pending);return result;}};
 }
 
 test('shell is the current public files plus exact referenced versions, with no obsolete aliases',()=>{
@@ -85,7 +87,8 @@ test('shell is the current public files plus exact referenced versions, with no 
 
 test('install preloads only the starter dependency closure and leaves optional sections on demand',async()=>{
   const h=harness();await h.lifecycle('install');
-  assert.deepEqual(h.installed,starter);
+  assert.deepEqual(h.fetched.map(([url])=>'./'+url.slice(scope.length)).sort(),starter);
+  assert(h.fetched.every(([,options])=>options.cache==='no-store'));assert.equal(h.skipped,1);
   assert.deepEqual([...h.config.PRECACHE],starter);
   for(const name of ['experiments.js','cryopreservation.js','brainbot.js','locobox.js','lac-fees.js','iacuc.js','breeding-planner.js','cage-label.js'])assert(!starter.some(path=>path.startsWith('./'+name+'?')),name);
   for(const path of starter)assert(await h.store(h.config.CACHE).match(path),path);
@@ -136,4 +139,40 @@ test('offline fallback only uses this release cache, never a previous shell',asy
   assert.equal((await h.request(appPath)).type,'error');
   await h.store(h.config.CACHE).put(appPath,new Response('current shell'));
   assert.equal(await (await h.request(appPath)).text(),'current shell');
+});
+
+
+test('release install reuses exact immutable URLs including saved optional menus and fetches only missing required files',async()=>{
+ const h=harness(),previous=h.store('colony-shell-v174');
+ for(const path of h.config.SHELL)if(path.includes('?v=')&&!path.includes('?v='+releaseVersion))await previous.put(path,basicResponse('saved:'+path));
+ await previous.put('./app.js?v=174',basicResponse('old app'));await previous.put('./index.html',basicResponse('old HTML'));
+ await previous.put('./private-data.json',basicResponse('private'));await h.store('unrelated-private-cache').put(appPath,basicResponse('wrong cache'));
+ await h.lifecycle('install');
+ const expected=starter.filter(path=>!path.includes('?v=')||path.includes('?v='+releaseVersion)).map(path=>new URL(path,scope).href).sort();
+ assert.deepEqual(h.fetched.map(([url])=>url).sort(),expected);
+ assert.equal(await(await h.store(h.config.CACHE).match('./experiments.js?v=132')).text(),'saved:./experiments.js?v=132');
+ assert.equal(await(await h.store(h.config.CACHE).match(appPath)).text(),'online');
+ assert.equal(await(await h.store(h.config.CACHE).match('./index.html')).text(),'online');
+ assert.equal(await h.store(h.config.CACHE).match('./private-data.json'),undefined);
+ assert.equal(await h.store(h.config.CACHE).match('./app.js?v=174'),undefined);
+ assert(!h.fetched.some(([url])=>url.includes('experiments.js')));
+});
+
+test('same path with a changed release token is fetched, while absent optional menus remain on demand',async()=>{
+ const h=harness();await h.store('colony-shell-v174').put('./guest-access.js?v=174',basicResponse('old validator'));
+ await h.lifecycle('install');
+ assert(h.fetched.some(([url])=>url===scope+'guest-access.js?v='+releaseVersion));
+ assert.equal(await(await h.store(h.config.CACHE).match('./guest-access.js?v='+releaseVersion)).text(),'online');
+ assert.equal(await h.store(h.config.CACHE).match('./experiments.js?v=132'),undefined);
+ assert(!h.fetched.some(([url])=>url.includes('experiments.js')));
+});
+
+test('failed required refresh never activates or deletes the working previous offline cache',async()=>{
+ for(const fail of ['error','opaque']){
+  const h=harness({network:async()=>{if(fail==='error')throw new Error('offline');return {ok:true,type:'opaque'};}});
+  await h.store('colony-shell-v174').put('./app.js?v=174',basicResponse('working previous'));
+  await assert.rejects(h.lifecycle('install'),/offline|Public app shell could not be verified/);
+  assert.equal(h.skipped,0);assert.deepEqual(h.deleted,[]);
+  assert.equal(await(await h.store('colony-shell-v174').match('./app.js?v=174')).text(),'working previous');
+ }
 });

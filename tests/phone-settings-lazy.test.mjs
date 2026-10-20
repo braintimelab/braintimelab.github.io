@@ -17,7 +17,7 @@ test('Cages startup excludes all Settings-only renderer modules',()=>{
 test('only requested Settings panels load, with one module download for simultaneous mounts',async()=>{
  const h=fixture(),one=h.node('one'),two=h.node('two');assert.deepEqual(h.calls,[]);
  h.env.mount('users',one,{});h.env.mount('users',two,{});assert.equal(h.calls.length,1);assert.match(one.innerHTML,/Opening this panel/);
- let drawn=0;h.resolve('./user-management.js?v=171',{renderUserManagement(){drawn++;}});await settle();assert.equal(drawn,2);
+ let drawn=0;h.resolve('./user-management.js?v=175',{renderUserManagement(){drawn++;}});await settle();assert.equal(drawn,2);
  h.env.mount('users',one,{});assert.equal(h.calls.length,1);assert.equal(drawn,3);
 });
 test('a panel resolving after navigation, identity change, host replacement or clear cannot render',async()=>{
@@ -31,6 +31,6 @@ test('deferred access logs retain cleanup before and after the module resolves',
  const clear=h.env.mount('access',node,{});assert.equal(drawn,1);clear();clear();assert.equal(cleaned,1);
 });
 test('failed panel code has an isolated Retry without rebuilding other Settings fields',async()=>{
- const h=fixture(),node=h.node('members'),other=h.node('password');other.innerHTML='typed input stays';h.env.mount('members',node,{});h.pending.get('./lab-members.js?v=171').reject(Error('offline'));await settle();assert.match(node.innerHTML,/Retry/);
- node.onclick({target:{closest:()=>true},preventDefault(){},stopPropagation(){}});assert.equal(h.calls.length,2);h.resolve('./lab-members.js?v=171',{renderLabMembers(host){host.innerHTML='Members';}});await settle();assert.equal(node.innerHTML,'Members');assert.equal(other.innerHTML,'typed input stays');
+ const h=fixture(),node=h.node('members'),other=h.node('password');other.innerHTML='typed input stays';h.env.mount('members',node,{});h.pending.get('./lab-members.js?v=175').reject(Error('offline'));await settle();assert.match(node.innerHTML,/Retry/);
+ node.onclick({target:{closest:()=>true},preventDefault(){},stopPropagation(){}});assert.equal(h.calls.length,2);h.resolve('./lab-members.js?v=175',{renderLabMembers(host){host.innerHTML='Members';}});await settle();assert.equal(node.innerHTML,'Members');assert.equal(other.innerHTML,'typed input stays');
 });

@@ -1,5 +1,5 @@
-import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=171';
-import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=171';
+import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=175';
+import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=175';
 import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
 import { tableHistoryConfig, tableHistoryView, compareTableRecency, tableHistoryPage } from './table-history.js?v=104';
 import { applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=174';
@@ -7,7 +7,7 @@ import { applyCageEntrainmentAdoptions, cageEntrainmentReadDependencies } from '
 import { newNumericMouseSid, inferMouseTag, completeMouseTag, prepareCageMouseRegistration, registrationDataset, finalizeMouseRegistration, mouseRegistrationDependencies, separateReusedMouseTag } from './mouse-registration.js?v=174';
 import { prepareMouseReviewPrefill, attachMouseReviewResolution } from './mouse-review.js?v=100';
 import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
-import * as store from './data-store.js?v=174';
+import * as store from './data-store.js?v=175';
 import * as model from './model.js?v=174';
 import { MOUSE_LINE_GROUPS, summarizeMice, mouseLineAssignments } from './mouse-summary.js?v=146';
 import { getStrainRegistry, strainNamingHelpHTML } from './strain-registry.js?v=146';
@@ -46,8 +46,8 @@ import {managedViewNeeds,managedEditorNeeds,pendingManagedNeeds,hasManagedNeeds}
 // Each mount is fenced by its account, render generation and actual DOM node.
 const settingsComponentModules=new Map(),settingsComponentPending=new Map(),settingsComponentMounts=new WeakMap();
 const settingsComponentLoaders={
- users:()=>import('./user-management.js?v=171'),
- members:()=>import('./lab-members.js?v=171'),
+ users:()=>import('./user-management.js?v=175'),
+ members:()=>import('./lab-members.js?v=175'),
  access:()=>import('./access-logs.js?v=171'),
  account:()=>import('./account-setup.js?v=162'),
  acronym:()=>import('./account-acronym.js?v=100'),

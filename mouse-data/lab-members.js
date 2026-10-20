@@ -1,4 +1,4 @@
-import {GUEST_LEVELS,isGuest,GUEST_AVAILABILITY_MODES,guestAvailabilityDraft,guestAvailabilityInput,guestAvailabilityLabel,validateGuestAvailability} from './guest-access.js?v=171';
+import {GUEST_LEVELS,isGuest,GUEST_AVAILABILITY_MODES,guestAvailabilityDraft,guestAvailabilityInput,guestAvailabilityLabel,validateGuestAvailability} from './guest-access.js?v=175';
 /* Owner-only roster. Every read and write is authorized by its server RPC.
  * Email invitations require an explicit owner confirmation and a server-authorized hook.
  * This component never stores passwords. */
