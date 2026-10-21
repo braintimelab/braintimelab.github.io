@@ -24,7 +24,7 @@ import {createPresence,cloudPresenceContext,mergePresenceFeeds} from './presence
 import { projectCageHistory, getCageHistoryDates } from './cage-history.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=174';
 import { sortRooms, compareRooms } from './room-order.js?v=100';
-import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=174';
+import { renderCageSheet, clearCageSheetDrafts, hasCageSheetDrafts, cageSheetHelpHTML } from './cage-sheet.js?v=180';
 import { prepareMouseCageSheetEdit } from './cage-observations.js?v=100';
 import { userAcronymHelpHTML, setLabUserDirectory } from './user-acronyms.js?v=100';
 import { normalizeManagerPermissions, visibleRoleLabel } from './permissions.js?v=100';

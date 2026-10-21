@@ -85,3 +85,9 @@ th .sort-button:hover{background:#e2e9e8;color:var(--blue)}th .sort-button:focus
 .safety-sds-metadata { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; font-size: 12px; margin: 0; }
 .safety-sds-metadata dt { color: var(--muted); }
 .safety-sds-metadata dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Keep Inventory and Dangerous chemicals Safety labels readable in a compact column. */
+.inventory-table th:nth-child(6),.inventory-table td:nth-child(6){width:11rem;max-width:11rem}
+.inventory-table .safety-badges{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px;max-width:10rem}
+.inventory-table .safety-label,.inventory-table .safety-review-pending{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:650px){.inventory-table th:nth-child(6),.inventory-table td:nth-child(6){width:10rem;max-width:10rem}.inventory-table .safety-badges{max-width:9rem}}

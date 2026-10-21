@@ -1,4 +1,4 @@
-import { buildCageManagerChoices, cageManagerShortName, cageManagerValue } from './cage-managers.js?v=100';
+import { buildCageManagerChoices, cageManagerShortName, cageManagerValue, matchCageManager } from './cage-managers.js?v=100';
 import { cageSlotMoveEligibility, planCageSlotMove, planCageMove, planCageRemoval, validateCageMovementOccupancy, planMouseMove, planMouseMoveToPosition, validateMouseMoveDrafts, buildMouseMoveEvent, getMouseMoveReadDependencies } from './cage-movement.js?v=174';
 import { sortRooms } from './room-order.js?v=100';
 import { projectAnimalSheet } from './animal-sheet-export.js?v=174';
@@ -171,6 +171,26 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
     tables.locations=(tables.locations||[]).map(position=>affectedPositions.has(String(position.location_id))?{...position,app_modified_at:new Date(Math.max(Date.parse(at),Number.isFinite(Date.parse(position.app_modified_at))?Date.parse(position.app_modified_at)+1:0)).toISOString()}:position);
   }
   return applySourceBadgeDrafts(applyEquipmentBadgeDrafts(applyCageEntrainmentLocoboxDrafts(applyCageEntrainmentAdoptions(dataset,applyCageEntryStartDates(dataset,{...dataset,tables},{at})),changes,{canEdit}),changes,{canEdit}),changes,{canEdit});
+}
+
+/** Current Sheet responsibility is independent of the legacy SoftMouse owner.
+ * Keep deliberate assignments (including blanks), and leave uncertain source names unassigned. */
+export function cageSheetManagerValue(item,managers=[]){
+ const cage=item?.cage,position=item?.position,real=Boolean(cage&&!cage._derived);
+ if(real&&Object.hasOwn(cage,'manager'))return cage.manager;
+ if(position&&Object.hasOwn(position,'manager'))return position.manager;
+ const current=position?.record_origin==='current_google_sheet_map'&&position.source_current===true&&!position.source_historical&&position.history_read_only!==true;
+ if(real&&current){
+  if(position.source_label_conflict===true||position.source_manager_status==='ambiguous')return '';
+  const canonical=typeof position.source_manager_name==='string'?position.source_manager_name.trim():'';
+  if(position.source_manager_status==='resolved'&&canonical)return matchCageManager(managers,canonical)?.name||canonical;
+  const observed=cageObservations(position),refs=position.source_manager_evidence_refs;
+  // A lone literal name can use the same unique verified roster alias as the selector.
+  // Multiple/unmatched header entries must remain review evidence, never an owner fallback.
+  if(Array.isArray(refs)&&refs.length===1&&refs[0]?.raw===observed.managerName&&position.source_manager_raw===observed.managerName)return matchCageManager(managers,observed.managerName)?.name||'';
+  return '';
+ }
+ return real?item?.manager?.name:cageObservations(position||{}).managerName||position?.source_manager_name||position?.source_manager_acronym||item?.manager?.name;
 }
 
 export function renderCageSheet(host,dataset,hooks={}){
@@ -465,7 +485,7 @@ export function renderCageSheet(host,dataset,hooks={}){
     const printTarget=realCage?`data-sheet-label="${esc(id)}"`:positionId?`data-sheet-position-label="${esc(positionId)}"`:'';
     const printName=realCage?`cage ${cage.cage_tag||id}`:`position ${item.positionName}`;
     const printButton=!hooks.readOnly&&hooks.canPrint!==false&&printTarget?`<button type="button" class="sheet-print-label" ${printTarget} title="${esc('Print label for '+printName)}" aria-label="${esc('Print label for '+printName)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6zM17 12h1"/></svg><span>Label</span></button>`:'';
-    const manager=realCage?(Object.hasOwn(cage,'manager')?cage.manager:item.manager?.name):position&&Object.hasOwn(position,'manager')?position.manager:observations.managerName||position?.source_manager_name||position?.source_manager_acronym||item.manager?.name;
+    const manager=cageSheetManagerValue(item,managers);
     const managerType=realCage?'cages':'locations',managerId=realCage?id:positionId;
     const managerControl=hooks.readOnly||!managerId?`<span class="sheet-manager" title="Manager">${esc(cageManagerShortName(managers,manager))}</span>`:input(managerType,managerId,'manager','Manager for '+item.positionName,{fallback:manager||'',managerSelect:true,choices:buildCageManagerChoices(managers,manager)});
     const lux=observations.intensityLux;
