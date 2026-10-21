@@ -48,17 +48,19 @@ const authDenied=value=>['signed_out','denied'].includes(value?.state);
 const authorizationFailure=value=>Object.assign(problem(value.state==='signed_out'?'UNAUTHORIZED':'FORBIDDEN','The cloud account could not be verified.'),{status:value.state==='signed_out'?401:403});
 const foreground=canCommit=>{if(!canCommit())throw problem('BACKGROUND_CANCELLED','The background connection check was postponed.');};
 
-export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=null,primaryPolicy=false}){
+export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=null,primaryPolicy=false,sessionPolicy=false,getSessionCloud=()=>null,onSessionCloud=()=>{}}){
   if(typeof getContext!=='function'||!adapters?.cloud1||!adapters?.cloud2)throw new TypeError('Two cloud adapters and a verified context provider are required.');
   const listeners=new Set([onChange]),controllers=new Set(),operations=new Map();
-  let generation=0,contextKey=null,context=null,preferred='cloud1',active=null,refreshing=null,primaryProbe=null,disposed=false;
+  let generation=0,contextKey=null,context=null,preferred='cloud1',active=null,refreshing=null,primaryProbe=null,sessionProbe=null,disposed=false;
+  let pinnedSession=sessionPolicy===true,sessionCloud=null;
   let fixedPrimary=primaryPolicy===true,fallbackEngaged=false,recoveryVerified=false,recoveryBlocked=false,failedPrimaryRead=null,primaryReadFailure=0,primaryReadFailureState='unavailable';
-  let sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};
+  let sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')},sourceRevisions={cloud1:0,cloud2:0};
   const verified=()=>context&&UUID.test(context.userId)&&UUID.test(context.colonyId)&&typeof context.authEpoch==='string'&&context.authEpoch.length>0;
   const readable=source=>verified()&&sources[source].state==='online'&&sources[source].ready&&sources[source].canRead&&(source!=='cloud2'||sources[source].enrolled);
   const pendingNAS=()=>[...operations.values()].some(entry=>entry.source==='cloud2'&&(entry.inFlight||['submitting','uncertain','queued','conflict','rejected'].includes(entry.outcome)));
   const caughtUp=()=>sources.cloud2.replicationCaughtUp===true&&!pendingNAS();
   function selectActive(){
+    if(pinnedSession&&sessionCloud)return readable(sessionCloud)?sessionCloud:null;
     if(fixedPrimary){
       if(pendingNAS())fallbackEngaged=true;
       if(readable('cloud1')){
@@ -75,11 +77,11 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     if(preferred==='cloud2'&&sources.cloud2.state==='unavailable'&&readable('cloud1'))return 'cloud1';
     return null;
   }
-  function snapshot(){return {preferred,active,primaryPolicy:fixedPrimary?'cloud1':null,failbackPending:fixedPrimary&&fallbackEngaged,loading:!!refreshing,sources:clone(sources),operations:[...operations.values()].map(({id,source,outcome,receiptOnly})=>({operationId:id,source,outcome,...(receiptOnly?{retryable:false}:{})}))};}
-  function emit(){active=selectActive();const value=snapshot();for(const listener of listeners){try{listener(value);}catch{/* Status rendering cannot change a transaction outcome. */}}return value;}
+  function snapshot(){return {preferred,active,...(pinnedSession?{sessionPolicy:true,sessionCloud}:{}),primaryPolicy:fixedPrimary?'cloud1':null,failbackPending:fixedPrimary&&fallbackEngaged,loading:!!refreshing,sources:clone(sources),operations:[...operations.values()].map(({id,source,outcome,receiptOnly})=>({operationId:id,source,outcome,...(receiptOnly?{retryable:false}:{})}))};}
+  function emit(){active=selectActive();if(pinnedSession&&!sessionCloud&&active){sessionCloud=active;onSessionCloud(active);}const value=snapshot();for(const listener of listeners){try{listener(value);}catch{/* Status rendering cannot change a transaction outcome. */}}return value;}
   function reset(nextContext=null){
     generation++;for(const controller of controllers)controller.abort();controllers.clear();operations.clear();
-    context=nextContext;contextKey=stable(nextContext);sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};preferred='cloud1';active=null;refreshing=null;primaryProbe=null;fallbackEngaged=false;recoveryVerified=false;recoveryBlocked=false;failedPrimaryRead=null;primaryReadFailure=0;
+    context=nextContext;contextKey=stable(nextContext);sessionCloud=pinnedSession&&nextContext&&SOURCES.includes(getSessionCloud())?getSessionCloud():null;sources={cloud1:empty('cloud1'),cloud2:empty('cloud2')};preferred='cloud1';active=null;refreshing=null;primaryProbe=null;sessionProbe=null;sourceRevisions={cloud1:0,cloud2:0};fallbackEngaged=false;recoveryVerified=false;recoveryBlocked=false;failedPrimaryRead=null;primaryReadFailure=0;
     return emit();
   }
   function synchronize(){
@@ -115,14 +117,14 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   }
   async function refresh({recover=true,canCommit=()=>true}={}){
     synchronize();if(refreshing)return refreshing;
-    const check=fence(),readFailure=primaryReadFailure;
-    const checkedResult=(source,result)=>fixedPrimary&&source==='cloud1'&&readFailure!==primaryReadFailure&&(result.state==='online'||['signed_out','denied'].includes(primaryReadFailureState))?{...empty(source),state:primaryReadFailureState}:result;
-    let primaryDone;primaryProbe=new Promise(resolve=>{primaryDone=resolve;});
+    const check=fence(),readFailure=primaryReadFailure,revisions={...sourceRevisions},selected=pinnedSession?(sessionCloud||preferred):null;
+    const checkedResult=(source,result)=>pinnedSession&&authDenied(result)?result:pinnedSession&&revisions[source]!==sourceRevisions[source]?sources[source]:fixedPrimary&&source==='cloud1'&&readFailure!==primaryReadFailure&&(result.state==='online'||['signed_out','denied'].includes(primaryReadFailureState))?{...empty(source),state:primaryReadFailureState}:result;
+    let primaryDone,sessionDone;primaryProbe=new Promise(resolve=>{primaryDone=resolve;});sessionProbe=pinnedSession?new Promise(resolve=>{sessionDone=resolve;}):null;
     const task=(async()=>{
       const results=await Promise.allSettled(SOURCES.map(async source=>{
-        try{const value=await invoke(source,'status',{},check),normalized=status(source,value);if(source==='cloud1'&&fixedPrimary&&(authDenied(normalized)||!fallbackEngaged&&!pendingNAS()&&canCommit())){sources.cloud1=checkedResult(source,normalized);emit();}return value;}
-        catch(error){if(source==='cloud1'&&fixedPrimary&&['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){sources.cloud1={...empty(source),state:failureState(error)};emit();}throw error;}
-        finally{if(source==='cloud1')primaryDone();}
+        try{const value=await invoke(source,'status',{},check),normalized=status(source,value);if(pinnedSession&&source===selected&&(authDenied(normalized)||canCommit())){sources[source]=checkedResult(source,normalized);emit();}if(source==='cloud1'&&fixedPrimary&&(authDenied(normalized)||!fallbackEngaged&&!pendingNAS()&&canCommit())){sources.cloud1=checkedResult(source,normalized);emit();}return value;}
+        catch(error){if(pinnedSession&&source===selected&&['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){sources[source]={...empty(source),state:failureState(error)};sourceRevisions[source]++;emit();}if(source==='cloud1'&&fixedPrimary&&['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){sources.cloud1={...empty(source),state:failureState(error)};emit();}throw error;}
+        finally{if(source==='cloud1')primaryDone();if(source===selected)sessionDone?.();}
       }));
       check();const resolved=SOURCES.map((source,i)=>{const result=results[i];return checkedResult(source,result.status==='fulfilled'?status(source,result.value):{...empty(source),state:failureState(result.reason)});});
       if(!canCommit()){
@@ -140,25 +142,30 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   }
   async function refreshForRead(check,{canCommit=()=>true}={}){
     const task=refresh({canCommit});void task.catch(()=>{});
+    if(pinnedSession&&sessionProbe){await sessionProbe;check();const selected=sessionCloud||preferred;if(authDenied(sources[selected]))throw authorizationFailure(sources[selected]);foreground(canCommit);if(sessionCloud&&readable(sessionCloud))return;}
     if(fixedPrimary&&primaryProbe){await primaryProbe;check();if(!canCommit()){if(authDenied(sources.cloud1))throw authorizationFailure(sources.cloud1);await task;check();foreground(canCommit);}if(!fallbackEngaged&&!pendingNAS()&&readable('cloud1'))return;}
     await task;check();foreground(canCommit);
   }
   async function prepareRead({canCommit=()=>true}={}){const check=fence();await refreshForRead(check,{canCommit});check();foreground(canCommit);return getState();}
   function getState(){synchronize();return snapshot();}
   function setPrimaryCloudPolicy(){synchronize();fixedPrimary=true;preferred='cloud1';if(active==='cloud2')fallbackEngaged=true;return emit();}
-  function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
+  function setSessionCloudPolicy(){synchronize();pinnedSession=true;const saved=getSessionCloud();if(!sessionCloud&&SOURCES.includes(saved))sessionCloud=saved;return emit();}
+  function choose(source){synchronize();if(!SOURCES.includes(source))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');if(pinnedSession&&sessionCloud&&source!==sessionCloud)throw problem('SESSION_CLOUD_PINNED','Sign out before choosing a different cloud for the next session.');if(fixedPrimary&&source!=='cloud1')throw problem('PRIMARY_POLICY','Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.');preferred=source;return emit();}
   async function read(query,{source:requiredSource=null,canCommit=()=>true}={}){
     if(requiredSource!==null&&!SOURCES.includes(requiredSource))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');
     synchronize();const check=fence();if(!active)await refreshForRead(check,{canCommit});check();foreground(canCommit);
+    if(pinnedSession&&sessionCloud&&authDenied(sources[sessionCloud]))throw authorizationFailure(sources[sessionCloud]);
+    if(pinnedSession&&sessionCloud&&!active)throw Object.assign(problem('UNAVAILABLE','The session cloud is unavailable. Retry without changing clouds.'),{connectionUnavailable:true});
     if(requiredSource!==null&&active!==requiredSource)throw problem('SOURCE_CHANGED','The original cloud is unavailable. Retry when it reconnects.');
     if(requiredSource===null&&fixedPrimary&&fallbackEngaged&&recoveryBlocked){await recoverPrimary(check,query,{fromRead:true,canCommit});check();foreground(canCommit);emit();}
     const source=active;
     if(!source)throw problem('NOT_READY','No verified cloud data source is available.');
-    try{const data=await invoke(source,'read',{query:clone(query)},check);foreground(canCommit);if(active!==source)throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
+    try{const data=await invoke(source,'read',{query:clone(query)},check);foreground(canCommit);if(pinnedSession&&sessionCloud===source&&authDenied(sources[source]))throw authorizationFailure(sources[source]);if(active!==source&&!(pinnedSession&&sessionCloud===source&&!authDenied(sources[source])))throw problem('SOURCE_CHANGED','The active cloud changed while loading. Reload this view.');return {source,data};}
     catch(error){
-      check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){if(fixedPrimary&&source==='cloud1'){primaryReadFailure++;primaryReadFailureState=failureState(error);}sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
+      check();if(failure(error)!=='UNAVAILABLE'){if(['UNAUTHORIZED','FORBIDDEN'].includes(failure(error))){if(pinnedSession)sourceRevisions[source]++;if(fixedPrimary&&source==='cloud1'){primaryReadFailure++;primaryReadFailureState=failureState(error);}sources[source]={...empty(source),state:failureState(error)};emit();}throw error;}
       if(authDenied(sources[source]))throw authorizationFailure(sources[source]);
       foreground(canCommit);
+      if(pinnedSession){sourceRevisions[source]++;sources[source]={...empty(source),state:'unavailable'};emit();throw Object.assign(error,{connectionUnavailable:true});}
       // The server completed authorization and reported this page's exact SQL
       // statement timeout. Let the existing bounded reader halve its page,
       // without invalidating other in-flight tables. A one-row failure keeps
@@ -241,6 +248,9 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     const affected=recordKeys(value);
     for(const entry of operations.values())if((entry.inFlight||entry.outcome==='uncertain')&&(!entry.operation||[...recordKeys(entry.operation)].some(record=>affected.has(record))))throw problem('WRITE_UNCERTAIN','An earlier write to this record needs verification. Keep its operation ID rather than submitting the change again.');
     if(!active){const opening=fence();await refreshForRead(opening);opening();}const check=fence(),source=active;
+    if(pinnedSession&&sessionCloud&&authDenied(sources[sessionCloud]))throw authorizationFailure(sources[sessionCloud]);
+    if(pinnedSession&&sessionCloud&&!source)throw Object.assign(problem('UNAVAILABLE','The session cloud is unavailable. Your save stays on its original cloud.'),{connectionUnavailable:true});
+    if(pinnedSession&&pendingNAS()&&sessionCloud!=='cloud2')throw problem('WRITE_UNCERTAIN','An earlier Cloud 2 save needs verification before new writes.');
     if(!source||!sources[source].canWrite)throw problem('READ_ONLY','No verified writable cloud is available.');
     if(adapters[source].idempotentWrites!==true)throw problem('NOT_READY','Idempotent cloud writes are not configured.');
     const entry={id:value.operation_id,source,operation:value,body:key,outcome:'submitting',inFlight:false,receipt:null};operations.set(entry.id,entry);return send(entry,check);
@@ -270,5 +280,5 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   function subscribe(listener){synchronize();if(typeof listener!=='function')throw new TypeError('A status listener is required.');listeners.add(listener);try{listener(snapshot());}catch{/* Rendering cannot alter cloud operations. */}return ()=>listeners.delete(listener);}
   function clear(){return reset(null);}
   function dispose(){reset(null);disposed=true;listeners.clear();}
-  return {refresh,prepareRead,getState,setPrimaryCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
+  return {refresh,prepareRead,getState,setPrimaryCloudPolicy,setSessionCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
 }
