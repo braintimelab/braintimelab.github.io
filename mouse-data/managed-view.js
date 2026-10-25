@@ -2,6 +2,7 @@
 // verified; ordinary menus never request the complete husbandry event table.
 export const MANAGED_TABLES=Object.freeze(['mice','matings','litters','cages','rooms','racks','locations','light_events','husbandry_events']);
 const HOUSING=['mice','cages','rooms','racks','locations','light_events'];
+const SOURCE_ASSOCIATIONS=['animal_sheet_mouse_review','source_reconciliation_batch'];
 const STRAINS=['strain_definition'];
 const LIGHT=['locobox_protocol','locobox_revision','mouse_entrainment'];
 const MOVES=['cage_move','cage_assignment','cage_location_assignment'];
@@ -15,19 +16,19 @@ export function managedViewNeeds(route,{detail=null,cageDate=''}={}){
  if(['settings','brainbot','archive'].includes(route))return needs();
  if(route==='cages'&&!cageDate)return needs();
  if(route==='cages')return needs(HOUSING,CAGE_HISTORY);
- if(route==='mice')return needs(detail?[...HOUSING,'matings','litters']:['mice','cages','locations'],detail?[...STRAINS,...LIGHT,...EXPERIMENTS,...IACUC]:STRAINS);
+ if(route==='mice')return needs(detail?[...HOUSING,'matings','litters']:['mice','cages','locations'],detail?[...STRAINS,...LIGHT,...EXPERIMENTS,...IACUC,...SOURCE_ASSOCIATIONS]:STRAINS);
  if(route==='matings')return needs(['mice','matings','litters','cages','locations'],['breeding_options',...STRAINS,...IACUC]);
  if(route==='litters')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...IACUC]);
  if(route==='overview')return needs([...HOUSING,'matings','litters'],['breeding_options','cage_summary_options',...STRAINS]);
  if(route==='family'||route==='planner')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...(route==='planner'?['breeding_options','breeding_plan']:[])]);
  if(route==='strains')return needs([],STRAINS);
- if(route==='housing')return needs(HOUSING,[...LIGHT,...MOVES]);
+ if(route==='housing')return needs(HOUSING,[...LIGHT,...MOVES,...SOURCE_ASSOCIATIONS]);
  if(route==='locobox')return needs(HOUSING,[...LIGHT,...EXPERIMENTS]);
  if(route==='cryo')return needs(['mice','cages','locations'],['cryopreservation_lot','cryopreservation_event',...STRAINS]);
  if(route==='experiments')return needs(['mice','cages','locations'],[...EXPERIMENTS,...IACUC,...STRAINS]);
  if(route==='iacuc')return needs([...HOUSING,'matings','litters'],[...IACUC,...EXPERIMENTS]);
  if(route==='fees')return needs(HOUSING,['lac_fee_month','lac_fee_options',...CAGE_HISTORY]);
- if(route==='review')return needs([...HOUSING,'matings','litters'],[...STRAINS,...LIGHT,...MOVES,...IACUC]);
+ if(route==='review')return needs([...HOUSING,'matings','litters'],[...STRAINS,...LIGHT,...MOVES,...IACUC,...SOURCE_ASSOCIATIONS]);
  return needs();
 }
 

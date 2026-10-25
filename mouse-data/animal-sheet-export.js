@@ -2,6 +2,7 @@ import {compareRooms} from './room-order.js?v=100';
 import { lightClock } from './husbandry.js?v=174';
 import {mouseManager,cageManager} from './model.js?v=174';
 import {createWorkbookXlsx,columnName} from './workbook-export.js?v=100';
+import {projectCurrentAnimalSheetObservations,observationLocationLabel} from './animal-sheet-current-observation.js?v=183';
 export {createWorkbookXlsx} from './workbook-export.js?v=100';
 
 const present=v=>v!==null&&v!==undefined&&v!=='';
@@ -112,8 +113,17 @@ export function projectAnimalSheet(dataset,options={}) {
   const warnings=[...new Set(rows.flatMap(r=>r.warnings))];
   if(mouseIds.size)warnings.push('Selected-mouse export: other current residents are omitted; total resident counts remain shown.');
   if(dateFrom||dateTo)warnings.push('Date range applies to supporting data; the housing map shows current assignments, not past occupancy.');
-  const projection={title:'Current Animal Sheet',capturedAt,groups,rows,warnings,scope:{roomId,rackId,cageIds:[...cageIds],mouseIds:[...mouseIds],dateFrom,dateTo},
+  const contextTables=options.sourceObservationContext?.tables,contextMice=new Map((contextTables?.mice||[]).filter(mouse=>list(mouse.animal_sheet_review_links).some(link=>link.association_ref)).map(mouse=>[id(mouse.mouse_sid),mouse]));
+  // Fresh server rows win. Supplemental non-Stock records are used only in the
+  // owner's separately labelled listing view, never managed output tables.
+  for(const mouse of get('mice'))contextMice.set(id(mouse.mouse_sid),mouse);
+  const associationIds=new Set([...contextMice.values()].flatMap(mouse=>list(mouse.animal_sheet_review_links).map(link=>id(link.association_ref?.event_id))).filter(Boolean)),events=new Map(get('husbandry_events').map(event=>[id(event.event_id),event]));
+  for(const event of contextTables?.husbandry_events||[])if(associationIds.has(id(event.event_id))&&!events.has(id(event.event_id)))events.set(id(event.event_id),event);
+  const observationDataset={...dataset,tables:{...tables,mice:[...contextMice.values()],husbandry_events:[...events.values()]}};
+  const observations=projectCurrentAnimalSheetObservations(observationDataset).observations.filter(row=>(!roomId||row.sourceRoomId===roomId)&&(!rackId||row.sourceRackId===rackId)&&(!mouseIds.size||mouseIds.has(row.mouseSid)||row.candidateMouseSids.some(sid=>mouseIds.has(sid)))&&(!cageIds.size||cageIds.has(row.recordedCageSid)));
+  const projection={title:'Current Animal Sheet',capturedAt,groups,rows,warnings,observations,scope:{roomId,rackId,cageIds:[...cageIds],mouseIds:[...mouseIds],dateFrom,dateTo},
     counts:{rooms:new Set(groups.map(g=>g.roomId).filter(Boolean)).size,racks:new Set(groups.map(g=>g.rackId).filter(Boolean)).size,groups:groups.length,positions:new Set(rows.map(r=>r.locationId).filter(Boolean)).size,cages:rows.filter(r=>r.cage).length,mice:rows.reduce((n,r)=>n+r.mice.length,0)}};
+  projection.observationCounts={linked:new Set(observations.filter(row=>row.placementStatus==='observed').map(row=>row.mouseSid).filter(Boolean)).size,needsReview:observations.filter(row=>row.placementStatus!=='observed').length};
   projection.sheets=buildSheets(projection,tables,options.entityTypes??['mice','cages','locations','light_events']);
   return projection;
 }
@@ -141,8 +151,8 @@ function cardLines(item) {
 function mapSheet(projection) {
   const sheet={name:'Animal Sheet',rows:[],widths:Array(2).fill([12,17,10,13,24,20]).flat(),merges:[],rowHeights:[],cellStyles:{},frozenRows:0,autoFilter:false};
   function full(value,style=2,height=25){const r=sheet.rows.length;sheet.rows.push([value,...Array(11).fill('')]);sheet.merges.push(`A${r+1}:L${r+1}`);sheet.cellStyles[`A${r+1}`]=style;sheet.rowHeights[r]=height;}
-  full('Braintime · Current Animal Sheet',4,30);full(`Captured ${projection.capturedAt} · ${projection.counts.mice} Stock mice · ${projection.counts.cages} cages`,3);
-  full('Current Stock assignments only. Coordinates preserve recorded rack order; missing slots have no position record. Lighting is a record, not proof of exposure.',3,32);
+  full('Braintime · Recorded cage assignments',4,30);full(`Captured ${projection.capturedAt} · ${projection.counts.mice} recorded Stock assignments · ${projection.counts.cages} recorded cages`,3);
+  full('Current AnimalSheet listings appear separately in AS observations. This sheet retains saved cage assignments and recorded lighting.',3,32);
   for(const group of projection.groups){
     full(`${group.roomName} / ${group.rackName}`,1);
     if(!group.items.length){full('No positions or cages recorded.',3);continue;}
@@ -204,8 +214,14 @@ function buildSheets(p,tables,selectedTypes) {
     matings:list(tables.matings).filter(m=>alive(m)&&(matingSet.has(id(m.mating_sid))||cageSet.has(id(m.cage_sid)))),
     litters:list(tables.litters).filter(l=>alive(l)&&(litterSet.has(id(l.litter_sid))||cageSet.has(id(l.cage_sid))))
   };
-  return [summary,mapSheet(p),...[...new Set(selectedTypes)].map(type=>({name:type.replaceAll('_',' '),rows:[columns[type],...resolved[type].filter(record=>range(record,type)).map(r=>columns[type].map(field=>field==='source'?source(r):r[field]??''))],widths:columns[type].map(field=>/notes|comment|source|genotype/.test(field)?40:20)}))];
+  // Existing managed-table columns and worksheet order remain unchanged.
+  return [summary,mapSheet(p),...[...new Set(selectedTypes)].map(type=>({name:type.replaceAll('_',' '),rows:[columns[type],...resolved[type].filter(record=>range(record,type)).map(r=>columns[type].map(field=>field==='source'?source(r):r[field]??''))],widths:columns[type].map(field=>/notes|comment|source|genotype/.test(field)?40:20)})),observationSheet(p.observations)];
 }
+
+const observationColumns=['AS label','Mouse SID','Identity basis','AS DOB','AS sex','AS ear mark','AS note cell','AS note','AnimalSheet position','Source location ID','Source cell','Sheet captured','Placement status','Recorded mouse label','Recorded cage SID','Recorded cage tag','Effective move date','Review notes'];
+function observationValues(row){return [row.sourceTag,row.mouseSid||'',row.identityLabel,row.sourceDob||'',row.sourceSex||'',row.sourceEarMark||'',row.sourceNoteCell||'',row.sourceNoteKnown?(row.sourceNote??''):'Unknown / not separable from source annotations',observationLocationLabel(row),row.sourceLocationId,row.sourceCell||'',row.sourceCaptureAt||'Not recorded',row.placementStatus==='observed'?'Listed in current AnimalSheet':'Needs review',row.recordedTag||'',row.recordedCageSid||'',row.recordedCageTag||'','Not recorded',row.warnings.map(warning=>warning.message).join('; ')];}
+function observationSheet(rows=[]){return {name:'AS observations',rows:[observationColumns,...rows.map(observationValues)],widths:observationColumns.map(name=>/note|position|label|basis/i.test(name)?35:20)};}
+function observationPrintHTML(rows=[]){return `<section><h2>Current AnimalSheet listings</h2><p>AnimalSheet labels and listed positions are separate from recorded cage assignments. Sheet capture time does not record a physical inspection or cage move.</p><table><thead><tr>${observationColumns.map(value=>`<th>${esc(value)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${observationValues(row).map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${observationColumns.length}">No current observations match this export.</td></tr>`}</tbody></table></section>`;}
 
 export function createAnimalSheetXlsx(projection) {return createWorkbookXlsx(projection);}
 
@@ -228,7 +244,8 @@ export function animalSheetPrintHTML(projection,{logoUrl,title}={}) {
   let body='';
   if(Array.isArray(projection.groups))body=projection.groups.map(group=>`<section class="rack"><h2>${esc(group.roomName)} / ${esc(group.rackName)}</h2>${group.items.length?panels(group).map(panel=>`<h3>${esc(panel.label)}</h3>${panel.bands.map(band=>`<div class="band"><div class="coordinate">${band.row===null?'Coordinates unrecorded':`Recorded row ${esc(band.row)}`}</div><div class="grid">${band.slots.map(slot=>`<div class="slot"><div class="coordinate">${slot.column===null?'':`Recorded column ${esc(slot.column)}`}</div>${slot.items.length?slot.items.map(printCard).join(''):printCard(null)}</div>`).join('')}</div></div>`).join('')}`).join(''):'<p>No positions or cages recorded.</p>'}</section>`).join('');
   else body=list(projection.sheets).map(sheet=>`<section><h2>${esc(sheet.name)}</h2><table><thead><tr>${list(sheet.rows?.[0]).map(v=>`<th>${esc(v)}</th>`).join('')}</tr></thead><tbody>${list(sheet.rows).slice(1).map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>`).join('');
+  if(Array.isArray(projection.groups))body=observationPrintHTML(projection.observations)+'<h2>Recorded cage assignments</h2>'+body;
   return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(heading)}</title><style>
     :root{font-family:Arial,Helvetica,sans-serif;color:#303438;background:#f7f4e7;font-size:12px}body{margin:20px}header{display:flex;gap:16px;align-items:center;border-bottom:3px solid #1f4c7d;padding-bottom:12px}header img{width:48px;height:auto}h1{font-size:24px;color:#1f4c7d;margin:0}h2{background:#1f4c7d;color:#fff;padding:9px;font-size:17px;margin:24px 0 12px}h3{font-size:12px;margin:14px 0 4px;color:#1f4c7d}h4{font-size:12px;margin:0;background:#f7f4e7;padding:7px;color:#1f4c7d}p{margin:6px 0;line-height:1.4}.intro{font-size:10px;color:#5e6265}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.coordinate{font-size:10px;color:#5e6265;margin:4px 0}.cage{background:white;border:1px solid #b9c3cc;padding:5px;margin-bottom:10px;break-inside:avoid}.cage p{font-size:10px}.light{color:#4b5662}.warning{background:#fff0d1;padding:4px}.missing{border:1px dashed #b9c3cc;color:#5e6265;padding:12px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff}th,td{text-align:left;vertical-align:top;border:1px solid #d5d8db;padding:5px;overflow-wrap:anywhere;white-space:pre-wrap}th{font-size:10px;background:#edf2f7}td{font-size:10px}small{font-weight:normal}thead{display:table-header-group}.rack{break-before:page}.rack:first-of-type{break-before:auto}@page{size:A4 landscape;margin:10mm}@media print{body{margin:0;background:white}.no-print{display:none}h2,h3,.coordinate{break-after:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.grid{align-items:start}}
-    </style></head><body><header>${logo?`<img src="${esc(logo)}" alt="Braintime logo">`:''}<div><h1>${esc(heading)}</h1><p>Captured ${esc(projection.capturedAt||'')}</p></div></header><p class="no-print">Use Print → Save as PDF to save this document.</p><p class="intro">${projection.groups?'Current Stock assignments only. Recorded row and column coordinates preserve the source map order. Source-listed animals do not establish current occupancy. Light schedules retain uncertainty and do not prove exposure.':'Exported records, retaining text IDs and source uncertainty.'}</p>${list(projection.warnings).map(w=>`<p class="warning">${esc(w)}</p>`).join('')}${body}</body></html>`;
+    </style></head><body><header>${logo?`<img src="${esc(logo)}" alt="Braintime logo">`:''}<div><h1>${esc(heading)}</h1><p>Captured ${esc(projection.capturedAt||'')}</p></div></header><p class="no-print">Use Print → Save as PDF to save this document.</p><p class="intro">${projection.groups?'AnimalSheet listings appear first. Recorded cage assignments and lighting are shown separately; listing links do not record a cage move or verify exposure.':'Exported records, retaining text IDs and source uncertainty.'}</p>${list(projection.warnings).map(w=>`<p class="warning">${esc(w)}</p>`).join('')}${body}</body></html>`;
 }

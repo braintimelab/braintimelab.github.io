@@ -1,4 +1,5 @@
 import { cageObservations } from './cage-observations.js?v=100';
+import { compareVerifiedSourceLabels,resolveAnimalSheetAssociation } from './animal-sheet-current-observation.js?v=183';
 
 const list=value=>Array.isArray(value)?value:[];
 const text=value=>typeof value==='string'?value.trim():typeof value==='number'&&Number.isFinite(value)?String(value):'';
@@ -28,22 +29,52 @@ function resolutionId(id){
  a=Math.imul(c^(a>>>18),597399067);b=Math.imul(d^(b>>>22),2869860233);c=Math.imul(a^(c>>>17),951274213);d=Math.imul(b^(d>>>19),2716044179);
  return 'mouse-review-'+[a^b^c^d,b^a,c^a,d^a].map(value=>(value>>>0).toString(16).padStart(8,'0')).join('');
 }
-function validReviewLink(mouse,id,sources){
- const refs=new Set(sources.map(source=>refKey(source.ref))),currentRefs=sources.filter(source=>source.current).map(source=>refKey(source.ref));
- return list(mouse.animal_sheet_review_links).some(link=>{if(!object(link)||link.schema_version!==1||link.issue_id!==id||!sameReviewedIdentity(link.reviewed_mouse,mouse))return false;const saved=new Set(list(link.source_refs).map(refKey));return [...saved].some(key=>refs.has(key))&&currentRefs.every(key=>saved.has(key));});
+function validReviewLink(mouse,id,sources,dataset){
+ return matchingReviewLinks(mouse,id,sources,dataset).length>0;
+}
+function matchingReviewLinks(mouse,id,sources,dataset){
+ const current=sources.filter(source=>source.current).map(source=>refKey(source.ref)),all=new Set(sources.map(source=>refKey(source.ref)));
+ return list(mouse.animal_sheet_review_links).filter(link=>{
+  if(!object(link)||link.schema_version!==1||!sameReviewedIdentity(link.reviewed_mouse,mouse))return false;
+  if(Object.hasOwn(link,'association_ref')||Object.hasOwn(link,'association_basis')){const resolved=resolveAnimalSheetAssociation(dataset,mouse,link);return Boolean(resolved&&current.length===1&&current[0]===refKey(resolved.currentSourceRef));}
+  return link.issue_id===id&&list(link.source_refs).some(ref=>all.has(refKey(ref)))&&current.every(key=>list(link.source_refs).some(ref=>refKey(ref)===key));
+ });
+}
+function sourceTagCheck(dataset,mouse,group,sources){
+ const current=sources.filter(source=>source.current);if(!current.length||!day(mouse.date_of_birth)||group.dateOfBirth!==day(mouse.date_of_birth))return null;
+ const link=matchingReviewLinks(mouse,group.id,sources,dataset).find(link=>resolveAnimalSheetAssociation(dataset,mouse,link)?.identityKind==='inferred'),resolved=link?resolveAnimalSheetAssociation(dataset,mouse,link):null;
+ if(!link||!sex(mouse.sex)||current.some(source=>source.sex!==sex(mouse.sex)))return null;
+ const marker=sex(mouse.sex)==='Male'?'M':'F',sid=text(mouse.mouse_sid);
+ if(!sid||current.some(source=>!source.tag.endsWith('-'+marker+sid)))return null;
+ const observedTag=current.length===1?current[0].rawTag:group.tag,comparison=compareVerifiedSourceLabels(mouse.physical_tag,observedTag,{mouseSid:sid,sex:sex(mouse.sex)});
+ if(comparison.classification!=='prefix_discrepancy'&&observedTag===resolved.sourceObservation.source_tag)return null;
+ const refs=current.map(source=>structuredClone(source.ref)),captures=current.map(source=>source.captureAt??null),capture=captures.length===1?captures[0]:null;
+ const ack={schema_version:1,scope:'source_label_only',outcome:'difference_retained',mouse_sid:mouse.mouse_sid,recorded_tag:mouse.physical_tag,observed_tag:observedTag,recorded_prefix:comparison.recordedPrefix,observed_prefix:comparison.observedPrefix,date_of_birth:day(mouse.date_of_birth),sex:sex(mouse.sex),source_refs:refs,evidence_sha256:resolved.evidenceSha256,source_capture_at:capture};
+ const checked=list(link.source_tag_review_history).some(value=>object(value)&&value.schema_version===1&&value.scope===ack.scope&&value.outcome===ack.outcome&&value.mouse_sid===ack.mouse_sid&&value.recorded_tag===ack.recorded_tag&&value.observed_tag===ack.observed_tag&&value.recorded_prefix===ack.recorded_prefix&&value.observed_prefix===ack.observed_prefix&&value.evidence_sha256===ack.evidence_sha256&&value.date_of_birth===ack.date_of_birth&&value.sex===ack.sex&&JSON.stringify(list(value.source_refs).map(refKey).sort())===JSON.stringify(refs.map(refKey).sort()));
+ return {link,resolved,comparison,ack,checked};
+}
+function heldAttention(dataset,id,sources){
+ const refs=new Set(sources.filter(source=>source.current).map(source=>refKey(source.ref))),out=[];
+ const allowed=new Set(['source_ended_conflict','source_terminal_annotation_conflict','source_dob_sex_conflict','source_numeric_id_ambiguous']);
+ for(const event of table(dataset,'husbandry_events'))if(active(event)&&event.event_type==='source_reconciliation_batch')for(const held of list(event.held_observations)){
+  if(!object(held)||held.issue_id!==id||!allowed.has(held.reason)||!list(held.source_refs).length||!list(held.source_refs).every(ref=>refs.has(refKey(ref))))continue;
+  out.push({reason:held.reason,attention:structuredClone(held.attention??null),source_evidence_refs:structuredClone(list(held.source_evidence_refs))});
+ }
+ return out;
 }
 
 function sourceRows(dataset,{includeHistorical=true}={}){
  const output=[],rooms=new Map(table(dataset,'rooms').map(room=>[text(room.room_id),text(room.name||room.label)]));
  function append(position,meta){
   for(const animal of cageObservations(position).animals){
+   const raw=list(position.source_cage_observation?.animals).filter(value=>value?.sourceCell===animal.sourceCell&&typeof value.tag==='string'),rawTag=raw.length===1?raw[0].tag:animal.tag;
    const ref={kind:meta.kind,record_id:meta.recordId,source_cell:animal.sourceCell||null,tag:animal.tag,date_of_birth:animal.dateOfBirth||null,sex:animal.sex||null};
-   output.push({...meta,cell:animal.sourceCell||null,tag:animal.tag,dateOfBirth:animal.dateOfBirth||null,sex:animal.sex||null,note:animal.note||'',earMark:animal.earMark||null,ref});
+   output.push({...meta,cell:animal.sourceCell||null,tag:animal.tag,rawTag,dateOfBirth:animal.dateOfBirth||null,sex:animal.sex||null,note:animal.note||'',earMark:animal.earMark||null,ref});
   }
  }
  for(const position of table(dataset,'locations')){
   if(!active(position)||historical(position)||position.source_current===false||position.active===false||position.source_position_closed===true||!text(position.location_id))continue;
-  append(position,{kind:'current_position',recordId:text(position.location_id),current:true,date:day(position.source_snapshot_date||position.source_last_seen_at),dateBasis:text(position.source_snapshot_date_basis)||null,room:rooms.get(text(position.room_id))||text(position.source_room_label)||null,cage:text(position.label||position.source_label)||null,url:safeUrl(position.source_url)});
+  append(position,{kind:'current_position',recordId:text(position.location_id),current:true,date:day(position.source_snapshot_date||position.source_last_seen_at),captureAt:position.source_capture_at||position.source_captured_at||position.source_snapshot_date||position.source_last_seen_at||null,dateBasis:text(position.source_snapshot_date_basis)||null,room:rooms.get(text(position.room_id))||text(position.source_room_label)||null,cage:text(position.label||position.source_label)||null,url:safeUrl(position.source_url)});
  }
  if(includeHistorical)for(const event of table(dataset,'husbandry_events')){
   const source=event?.source_cage_snapshot;
@@ -78,21 +109,24 @@ const labels={
  current_status_unknown:'Current status needs review',
  dob_conflict:'Different DOB for this tag',
  missing_mouse:'Mouse record missing'
+ ,source_tag_conflict:'Source label needs checking'
 };
 
 /** Runtime-only review, never a new identity or an inferred animal status.
  * A historical exact match to an Ended mouse is complete. Current sheet
  * presence does not itself change that record to Stock. */
 export function buildMouseReviewIssues(dataset,{includeHistorical=true}={}){
- const mice=editableMice(dataset),index=mouseIndex(mice),groups=new Map();
- for(const source of sourceRows(dataset,{includeHistorical})){
+ const mice=editableMice(dataset),index=mouseIndex(mice),groups=new Map(),allSources=sourceRows(dataset,{includeHistorical}),sidCells=new Map(),compactSids=new Set();
+ for(const mouse of mice)if(list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&resolveAnimalSheetAssociation(dataset,mouse,link)))compactSids.add(text(mouse.mouse_sid));
+ for(const source of allSources){
   const id=issueId(source.tag,source.dateOfBirth),group=groups.get(id)||{id,tag:source.tag,dateOfBirth:source.dateOfBirth,sources:[]};group.sources.push(source);groups.set(id,group);
+  const sid=source.current?source.tag.match(/^.+[-\s][MF](\d+)$/)?.[1]:null;if(sid){const cells=sidCells.get(sid)||new Set();cells.add(source.recordId+':'+source.cell);sidCells.set(sid,cells);}
  }
  const issues=[];
  for(const group of groups.values()){
   const sources=group.sources.sort(sourceOrder),current=sources.some(source=>source.current),sexes=unique(sources.map(source=>source.sex).filter(Boolean)),observedSex=sexes.length===1?sexes[0]:null;
   const candidates=index.get(identifier(group.tag))||[];
-  const linked=mice.filter(mouse=>validReviewLink(mouse,group.id,sources));
+  const linked=mice.filter(mouse=>validReviewLink(mouse,group.id,sources,dataset));
   const exact=group.dateOfBirth?candidates.filter(mouse=>day(mouse.date_of_birth)===group.dateOfBirth):[];
   const candidateRecords=[...new Set([...candidates,...linked])],candidateMouseSids=unique(candidateRecords.map(mouse=>text(mouse.mouse_sid))).sort();
   const validIndividual=individual(group.tag)||candidates.some(mouse=>identifier(mouse.physical_tag)===identifier(group.tag)&&individual(mouse.physical_tag));
@@ -111,15 +145,51 @@ export function buildMouseReviewIssues(dataset,{includeHistorical=true}={}){
    else if(current&&matched.state==='Ended')reason='current_status_conflict';
    else if(current&&matched.state!=='Stock')reason='current_status_unknown';
   }
+  const tagCheck=matched&&linked.length===1?sourceTagCheck(dataset,matched,group,sources):null,attention=heldAttention(dataset,group.id,sources);
+  const compactMatched=matched&&matchingReviewLinks(matched,group.id,sources,dataset).some(link=>link?.association_ref);
+  if(compactMatched&&exact.some(mouse=>mouse!==matched)){attention.push({reason:'ambiguous_match',attention:'The current literal label also matches another recorded mouse. The inferred association does not clear that conflict.'});reason='ambiguous_match';}
+  const sourceSid=current?group.tag.match(/^.+[-\s][MF](\d+)$/)?.[1]:null;
+  if(sourceSid&&compactSids.has(sourceSid)&&sidCells.get(sourceSid)?.size>1){attention.push({reason:'source_numeric_id_ambiguous',attention:'The source SID appears in multiple current cells or cohorts. Identity association does not resolve current placement.'});if(!reason)reason='ambiguous_match';}
+  const invalidAssociation=mice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&refKey(ref)===refKey(source.ref)))&&!resolveAnimalSheetAssociation(dataset,mouse,link)));
+  if(invalidAssociation){attention.push({reason:'source_association_unavailable',attention:'The saved source association evidence is unavailable or inconsistent. Reload and review its stable event.'});if(!reason)reason='source_association_unavailable';}
+  const changedAssociation=mice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref?.kind==='source_reconciliation_association_ref'&&!resolveAnimalSheetAssociation(dataset,mouse,link)&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&ref.kind==='current_position'&&ref.record_id===source.recordId&&ref.source_cell===source.cell&&day(ref.date_of_birth)===source.dateOfBirth&&sex(ref.sex)===source.sex&&ref.tag!==source.rawTag))));
+  if(changedAssociation){attention.push({reason:'source_association_changed',attention:'The current source label changed after its saved identity association. Review the current source evidence.'});if(!reason)reason='source_association_changed';}
+  if(tagCheck&&!tagCheck.checked){attention.unshift({reason:'source_tag_conflict',attention:'Identity association only; the differing source label has not been checked.'});if(!reason)reason='source_tag_conflict';}
+  if(current&&attention.some(row=>row.reason==='source_ended_conflict'))reason='current_status_conflict';
+  if(attention.length&&!reason)reason=attention[0].reason;
   if(!reason)continue;
   const recent=(sources.filter(source=>source.current).at(-1)||sources.at(-1)),latest=sources.at(-1);
-  const canCreate=validIndividual&&!linked.length&&!exact.length&&!candidates.some(mouse=>!day(mouse.date_of_birth))&&(!candidates.length||Boolean(group.dateOfBirth))&&sexes.length<=1;
-  issues.push({...group,sex:observedSex,reason,reasonLabel:labels[reason],current,sourceCount:sources.length,currentSourceCount:sources.filter(source=>source.current).length,historicalSourceCount:sources.filter(source=>!source.current).length,lastSeen:latest?.date||null,lastSeenBasis:latest?.dateBasis||null,room:recent?.room||null,cage:recent?.cage||null,place:[recent?.room,recent?.cage].filter(Boolean).join(' · '),candidateMouseSids,canCreate,sources});
+  const canCreate=!attention.length&&validIndividual&&!linked.length&&!exact.length&&!candidates.some(mouse=>!day(mouse.date_of_birth))&&(!candidates.length||Boolean(group.dateOfBirth))&&sexes.length<=1;
+  issues.push({...group,sex:observedSex,reason,reasonLabel:labels[reason]||'Source evidence needs review',attention_reasons:attention,sourceTagReview:tagCheck?{...tagCheck.comparison,checked:tagCheck.checked}:null,current,sourceCount:sources.length,currentSourceCount:sources.filter(source=>source.current).length,historicalSourceCount:sources.filter(source=>!source.current).length,lastSeen:latest?.date||null,lastSeenBasis:latest?.dateBasis||null,room:recent?.room||null,cage:recent?.cage||null,place:[recent?.room,recent?.cage].filter(Boolean).join(' · '),candidateMouseSids,canCreate,sources});
  }
  return issues.sort((a,b)=>Number(b.current)-Number(a.current)||String(b.lastSeen||'').localeCompare(String(a.lastSeen||''))||a.tag.localeCompare(b.tag,undefined,{numeric:true})||a.id.localeCompare(b.id));
 }
 
-function requireIssue(dataset,id){const issue=buildMouseReviewIssues(dataset).find(issue=>issue.id===id);if(!issue)throw new Error('This source issue changed or is already resolved. Refresh Review.');return issue;}
+const reviewContexts=new WeakMap();
+function freezeReviewSnapshot(value,seen=new WeakSet()){
+ if(value===null||typeof value!=='object'||seen.has(value))return value;
+ const prototype=Object.getPrototypeOf(value);
+ if(!Array.isArray(value)&&prototype!==Object.prototype&&prototype!==null)throw new Error('A Review context requires plain snapshot data.');
+ seen.add(value);for(const item of Object.values(value))freezeReviewSnapshot(item,seen);return Object.freeze(value);
+}
+/** Share one private immutable Review snapshot only during a compiler run.
+ * Ordinary helper calls stay fresh and the caller's dataset is not frozen. */
+export function createMouseReviewContext(dataset){
+ if(!object(dataset)||!object(dataset.tables))throw new Error('A Review context requires a dataset snapshot.');
+ const snapshot=freezeReviewSnapshot(structuredClone(dataset)),issues=freezeReviewSnapshot(buildMouseReviewIssues(snapshot)),context=Object.freeze({});
+ reviewContexts.set(context,{snapshot,issues:new Map(issues.map(issue=>[issue.id,issue]))});
+ return Object.freeze({snapshot,context});
+}
+export function releaseMouseReviewContext(context){
+ if(!reviewContexts.has(context))throw new Error('This Review context is invalid or has been released.');
+ reviewContexts.delete(context);
+}
+function requireIssue(dataset,id,reviewContext){
+ let issue;
+ if(reviewContext===undefined)issue=buildMouseReviewIssues(dataset).find(issue=>issue.id===id);
+ else{const checked=reviewContexts.get(reviewContext);if(!checked||checked.snapshot!==dataset)throw new Error('This Review context does not belong to this snapshot or has been released.');issue=checked.issues.get(id);}
+ if(!issue)throw new Error('This source issue changed or is already resolved. Refresh Review.');return issue;
+}
 function selectedMouse(dataset,id){const found=editableMice(dataset).filter(mouse=>text(mouse.mouse_sid)===text(id));if(found.length!==1)throw new Error('Choose one available mouse SID.');return found[0];}
 function retainedSources(issue){
  const ordered=[...issue.sources].sort(sourceOrder);
@@ -130,9 +200,9 @@ function retainedSources(issue){
 
 /** This only prepares an editor. Existing records are never overwritten by
  * source suggestions, and choosing an SID is always an explicit user action. */
-export function prepareMouseReviewPrefill(dataset,id,{mouseSid=null}={}){
+export function prepareMouseReviewPrefill(dataset,id,{mouseSid=null,reviewContext=undefined}={}){
  if(dataset?.history_projection?.read_only===true)throw new Error('Return to the current database before completing a source review.');
- const issue=requireIssue(dataset,id),sourceRefs=retainedSources(issue).sources.map(source=>structuredClone(source.ref));
+ const issue=requireIssue(dataset,id,reviewContext),sourceRefs=retainedSources(issue).sources.map(source=>structuredClone(source.ref));
  if(mouseSid!==null){const mouse=selectedMouse(dataset,mouseSid);return {issue,mouseSid:text(mouse.mouse_sid),prefill:{},sourceRefs};}
  if(!issue.canCreate)throw new Error('Choose an existing mouse or review the source before creating an animal.');
  const prefill={physical_tag:issue.tag,sex:issue.sex||'Unknown',date_of_birth:issue.dateOfBirth||null,state:'Unknown',manager:null,cage_sid:null,cage_tag:null,sire_sids:[],dam_sids:[]};
@@ -145,26 +215,31 @@ export function prepareMouseReviewPrefill(dataset,id,{mouseSid=null}={}){
  * this mouse and the stable resolution record in one guarded transaction.
  * A new resolution record requires expected_version=0, preventing two clients
  * with different historical snapshots from creating separate mouse records. */
-export function attachMouseReviewResolution(dataset,draft,id,{confirmed=false,mouseSid=null}={}){
+export function attachMouseReviewResolution(dataset,draft,id,{confirmed=false,mouseSid=null,reviewContext=undefined}={}){
  if(confirmed!==true)throw new Error('Confirm the source animal and selected mouse before saving.');
  if(!object(draft)||!text(draft.mouse_sid))throw new Error('A mouse SID is required.');
- const prepared=prepareMouseReviewPrefill(dataset,id,{mouseSid}),issue=prepared.issue;
+ const prepared=prepareMouseReviewPrefill(dataset,id,{mouseSid,reviewContext}),issue=prepared.issue;
  if(mouseSid!==null&&text(draft.mouse_sid)!==text(mouseSid))throw new Error('The selected mouse SID changed. Reopen Review.');
  if(mouseSid===null&&table(dataset,'mice').some(mouse=>text(mouse.mouse_sid)===text(draft.mouse_sid)))throw new Error('This mouse SID already exists. Choose it explicitly in Review.');
- const retained=retainedSources(issue),eventId=resolutionId(id),existing=table(dataset,'husbandry_events').filter(row=>text(row.event_id)===eventId);
+ const selected=mouseSid!==null?selectedMouse(dataset,mouseSid):null,tagCheck=selected?sourceTagCheck(dataset,selected,issue,issue.sources):null,preserveLink=tagCheck?.link||(selected?matchingReviewLinks(selected,id,issue.sources,dataset).find(link=>resolveAnimalSheetAssociation(dataset,selected,link)):null),carrier=preserveLink?resolveAnimalSheetAssociation(dataset,selected,preserveLink):null;
+ const retained=retainedSources(issue),eventId=carrier?.event.event_id??resolutionId(id),carrierIssueId=preserveLink?.issue_id??id,existing=table(dataset,'husbandry_events').filter(row=>text(row.event_id)===eventId);
  if(!retained.sources.length)throw new Error('The source record is unavailable.');
- if(existing.length>1||existing.some(row=>row.event_type!=='animal_sheet_mouse_review'||row.review_issue_id!==id))throw new Error('The review resolution record conflicts with another record. Refresh Review.');
+ if(existing.length>1||existing.some(row=>row.event_type!=='animal_sheet_mouse_review'||row.review_issue_id!==carrierIssueId))throw new Error('The review resolution record conflicts with another record. Refresh Review.');
  const previous=existing[0]||null,priorMice=previous?table(dataset,'mice').filter(row=>text(row.mouse_sid)===text(previous.mouse_sid)):[];
  if(priorMice.length>1)throw new Error('The prior reviewed mouse is ambiguous. Refresh Review.');
- const prior=priorMice[0],validPrior=prior&&active(prior)&&!historical(prior)&&sameReviewedIdentity(previous.reviewed_mouse,prior)&&validReviewLink(prior,id,issue.sources);
+ const prior=priorMice[0],validPrior=prior&&active(prior)&&!historical(prior)&&sameReviewedIdentity(previous.reviewed_mouse,prior)&&validReviewLink(prior,id,issue.sources,dataset);
  if(validPrior&&text(prior.mouse_sid)!==text(draft.mouse_sid))throw new Error('This source animal is already linked to another reviewed mouse. Refresh Review.');
  const dependencies=[...retained.sources.map(row=>({type:row.kind==='current_position'?'locations':'husbandry_events',id:row.recordId})),...issue.candidateMouseSids.map(sid=>({type:'mice',id:sid})),...(mouseSid!==null?[{type:'mice',id:text(mouseSid)}]:[]),...(previous?[{type:'husbandry_events',id:eventId}]:[]),...(prior?[{type:'mice',id:text(prior.mouse_sid)}]:[])];
  const readDependencies=[...new Map(dependencies.map(value=>[value.type+':'+value.id,value])).values()];
  if(readDependencies.length>500)throw new Error('This issue has too many conflicting source records. Narrow the source review before saving.');
  const keys={mice:'mouse_sid',locations:'location_id',husbandry_events:'event_id'};
  const guards=readDependencies.map(dependency=>{const records=table(dataset,dependency.type).filter(row=>text(row[keys[dependency.type]])===dependency.id);if(records.length!==1)throw new Error('A source or mouse record is ambiguous. Refresh Review.');return {...dependency,payload:structuredClone(records[0])};});
- const result=structuredClone(draft),links=list(result.animal_sheet_review_links).filter(link=>!object(link)||link.issue_id!==id);
- result.animal_sheet_review_links=[...links,{schema_version:1,issue_id:id,reviewed_mouse:reviewedIdentity(result),source_refs:prepared.sourceRefs}];
- const resolutionRecord={event_id:eventId,event_type:'animal_sheet_mouse_review',schema_version:1,review_issue_id:id,mouse_sid:text(result.mouse_sid),reviewed_mouse:reviewedIdentity(result)};
+ const result=structuredClone(draft),links=list(result.animal_sheet_review_links).filter(link=>!object(link)||link.issue_id!==id&&link.issue_id!==carrierIssueId);
+ if(preserveLink){
+  if(!sameReviewedIdentity(preserveLink.reviewed_mouse,result))throw new Error('The recorded label or identity changed. Save that edit separately before checking this source label.');
+  const preserved=structuredClone(preserveLink),history=[...structuredClone(list(preserved.source_tag_review_history)),...(tagCheck&&!tagCheck.checked?[structuredClone(tagCheck.ack)]:[])];
+  result.animal_sheet_review_links=[...links,{...preserved,...(history.length?{source_tag_review_history:history}:{})}];
+ }else result.animal_sheet_review_links=[...links,{schema_version:1,issue_id:id,reviewed_mouse:reviewedIdentity(result),source_refs:prepared.sourceRefs}];
+ const resolutionRecord={...(preserveLink&&previous?structuredClone(previous):{}),event_id:eventId,event_type:'animal_sheet_mouse_review',schema_version:1,review_issue_id:carrierIssueId,mouse_sid:text(result.mouse_sid),reviewed_mouse:reviewedIdentity(result),...(preserveLink&&result.animal_sheet_review_links.at(-1).source_tag_review_history?{source_tag_review_history:structuredClone(result.animal_sheet_review_links.at(-1).source_tag_review_history)}:{})};
  return {draft:result,readDependencies,guards,resolutionRecord};
 }

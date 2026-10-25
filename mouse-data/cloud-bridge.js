@@ -223,6 +223,14 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
     }
     return emit();
   }
+  async function restoreOperation(operationId,{requiredSource=null}={}){
+    if(!UUID.test(operationId||''))throw problem('INVALID_OPERATION','Use an operation UUID.');
+    if(requiredSource!==null&&!SOURCES.includes(requiredSource))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');
+    const check=fence();if(journal)await restore();check();
+    const entry=operations.get(operationId);if(!entry)return null;
+    if(requiredSource!==null&&entry.source!==requiredSource)throw problem('SOURCE_CHANGED','This operation belongs to a different cloud. Verify it on its original cloud.');
+    return entry.receiptOnly||!entry.operation?null:clone(entry.operation);
+  }
   async function persist(entry,check){if(!journal)return;check();await journal.put({id:entry.id,source:entry.source,outcome:entry.outcome,...(entry.receiptOnly?{receiptOnly:true}:{operation:clone(entry.operation)})},context);check();}
   async function applyReceipt(entry,value,check){
     if(value?.operation_id!==entry.id||!['applied','queued','conflict','rejected'].includes(value.status))throw problem('UNCONFIRMED','The write result could not be confirmed.');
@@ -242,15 +250,19 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
       throw problem('WRITE_UNCERTAIN','The write outcome is unconfirmed. Verify or retry this same operation before submitting it elsewhere.');
     }finally{entry.inFlight=false;}
   }
-  async function submit(operation){
+  async function submit(operation,{requiredSource=null}={}){
+    if(requiredSource!==null&&!SOURCES.includes(requiredSource))throw problem('INVALID_SOURCE','Choose Cloud 1 or Cloud 2.');
     synchronize();if(journal)await restore();const value=validateOperation(operation),key=stable(value),prior=operations.get(value.operation_id);
-    if(prior){if(prior.body!==key)throw problem('ID_REUSED','This operation ID belongs to different changes.');if(prior.inFlight)throw problem('BUSY','This operation is already being submitted.');if(prior.receipt)return {source:prior.source,...clone(prior.receipt)};throw problem('WRITE_UNCERTAIN','Verify or explicitly retry the unconfirmed operation.');}
+    if(prior){if(requiredSource!==null&&prior.source!==requiredSource)throw problem('SOURCE_CHANGED','This operation belongs to a different cloud. Verify it on its original cloud.');if(prior.body!==key)throw problem('ID_REUSED','This operation ID belongs to different changes.');if(prior.inFlight)throw problem('BUSY','This operation is already being submitted.');if(prior.receipt)return {source:prior.source,...clone(prior.receipt)};throw problem('WRITE_UNCERTAIN','Verify or explicitly retry the unconfirmed operation.');}
     const affected=recordKeys(value);
     for(const entry of operations.values())if((entry.inFlight||entry.outcome==='uncertain')&&(!entry.operation||[...recordKeys(entry.operation)].some(record=>affected.has(record))))throw problem('WRITE_UNCERTAIN','An earlier write to this record needs verification. Keep its operation ID rather than submitting the change again.');
     if(!active){const opening=fence();await refreshForRead(opening);opening();}const check=fence(),source=active;
     if(pinnedSession&&sessionCloud&&authDenied(sources[sessionCloud]))throw authorizationFailure(sources[sessionCloud]);
     if(pinnedSession&&sessionCloud&&!source)throw Object.assign(problem('UNAVAILABLE','The session cloud is unavailable. Your save stays on its original cloud.'),{connectionUnavailable:true});
     if(pinnedSession&&pendingNAS()&&sessionCloud!=='cloud2')throw problem('WRITE_UNCERTAIN','An earlier Cloud 2 save needs verification before new writes.');
+    // Restore and refresh may select another cloud. Pin the captured source
+    // before persisting or sending this operation; retries retain that source.
+    if(requiredSource!==null&&source!==requiredSource)throw problem('SOURCE_CHANGED','The required cloud is unavailable. Retry when it reconnects.');
     if(!source||!sources[source].canWrite)throw problem('READ_ONLY','No verified writable cloud is available.');
     if(adapters[source].idempotentWrites!==true)throw problem('NOT_READY','Idempotent cloud writes are not configured.');
     const entry={id:value.operation_id,source,operation:value,body:key,outcome:'submitting',inFlight:false,receipt:null};operations.set(entry.id,entry);return send(entry,check);
@@ -280,5 +292,5 @@ export function createCloudBridge({adapters,getContext,onChange=()=>{},journal=n
   function subscribe(listener){synchronize();if(typeof listener!=='function')throw new TypeError('A status listener is required.');listeners.add(listener);try{listener(snapshot());}catch{/* Rendering cannot alter cloud operations. */}return ()=>listeners.delete(listener);}
   function clear(){return reset(null);}
   function dispose(){reset(null);disposed=true;listeners.clear();}
-  return {refresh,prepareRead,getState,setPrimaryCloudPolicy,setSessionCloudPolicy,choose,read,submit,verify,retry,restore,discardConfirmed,subscribe,clear,dispose};
+  return {refresh,prepareRead,getState,setPrimaryCloudPolicy,setSessionCloudPolicy,choose,read,submit,verify,retry,restore,restoreOperation,discardConfirmed,subscribe,clear,dispose};
 }

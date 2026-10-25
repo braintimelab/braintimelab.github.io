@@ -1,3 +1,6 @@
+import {createSourceReconciliation} from './source-reconciliation.js?v=183';
+import {prepareOwnerSourceTagReview} from './source-tag-review.js?v=183';
+import {validateSourceReconciliationRecord} from './source-import-validation.js?v=183';
 import {APP_PERMISSION_KEYS,validAppPermissions} from './app-access.js?v=175';
 import {isGuest,guestAllows,validateGuestPermissions,guestAvailabilityStatus,validateGuestAvailability} from './guest-access.js?v=175';
 import {applyAnimalEntrainmentSync} from './entrainment-history.js?v=132';
@@ -7,7 +10,7 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=174';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=174';
-import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=182';
+import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=183';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=174';
 export {getDeferredManagedTables,getDeferredManagedEventTypes};
@@ -410,6 +413,48 @@ export async function cancelCloudOperation(id){
 export async function selectCloud(source){if(primaryCloudPolicy&&source!=='cloud1')throw Object.assign(new Error('Cloud 1 is the primary source. Cloud 2 is used automatically during an outage.'),{code:'PRIMARY_POLICY'});const service=provider();if(!service)throw new Error('Parallel clouds are not configured.');await service.refresh();service.choose(source);if(service.getState().active!==source)throw new Error('The selected cloud is not ready for this account.');invalidate();feeVisibility=null;feeVisibilityContext=null;return getCloudStatus();}
 export async function verifyCloudOperation(id){if(!verifiedIntentPolicy)await membership();return provider()?.verify(id);}
 export async function retryCloudOperation(id){await membership();return provider()?.retry(id);}
+// One reviewed, private source plan. No whole-workspace normalizer or automatic
+// entrainment synchronizer is used by this path. Its command remains Cloud 1.
+let ownerSourceReconciliation=null,sourceReconciliationProgress=null;
+function reportSourceReconciliationProgress(progress){try{sourceReconciliationProgress?.(Object.freeze({...progress}));}catch{/* Presentation cannot change validation or persistence. */}}
+function sourceReconciliationContext(){
+ const c=configuration(),s=session(),state=provider()?.getState();
+ if(mode()!=='cloud'||!c||!s?.access_token||!s.user?.id||s.role!=='owner'||isGuest(s)||s.passwordRecovery||pendingAccount(s)||providerSource!=='cloud1'||state?.active!=='cloud1'||!verifiedIntentPolicy?.policyKey)throw new Error('An active Owner session on Cloud 1 is required for source reconciliation.');
+ return {colonyId:c.colonyId,userId:s.user.id,url:c.url,generation:authGeneration,epoch:sessionEpoch(),policy:verifiedIntentPolicy.policyKey,context:exportContext()};
+}
+function checkSourceReconciliationContext(expected){if(stable(sourceReconciliationContext())!==stable(expected))throw new Error('The account, cloud or permissions changed. Reopen the source plan.');}
+async function sourceReconciliationOwner(){await verifyCloudMembership({source:'cloud1'});return sourceReconciliationContext();}
+async function sourceReconciliationSnapshot(plan,context){
+ checkSourceReconciliationContext(context);const c=configuration(),check=()=>checkSourceReconciliationContext(context),read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'});
+ // Reuse the existing complete managed-Mice reader, including its final
+ // version-index check. No archive rows or unrelated tables are scanned.
+ const mice=await incrementalManaged('mice',c,check,{records:new Map(),versions:new Map()},false,read,(completed,total)=>reportSourceReconciliationProgress({phase:'identities',completed,total}),'full');check();
+ const wanted=new Map([...plan.dependencies,...plan.expectedMissing].map(row=>[row.entity_type+':'+row.entity_id,row])),groups=new Map();
+ for(const row of wanted.values()){const rows=groups.get(row.entity_type)||[];rows.push(row.entity_id);groups.set(row.entity_type,rows);}
+ const batches=[];for(const [type,ids]of groups){for(let offset=0;offset<ids.length;){const batch=[ids[offset++]];if(/^[A-Za-z0-9_:-]{1,100}$/.test(batch[0]))while(offset<ids.length&&batch.length<20&&/^[A-Za-z0-9_:-]{1,100}$/.test(ids[offset]))batch.push(ids[offset++]);batches.push({type,ids:batch});}}
+ const records=[];let next=0;
+ await Promise.all(Array.from({length:Math.min(3,batches.length)},async()=>{while(next<batches.length){check();const batch=batches[next++],query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${batch.type}`,entity_id:batch.ids.length===1?`eq.${batch.ids[0]}`:`in.(${batch.ids.join(',')})`,limit:String(batch.ids.length)});
+   const page=await read(`entity_records?${query}`);check();if(!Array.isArray(page)||page.length>batch.ids.length)throw new Error('A source-plan record page was not returned completely.');
+   const seen=new Set();for(const value of page){const row=checkedCloudRecord(value,batch.type,c);if(!batch.ids.includes(row.entity_id)||seen.has(row.entity_id))throw new Error('The source-plan read contains unrelated or repeated records.');seen.add(row.entity_id);records.push(row);}
+ }}));check();return {colonyId:c.colonyId,mice,records};
+}
+function sourceReconciliationController(){
+ if(!ownerSourceReconciliation)ownerSourceReconciliation=createSourceReconciliation({validate:validateSourceReconciliationRecord,io:{
+  verifyOwner:sourceReconciliationOwner,checkContext:checkSourceReconciliationContext,readSnapshot:sourceReconciliationSnapshot,progress:reportSourceReconciliationProgress,
+  async recover(id,context){checkSourceReconciliationContext(context);const operation=await provider().restoreOperation(id,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);const value=await cloud1Request('rpc/parallel_cloud_receipt',{method:'POST',body:{p_colony_id:context.colonyId,p_operation_id:id}});checkSourceReconciliationContext(context);if(value!==null&&(!value||value.operation_id!==id||!['unknown','applied','conflict','rejected','queued'].includes(value.status)))throw new Error('The original source-import receipt could not be verified.');const prior=provider().getState().operations.find(row=>row.operationId===id);return {operation,receipt:value?{source:'cloud1',...value}:null,blocked:Boolean(prior&&!operation)};},
+  async readManagers(context){checkSourceReconciliationContext(context);const result=await request('rpc/list_cage_managers',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:context.colonyId}});checkSourceReconciliationContext(context);if(!Array.isArray(result?.managers)||result.managers.length>4096)throw new Error('The current manager directory is unavailable.');return result.managers.map(row=>({person_id:row.person_id,name:row.name,acronym:row.acronym??null,nickname:row.nickname??null,status:row.status}));},
+  async submit(operation,context){checkSourceReconciliationContext(context);await sourceReconciliationOwner();checkSourceReconciliationContext(context);const result=await provider().submit(operation,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);return result;},
+  async verify(id,context){checkSourceReconciliationContext(context);const result=await provider().verify(id);checkSourceReconciliationContext(context);return result;},
+  async retry(id,context){checkSourceReconciliationContext(context);await sourceReconciliationOwner();checkSourceReconciliationContext(context);const prior=provider().getState().operations.find(row=>row.operationId===id);if(prior?.source!=='cloud1')throw new Error('The original Cloud 1 command is unavailable. Verify its saved receipt.');const result=await provider().retry(id);checkSourceReconciliationContext(context);return result;},
+  invalidate(){invalidate();statusMessage='Source reconciliation requires a fresh cloud pull before editing.';}
+ }});return ownerSourceReconciliation;
+}
+async function withSourceReconciliation(run,onProgress=null){const scope=stable({generation:authGeneration,context:exportContext()});if(activeDatasetSaves.has(scope))throw new Error('Another save or history load is in progress.');activeDatasetSaves.add(scope);sourceReconciliationProgress=typeof onProgress==='function'?onProgress:null;try{return await run(sourceReconciliationController());}finally{sourceReconciliationProgress=null;activeDatasetSaves.delete(scope);}}
+export function clearSourceReconciliation(){ownerSourceReconciliation?.clear();sourceReconciliationProgress=null;}
+export const previewSourceReconciliation=(raw,{onProgress}={})=>withSourceReconciliation(controller=>controller.preview(raw),onProgress);
+export const applySourceReconciliation=({onProgress}={})=>withSourceReconciliation(controller=>controller.apply(),onProgress);
+export const verifySourceReconciliation=()=>withSourceReconciliation(controller=>controller.verify());
+export const retrySourceReconciliation=({onProgress}={})=>withSourceReconciliation(controller=>controller.retry(),onProgress);
 export async function syncCloud2(){const service=provider();if(!service)throw new Error('Cloud 2 is not configured.');await service.cloud2.sync();return service.refresh();}
 function adoptCloud2Identity(identity){
  assertGuestAvailability(identity);
@@ -1408,7 +1453,7 @@ export async function ensureHistory(dataset,{tables=null,onProgress}={}){
   throw error;
  }finally{activeDatasetSaves.delete(scope);}
 }
-async function writeAtomic(pending,{checkScope}={}){
+async function writeAtomic(pending,{checkScope,requiredSource=null}={}){
   checkScope?.();
   if(!pending.length)return [];
   if(pending.length>500)throw new Error('A cloud edit may change at most 500 records. Split this edit into smaller operations.');
@@ -1416,7 +1461,7 @@ async function writeAtomic(pending,{checkScope}={}){
   const body={p_colony_id:c.colonyId,p_changes:pending.map(([r,expected])=>({...r,expected_version:expected}))};
   if(utf8Size(body)>MAX_RPC_BYTES)throw new Error('This atomic edit exceeds the 1MB cloud request limit. Split it into smaller operations.');
   try{
-    const rows=await request('rpc/save_records',{method:'POST',body});
+    const rows=await request('rpc/save_records',{method:'POST',body,requiredSource});
     const expected=new Set(pending.map(([r])=>recordKey(r)));
     if(!Array.isArray(rows)||rows.length!==pending.length||rows.some(r=>!expected.delete(recordKey(r))||!Number.isInteger(r.version))||expected.size)throw new Error('The cloud save did not return a verifiable version for every record.');
     checkScope?.();return rows;
@@ -1447,6 +1492,47 @@ export async function saveDataset(dataset,options={}){
   activeDatasetSaves.add(scope);
   try{return await saveDatasetOnce(dataset,options);}
   finally{activeDatasetSaves.delete(scope);}
+}
+function sourceTagReviewDataset(){
+ if(mode()!=='cloud'||!synced||!baseline||session()?.role!=='owner')throw new Error('Reconnect as the owner and reopen this label check.');
+ const tables=Object.fromEntries(MANAGED.map(type=>[type,[]]));
+ for(const row of baseline.values())if(Object.hasOwn(tables,row.entity_type)&&row.archived!==true)tables[row.entity_type].push(clone(row.payload));
+ return {tables};
+}
+export function getOwnerSourceTagReviewScope(issueId,mouseSid){return prepareOwnerSourceTagReview(sourceTagReviewDataset(),{issueId,mouseSid}).scope;}
+/** Save only the two append-only label-check histories, plus their exact CAS
+ * dependencies. No model normalization, inferred genotype or housing updates. */
+export async function acknowledgeSourceTagReview({issueId,mouseSid,expectedScope}={}){
+ if(pendingAccount(session())||session()?.passwordRecovery)throw new Error('Complete your account setup before changing colony data.');
+ const scope=stable({generation:authGeneration,context:exportContext()});
+ if(activeDatasetSaves.has(scope))throw new Error('Another save is in progress. Reopen this check after it finishes.');
+ activeDatasetSaves.add(scope);
+ try{
+  if(!expectedScope)throw new Error('Reopen this label check from Review.');
+  const opening=baseline,openingVersions=versions,context=exportContext(),generation=authGeneration,pull=pullGeneration,requiredSource=providerSource||'cloud1';
+  const check=()=>{if(mode()!=='cloud'||!synced||baseline!==opening||versions!==openingVersions||generation!==authGeneration||pull!==pullGeneration||context!==exportContext()||session()?.role!=='owner')throw new Error('The account or shared data changed. Reopen this label check.');};
+  check();await requireEditor();check();const policy=await refreshFeeVisibility();check();
+  if(!policy.source_archive_allowed)throw new Error('Source access changed. Reopen this label check.');
+  const prepared=prepareOwnerSourceTagReview(sourceTagReviewDataset(),{issueId,mouseSid,expectedScope}),pending=[],keys=new Set();
+  for(const change of prepared.changes){
+   const key=change.entity_type+':'+change.entity_id,row=opening.get(key),version=openingVersions.get(key);
+   if(!row||!Number.isInteger(version)||version<1||stable(row.payload)!==stable(change.before))throw new Error('The checked record changed. Reopen Review.');
+   pending.push([{...clone(row),payload:clone(change.payload)},version]);keys.add(key);
+  }
+  for(const dependency of prepared.readDependencies){
+   const key=dependency.type+':'+dependency.id,row=opening.get(key),version=openingVersions.get(key);
+   if(!row||!Number.isInteger(version)||version<1)throw new Error('A source dependency is unavailable. Reload Review.');
+   if(!keys.has(key)){pending.push([clone(row),version]);keys.add(key);}
+  }
+  check();const saved=await writeAtomic(pending,{checkScope:check,requiredSource});check();
+  const returned=new Map(saved.map(row=>[recordKey(row),row]));
+  if(pending.some(([row,version])=>{const result=returned.get(recordKey(row));return !result||stable(result.payload)!==stable(row.payload)||Boolean(result.archived)!==Boolean(row.archived)||result.version!==version+(stable(row.payload)===stable(opening.get(recordKey(row)).payload)?0:1);})){
+   invalidate();throw new Error('The save response could not be verified. Pull the latest data before checking again.');
+  }
+  invalidate();
+  try{await pullFromCloud({deferHistory:true,currentOnly:true});}catch(error){throw new Error('The label check was saved. Reload shared data to see it. '+error.message);}
+  statusMessage='Source label check saved. Scientific fields were preserved.';
+ }finally{activeDatasetSaves.delete(scope);}
 }
 async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDependencies=[]}={}){
  if(isGuest(session())){if(localOnly)throw new Error('Guest changes must be verified by the shared database.');return saveGuestDataset(dataset,{readDependencies});}
