@@ -146,7 +146,10 @@ export async function renderExportCenter(container,dataset,hooks,options={}) {
     const metadata=result.metadata,expectedScope=state.scope==='animal-sheet'?'current_housing':'history';
     if(!object(metadata)||metadata.export_level!==grant.level||(metadata.cutoff_date??null)!==grant.cutoff_date||metadata.as_of_date!==grant.as_of_date||metadata.scope!==expectedScope||(metadata.from_date??null)!==(state.scope==='records'?(state.fromDate||null):null)||(metadata.to_date??null)!==(state.scope==='records'?state.toDate:null)||Boolean(metadata.local)!==Boolean(grant.local))throw new Error('Export permission or scope changed while records were loading. Recheck permission and preview again.');
     if(state.scope==='animal-sheet') {
-      const projection=projectAnimalSheet(result.dataset,projectionOptions(grant,metadata));
+      // Only the owner's full-history grant may supplement the source-listing
+      // view with already authorized immutable association evidence. Existing
+      // server-exported managed tables and their columns remain authoritative.
+      const projection=projectAnimalSheet(result.dataset,{...projectionOptions(grant,metadata),...(grant.full_history===true&&hooks.canViewSourceArchive?.()===true?{sourceObservationContext:dataset}:{})});
       const counts=Object.entries(projection.counts||{}).filter(([,value])=>typeof value==='number'&&Number.isFinite(value)).map(([key,count])=>({label:key.replaceAll('_',' '),count}));
       const total=Number.isFinite(projection.counts?.mice)?projection.counts.mice:0;
       return {projection,counts,total,unit:state.selectedOnly?'selected current animals':'current animals',warnings:Array.isArray(projection.warnings)?projection.warnings:[],range:(state.selectedOnly?'Selected animals · ':'')+'Current housing · birth date unrestricted'};

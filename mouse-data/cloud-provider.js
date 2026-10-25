@@ -1,4 +1,4 @@
-import {createCloudBridge,optionalPrimaryRead,managedRecordPageQuery} from './cloud-bridge.js?v=182';
+import {createCloudBridge,optionalPrimaryRead,managedRecordPageQuery} from './cloud-bridge.js?v=183';
 
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const READ_RPCS=new Set(['get_managed_record_page','get_lac_fee_visibility','get_lac_fee_records','get_managed_locations','get_export_permission','assert_full_export_permission','export_records','export_locobox_records','get_local_backup_permission','export_local_backup_records','list_app_access','list_app_access_filtered','list_lab_members','list_cage_managers','list_cage_note_hints','get_my_lab_member','get_lab_user_directory','get_lab_collaboration_members','get_animal_sheet_import_status','get_animal_sheet_import_conflicts','get_experiment_sheet_import_status','get_experiment_sheet_import_conflicts','get_brainbot_status','get_guest_mouse_records','get_member_mouse_records','list_guest_access','reagents_list','reagents_history','reagents_sources','reagents_observations','reagents_access','reagents_order_search','reagents_order_list','reagents_order_locations']);
@@ -110,11 +110,11 @@ export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=g
 
 export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},journal=null,uuid=()=>crypto.randomUUID(),primaryPolicy=false,sessionPolicy=false,getSessionCloud=()=>null,onSessionCloud=()=>{}}={}){
  const bridge=createCloudBridge({adapters:{cloud1,cloud2},getContext,onChange,journal,primaryPolicy,sessionPolicy,getSessionCloud,onSessionCloud});
-  async function request(route,{method='GET',body,cloudSource=null,canCommit=()=>true}={}){
+  async function request(route,{method='GET',body,cloudSource=null,canCommit=()=>true,requiredSource=null}={}){
   const query={route,method,...(body===undefined?{}:{body:clone(body)})};
   if(isCloudRead(route,method))return (await bridge.read(query,{source:cloudSource,canCommit})).data;
   const state=bridge.getState();if(cloudSource&&state.sessionPolicy&&state.sessionCloud!==cloudSource)throw problem('SOURCE_CHANGED','The original session cloud must be used for this save.');
-  const receipt=await bridge.submit({operation_id:uuid(),request:query});
+  const receipt=await bridge.submit({operation_id:uuid(),request:query},{requiredSource});
   if(receipt.access_changed)throw problem('FORBIDDEN','Account access changed. Verify current access before continuing.',{status:403,reagentsAccessChanged:true});
   if(receipt.status==='conflict')throw problem('CONFLICT','This record changed. Reload and review your edit.',{status:409,receipt});
   if(receipt.status==='rejected')throw problem('REJECTED',receipt.reason||'The cloud did not accept this change.',{receipt});

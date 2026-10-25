@@ -3,6 +3,7 @@ access-activity.js
 access-logs.js
 account-acronym.js
 account-setup.js
+animal-sheet-current-observation.js
 animal-sheet-export.js
 animal-sheet-import.js
 app-access.js
@@ -87,11 +88,16 @@ mouse-review-view.js
 mouse-review.js
 mouse-summary.js
 overview-summary.js
+parentage-evidence.js
 permissions.js
 planner-layout.css
 presence.js
 room-order.js
 site-migration.js
+source-import-validation.js
+source-reconciliation-view.js
+source-reconciliation.js
+source-tag-review.js
 startup-read.js
 strain-cryo-links.js
 strain-management.css
