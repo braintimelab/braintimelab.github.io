@@ -110,7 +110,7 @@ const sectionLoaders = {
  reviewRunner:()=>import('./brainbot-review-runner.js?v=174').then(module=>({runBrainbotMouseReview}=module)),
  brainbot:()=>import('./brainbot.js?v=112').then(module=>({renderBrainbot,brainbotHelpHTML}=module)),
  strains:()=>import('./strain-management.js?v=178').then(module=>({renderStrainManagement,hasStrainDrafts,clearStrainManagement}=module)),
- family:()=>import('./family-explorer.js?v=183').then(module=>({renderFamilyExplorer,familyHelpHTML}=module)),
+ family:()=>import('./family-explorer.js?v=186').then(module=>({renderFamilyExplorer,familyHelpHTML}=module)),
  cryo:()=>import('./cryopreservation.js?v=178').then(module=>({renderCryopreservation,hasCryopreservationDraft,isCryopreservationBusy}=module)),
  experiments:()=>import('./experiments.js?v=132').then(module=>({renderExperiments,experimentHelpHTML,hasExperimentDrafts,resetExperimentSourceView}=module)),
  fees:()=>import('./lac-fees.js?v=174').then(module=>({renderLacFees,lacFeeHelpHTML}=module)),
