@@ -47,7 +47,7 @@ export const MOUSE_REGISTRATION_SHEET_HELP='Paste up to 100 rows from a spreadsh
  * retained in original_sid whenever normalization changes it. Irregular source
  * identities require review instead of being silently assigned another ID. */
 export function parseMouseRegistrationRows(text,defaults={}){
- const errors=[],drafts=[];
+ const errors=[],drafts=[],explicitPhysicalTags=[];
  if(typeof text!=='string'||!text.trim())return {drafts,errors:['Paste the header row and at least one mouse row.']};
  if(text.length>1000000)return {drafts,errors:['The pasted sheet is too large. Paste at most 100 mouse rows.']};
  let rows;try{const source=text.replace(/^\uFEFF/,'');rows=cellsOf(source,delimiterOf(source)).filter(row=>row.cells.some(cell=>cell.trim()));}catch(error){return {drafts,errors:[error.message]};}
@@ -87,8 +87,9 @@ export function parseMouseRegistrationRows(text,defaults={}){
   if(cageColumn>=0&&row.cells[cageColumn].trim()&&String(draft.cage_sid)!==String(defaults.cage_sid||'')&&(tagColumn<0||!row.cells[tagColumn].trim()))delete draft.cage_tag;
   draft.sex??='Unknown';draft.state??='Stock';draft.sire_sids??=[];draft.dam_sids??=[];
   if(draft.mouse_sid){const key=sidKey(draft.mouse_sid);if(seenSids.has(key))errors.push(`Row ${row.line}: SID ${draft.mouse_sid} duplicates row ${seenSids.get(key)}.`);else seenSids.set(key,row.line);}
+  explicitPhysicalTags.push(headers.includes('physical_tag')&&Boolean(row.cells[headers.indexOf('physical_tag')].trim()));
   drafts.push(draft);
  }
  // Never return a partially usable batch after a malformed row.
- return {drafts:errors.length?[]:drafts,errors};
+ return {drafts:errors.length?[]:drafts,errors,explicitPhysicalTags:errors.length?[]:explicitPhysicalTags};
 }

@@ -74,7 +74,7 @@ export function litterRegistrationCounts(source,{reportedSize=null,existing=fals
  return {counts,total,reportedSize:!existing&&total>0?String(reported||total):raw};
 }
 
-export function prepareLitterRegistrationBatch(dataset,context,{litterDraft=context?.litterDraft,sharedDraft=context?.shared,counts,parentsConfirmed=false,sids=null,requestId=null}={}){
+export function prepareLitterRegistrationBatch(dataset,context,{litterDraft=context?.litterDraft,sharedDraft=context?.shared,counts,parentsConfirmed=false,sids=null,requestId=null,deferTagValidation=false}={}){
  assertLitterRegistrationContext(dataset,context);
  const litter=context.existing?copy(context.litterDraft):copy(litterDraft);
  const mating=context.matingId?find(dataset,'matings',context.matingId):null;
@@ -100,7 +100,7 @@ export function prepareLitterRegistrationBatch(dataset,context,{litterDraft=cont
  }
  const staged=context.existing?dataset:{...dataset,tables:{...dataset.tables,litters:[...rows(dataset,'litters'),litter]}};
  if(!context.existing){const check=validateRecord('litters',litter,dataset,null);if(check.errors.length)throw new Error(check.errors.join(' '));}
- const batch=parsed.total?prepareMouseRegistrationBatch(staged,shared,{counts:parsed.counts,sids,requestId}):{drafts:[],readDependencies:[],warnings:[]};
+ const batch=parsed.total?prepareMouseRegistrationBatch(staged,shared,{counts:parsed.counts,sids,requestId,deferTagValidation}):{drafts:[],readDependencies:[],warnings:[]};
  const dependencies=[...context.readDependencies,...batch.readDependencies];
  if(!context.existing)dependencies.push(...mouseRegistrationDependencies(dataset,shared));
  for(const draft of batch.drafts)dependencies.push(...mouseRegistrationDependencies(dataset,draft));
