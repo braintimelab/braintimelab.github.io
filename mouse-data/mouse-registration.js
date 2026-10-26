@@ -37,8 +37,8 @@ const batchField={Male:'batch_males',Female:'batch_females',Unknown:'batch_unkno
 const escapeHTML=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 
 export function mouseBatchCountsHTML(defaultSex='Unknown') {
- const sex=batchSexes.includes(defaultSex)?defaultSex:'Unknown';
- return `<fieldset class="field wide mouse-batch-counts"><legend>Number of mice</legend><p class="small muted">Enter the number of males, females and unsexed mice. The information below applies to the whole batch. SIDs are assigned automatically.</p><div class="form-grid">${batchSexes.map(value=>`<div class="field"><label for="${batchField[value]}">${value==='Unknown'?'Unsexed':value==='Male'?'Males':'Females'}</label><input id="${batchField[value]}" name="${batchField[value]}" type="number" min="0" max="${MOUSE_BATCH_LIMIT}" step="1" value="${value===sex?1:0}" inputmode="numeric"></div>`).join('')}</div><p class="small muted">For several mice, enter a tag prefix such as FB. Each mouse receives its own tag and SID.</p></fieldset>`;
+ // Every count starts at zero: entering 3 males and 3 females must not add a hidden unsexed mouse.
+ return `<fieldset class="field wide mouse-batch-counts"><legend>Number of mice</legend><p class="small muted">Enter the number of males, females and unsexed mice. The information below applies to the whole batch. SIDs are assigned automatically.</p><div class="form-grid">${batchSexes.map(value=>`<div class="field"><label for="${batchField[value]}">${value==='Unknown'?'Unsexed':value==='Male'?'Males':'Females'}</label><input id="${batchField[value]}" name="${batchField[value]}" type="number" min="0" max="${MOUSE_BATCH_LIMIT}" step="1" value="0" inputmode="numeric"></div>`).join('')}</div><p class="small muted">For several mice, enter a tag prefix such as FB. Each mouse receives its own tag and SID.</p></fieldset>`;
 }
 
 /** Accept FormData or a plain object. Fractional, negative and blank counts are

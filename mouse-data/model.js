@@ -291,6 +291,8 @@ function problems(dataset,dateValidity=null) {
 }
 
 const appendOnlyValidationContexts=new WeakMap();
+// Created and consumed only inside validateMouseBatchEdits; never exposed.
+const mouseBatchFieldContexts=new WeakMap();
 
 /** A private working copy for an append-only mouse batch. Existing rows and
  * other tables remain unchanged; append a mouse only after validation succeeds.
@@ -307,7 +309,8 @@ export function validateRecord(type,draft,dataset,originalId=null,validationCont
   if(!draft||typeof draft!=='object'||Array.isArray(draft))return {errors:['A record object is required.'],warnings};
   const prepared=type==='mice'&&originalId===null&&appendOnlyValidationContexts.get(validationContext);
   const usePrepared=Boolean(prepared&&prepared.dataset===dataset);
-  const base=usePrepared?prepared.dataset:normalizeDataset(dataset),field=ID_FIELDS[type],old=base.tables[type].find(r=>r[field]===originalId);
+  const fieldPrepared=type==='mice'&&mouseBatchFieldContexts.get(validationContext),useFieldPrepared=Boolean(fieldPrepared&&fieldPrepared.dataset===dataset);
+  const base=usePrepared?prepared.dataset:useFieldPrepared?fieldPrepared.dataset:normalizeDataset(dataset),field=ID_FIELDS[type],old=base.tables[type].find(r=>r[field]===originalId);
   if(originalId!==null&&!old)errors.push('The original record no longer exists. Reload before editing.');
   if(typeof draft[field]!=='string'||!draft[field].trim())errors.push(`${field} must be a nonempty text identifier.`);
   if(old&&draft[field]!==originalId)errors.push('An existing record identifier cannot be changed. Create a new record instead.');
@@ -345,18 +348,64 @@ export function validateRecord(type,draft,dataset,originalId=null,validationCont
       else {const check=validateScenario(plan.scenario);errors.push(...check.errors);warnings.push(...check.warnings);}
     }
   }
-  const candidate=usePrepared?{...base,tables:{...base.tables}}:copy(base);
-  candidate.tables[type]=base.tables[type].filter(r=>r[field]!==originalId);
-  candidate.tables[type].push(copy(draft));
-  const prior=usePrepared?prepared.prior:new Set(problems(base).map(p=>p.fingerprint));
-  for(const issue of problems(candidate,usePrepared?prepared.dateValidity:null)) {
-    if(!prior.has(issue.fingerprint))errors.push(issue.message);
-    else if(issue.type===type&&issue.id===originalId)warnings.push(`Existing source issue retained: ${issue.message}`);
+  if(!useFieldPrepared){
+    const candidate=usePrepared?{...base,tables:{...base.tables}}:copy(base);
+    candidate.tables[type]=base.tables[type].filter(r=>r[field]!==originalId);
+    candidate.tables[type].push(copy(draft));
+    const prior=usePrepared?prepared.prior:new Set(problems(base).map(p=>p.fingerprint));
+    for(const issue of problems(candidate,usePrepared?prepared.dateValidity:null)) {
+      if(!prior.has(issue.fingerprint))errors.push(issue.message);
+      else if(issue.type===type&&issue.id===originalId)warnings.push(`Existing source issue retained: ${issue.message}`);
+    }
   }
   if(ids(draft.dam_sids).length>1)warnings.push('Multiple dam IDs remain candidates; individual maternity is not established.');
   if(type==='mice'&&!populated(draft.genotype))warnings.push('Genotype remains unknown. A blank does not mean wild type.');
   if(type==='light_events'&&!populated(draft.cycle_hours))warnings.push('Cycle duration is unspecified; no light schedule is inferred.');
   return {errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
+}
+
+/** Validate existing mouse edits atomically without repeated full-source copies.
+ * Per-record rules are the same as validateRecord. The complete baseline and
+ * final graph are compared once, including unedited children/matings/litters.
+ * Only sex, physical tag, genotype, ear mark, comment and derived genotype
+ * cleanup may change. Dates, lifecycle, source, housing and lineage are fixed;
+ * those operations use their own workflows. The field-only token is private.
+ */
+export function validateMouseBatchEdits(drafts,dataset){
+  const errors=[],warnings=[];
+  if(!Array.isArray(drafts)||drafts.length<1||drafts.length>500)return{errors:['Use between 1 and 500 existing mouse edits per batch.'],warnings};
+  const proposed=new Map();
+  for(const draft of drafts){
+    if(!draft||typeof draft!=='object'||Array.isArray(draft)||typeof draft.mouse_sid!=='string'||!draft.mouse_sid.trim())errors.push('Every existing mouse edit requires its exact original text SID.');
+    else if(proposed.has(draft.mouse_sid))errors.push(`Identifier ${draft.mouse_sid} appears more than once in this batch.`);
+    else proposed.set(draft.mouse_sid,copy(draft));
+  }
+  if(errors.length)return{errors:[...new Set(errors)],warnings};
+  const base=normalizeDataset(dataset),originals=new Map(base.tables.mice.map(row=>[row.mouse_sid,row]));
+  const editable=new Set(['sex','physical_tag','genotype','ear_mark','comment']),derived=new Set(['genotype_status','genotype_inference']);
+  for(const[id,draft]of proposed){
+    const old=originals.get(id);
+    if(!old){errors.push(`Mouse ${id}: the original record no longer exists. Reload before editing.`);continue;}
+    for(const field of new Set([...Object.keys(old),...Object.keys(draft)]))if(!editable.has(field)&&!derived.has(field)&&key(draft[field])!==key(old[field]))errors.push(`Mouse ${id}: ${field} must remain unchanged in a registration batch. Use its dedicated workflow instead.`);
+    if([...derived].some(field=>key(draft[field])!==key(old[field]))){
+      const changedGenotype=key(draft.genotype)!==key(old.genotype),retiredTagInference=key(draft.physical_tag)!==key(old.physical_tag)&&(old.genotype_status==='inferred_from_physical_tag'||old.genotype_inference?.basis==='physical_tag');
+      const status=populated(draft.genotype)?'user_entered':'not_recorded';
+      if(!(changedGenotype||retiredTagInference)||draft.genotype_status!==status||draft.genotype_inference!=null)errors.push(`Mouse ${id}: only derived genotype cleanup after a genotype or inferred-tag correction is allowed.`);
+    }
+  }
+  if(errors.length)return{errors:[...new Set(errors)],warnings};
+  const context=Object.freeze({}),dateValidity=new Map();
+  mouseBatchFieldContexts.set(context,{dataset:base});
+  try{
+    for(const[id,draft]of proposed){const checked=validateRecord('mice',draft,base,id,context);errors.push(...checked.errors);warnings.push(...checked.warnings);}
+  }finally{mouseBatchFieldContexts.delete(context);}
+  const prior=new Set(problems(base,dateValidity).map(issue=>issue.fingerprint));
+  const candidate={...base,tables:{...base.tables,mice:base.tables.mice.map(row=>proposed.get(row.mouse_sid)??row)}};
+  for(const issue of problems(candidate,dateValidity)){
+    if(!prior.has(issue.fingerprint))errors.push(issue.message);
+    else if(issue.type==='mice'&&proposed.has(issue.id))warnings.push(`Existing source issue retained: ${issue.message}`);
+  }
+  return{errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
 }
 
 export function createSyntheticDataset() {
