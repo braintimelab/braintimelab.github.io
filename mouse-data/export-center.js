@@ -1,3 +1,4 @@
+import {formatMouseSid} from './mouse-sid.js?v=188';
 import { projectAnimalSheet, createAnimalSheetXlsx, createWorkbookXlsx, animalSheetPrintHTML } from './animal-sheet-export.js?v=174';
 
 const mounts=new WeakMap();
@@ -20,7 +21,9 @@ const canFull=permission=>permission?.level==='max'&&permission.full_history===t
 const permissionKey=permission=>JSON.stringify([permission.level,permission.cutoff_date,permission.as_of_date,permission.full_history,Boolean(permission.local)]);
 const countsFor=dataset=>Object.entries(dataset?.tables||{}).filter(([,rows])=>Array.isArray(rows)).map(([type,rows])=>({label:typeNames[type]||type,count:rows.length}));
 const sumCounts=counts=>counts.reduce((sum,row)=>sum+row.count,0);
-const scalarRows=rows=>{const headers=[...new Set(rows.flatMap(row=>Object.keys(row)))].sort();return [headers,...rows.map(row=>headers.map(key=>textValue(row[key]))) ]};
+const mouseSidReportLists=new Set(['sire_sids','dam_sids','male_sids','female_sids','mouse_sids','confirmed_mouse_sids','candidate_mouse_sids','source_observed_mouse_sids','source_candidate_mouse_sids','listed_pup_sids','locobox_animal_sids']);
+const reportSidValue=(key,value,record,dataset)=>key==='mouse_sid'||key==='record_id'&&record.entity_type==='mice'?formatMouseSid(value,dataset):mouseSidReportLists.has(key)&&Array.isArray(value)?value.map(sid=>formatMouseSid(sid,dataset)):value;
+const scalarRows=(rows,dataset)=>{const headers=[...new Set(rows.flatMap(row=>Object.keys(row)))].sort();return [headers,...rows.map(row=>headers.map(key=>textValue(reportSidValue(key,row[key],row,dataset)))) ]};
 function experimentColumns(record) {
   const type=record.event_type;
   if(type==='locobox_protocol'&&object(record[type])){
@@ -149,22 +152,25 @@ export async function renderExportCenter(container,dataset,hooks,options={}) {
       // Only the owner's full-history grant may supplement the source-listing
       // view with already authorized immutable association evidence. Existing
       // server-exported managed tables and their columns remain authoritative.
-      const projection=projectAnimalSheet(result.dataset,{...projectionOptions(grant,metadata),...(grant.full_history===true&&hooks.canViewSourceArchive?.()===true?{sourceObservationContext:dataset}:{})});
+      const projection=projectAnimalSheet(result.dataset,{...projectionOptions(grant,metadata),sidContext:dataset,...(grant.full_history===true&&hooks.canViewSourceArchive?.()===true?{sourceObservationContext:dataset}:{})});
       const counts=Object.entries(projection.counts||{}).filter(([,value])=>typeof value==='number'&&Number.isFinite(value)).map(([key,count])=>({label:key.replaceAll('_',' '),count}));
       const total=Number.isFinite(projection.counts?.mice)?projection.counts.mice:0;
       return {projection,counts,total,unit:state.selectedOnly?'selected current animals':'current animals',warnings:Array.isArray(projection.warnings)?projection.warnings:[],range:(state.selectedOnly?'Selected animals · ':'')+'Current housing · birth date unrestricted'};
     }
     const payload=historyPayload(result,grant),counts=countsFor({tables:payload.tables});return {payload,counts,total:sumCounts(counts),unit:'records',warnings:[...(Array.isArray(result.metadata?.warnings)?result.metadata.warnings:[]),...experimentProjectionWarnings(payload.tables),...(Number(result.metadata?.excluded_undated)>0?[`${Number(result.metadata.excluded_undated).toLocaleString()} undated records were excluded from this date-limited export.`]:[])],range:`${state.fromDate||'Earliest permitted date'} to ${state.toDate}, inclusive`};
   }
+  function reportSidContext(payload){return {tables:{mice:[...(payload.tables.mice||[]),...(dataset?.tables?.mice||[])]}};}
   function historySheets(payload) {
+    const sidContext=reportSidContext(payload);
     const metadata=[['Export scope','Records and history'],['From date',payload.metadata.from_date||'Full permitted history'],['To date',payload.metadata.to_date],['Export level',payload.metadata.export_level],['As of date',payload.metadata.as_of_date]];
-    return [{name:'Export information',rows:[['Field','Value'],...metadata],frozenRows:1},...Object.entries(payload.tables).map(([type,records])=>({name:typeNames[type],rows:records.length?scalarRows(records.map(experimentColumns)):[['No matching records']],frozenRows:1,autoFilter:records.length>0}))];
+    return [{name:'Export information',rows:[['Field','Value'],...metadata],frozenRows:1},...Object.entries(payload.tables).map(([type,records])=>({name:typeNames[type],rows:records.length?scalarRows(records.map(experimentColumns),sidContext):[['No matching records']],frozenRows:1,autoFilter:records.length>0}))];
   }
   function historyCSV(payload) {
+    const sidContext=reportSidContext(payload);
     const combined=Object.entries(payload.tables).flatMap(([type,records])=>records.map(record=>({entity_type:type,record_id:record[idFields[type]]??'',...experimentColumns(record)})));
     if(!combined.length)return '"entity_type","record_id"\r\n';
     const keys=['entity_type','record_id',...[...new Set(combined.flatMap(record=>Object.keys(record)))].filter(key=>!['entity_type','record_id'].includes(key)).sort()];
-    return '\uFEFF'+[keys.map(csvCell).join(','),...combined.map(record=>keys.map(key=>csvCell(record[key])).join(','))].join('\r\n')+'\r\n';
+    return '\uFEFF'+[keys.map(csvCell).join(','),...combined.map(record=>keys.map(key=>csvCell(reportSidValue(key,record[key],record,sidContext))).join(','))].join('\r\n')+'\r\n';
   }
   async function deliver(collected,grant) {
     const stem=state.scope==='animal-sheet'?'braintime-animal-sheet':state.scope==='records'?'braintime-records-history':state.scope==='backup'?'braintime-local-backup':'braintime-source-archive';

@@ -1,20 +1,89 @@
 import { parseCompactStrainNotation } from './mouse-summary.js?v=146';
 import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=174';
+import { cageManager, buildCageLocationEvent, validateRecord, createMouseRegistrationValidationContext } from './model.js?v=188';
 import {FOXJ1_STRAIN_NAME} from './strain-registry.js?v=146';
+import {formatMouseSid} from './mouse-sid.js?v=188';
 
 const active=r=>r&&!r.archived&&!r.app_archived_at&&!r.history_read_only&&!r.source_historical;
 const mice=data=>data?.tables?.mice||[];
 const find=(data,type,key,id)=>(data?.tables?.[type]||[]).find(r=>String(r[key])===String(id));
 const names={P:'PER2::LUC',E:'Bmal1-ELuc',B:'Bmal1-flox',F:FOXJ1_STRAIN_NAME,V:'Vip-Cre',AD:'APP/PS1',A:'Avp-Cre',Vg:'Vgat-flox',32:'Ai32',96:'Ai96',Gt:'GAD67-tTA2',WT:'WT'};
 
-/** Numeric candidates are provisional. The shared save's expected_version=0
- * is the final uniqueness check; never regenerate after an unknown save result. */
-export function newNumericMouseSid(dataset,random=()=>crypto.getRandomValues(new Uint32Array(1))[0]) {
- const used=new Set(mice(dataset).map(m=>/^\d+$/.test(String(m.mouse_sid))?String(Number(m.mouse_sid)):String(m.mouse_sid)));
- for(let i=0;i<1000;i++){const id=String(100000+(random()>>>0)%900000);if(!used.has(id))return id;}
- throw new Error('Could not allocate a mouse SID. Refresh and try again.');
+const numericSid=value=>/^\d+$/.test(String(value))?BigInt(String(value)):null;
+const mouseSidAliases=mouse=>[mouse.mouse_sid,mouse.canonical_sid,...(Array.isArray(mouse.legacy_sids)?mouse.legacy_sids:[])];
+
+/** Local previews continue the imported SoftMouse sequence. Shared registration
+ * uses the server reservation instead; a preview never reserves an identifier. */
+export function nextNumericMouseSids(dataset,count=1) {
+ if(!Number.isSafeInteger(count)||count<1||count>100)throw new Error('Choose between 1 and 100 mice per batch.');
+ const used=new Set(),source=mice(dataset);let next=1n;
+ for(const mouse of source){
+  for(const alias of mouseSidAliases(mouse)){const value=numericSid(alias);if(value!==null)used.add(String(value));}
+  const value=numericSid(mouse.mouse_sid),canonical=/^\d{5}$/.test(mouse.canonical_sid||'')?numericSid(mouse.canonical_sid):null;
+  if(canonical!==null&&canonical>0n&&canonical>=next)next=canonical+1n;
+  if(value!==null&&value>0n&&value<=99999n&&!['app_created','animal_sheet_tag_dob_cohort'].includes(mouse.record_origin)&&value>=next)next=value+1n;
+ }
+ const result=[];
+ while(result.length<count){if(next>99999n)throw new Error('The five-digit mouse SID range is full. Contact the colony administrator.');const value=String(next++);if(!used.has(value)){result.push(formatMouseSid(value));used.add(value);}}
+ return result;
+}
+
+export function newNumericMouseSid(dataset) {return nextNumericMouseSids(dataset,1)[0];}
+
+export const MOUSE_BATCH_LIMIT=100;
+const batchSexes=['Male','Female','Unknown'];
+const batchField={Male:'batch_males',Female:'batch_females',Unknown:'batch_unknown'};
+const escapeHTML=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+
+export function mouseBatchCountsHTML(defaultSex='Unknown') {
+ const sex=batchSexes.includes(defaultSex)?defaultSex:'Unknown';
+ return `<fieldset class="field wide mouse-batch-counts"><legend>Number of mice</legend><p class="small muted">Enter the number of males, females and unsexed mice. The information below applies to the whole batch. SIDs are assigned automatically.</p><div class="form-grid">${batchSexes.map(value=>`<div class="field"><label for="${batchField[value]}">${value==='Unknown'?'Unsexed':value==='Male'?'Males':'Females'}</label><input id="${batchField[value]}" name="${batchField[value]}" type="number" min="0" max="${MOUSE_BATCH_LIMIT}" step="1" value="${value===sex?1:0}" inputmode="numeric"></div>`).join('')}</div><p class="small muted">For several mice, enter a tag prefix such as FB. Each mouse receives its own tag and SID.</p></fieldset>`;
+}
+
+/** Accept FormData or a plain object. Fractional, negative and blank counts are
+ * rejected before any identifier reservation or record write. */
+export function readMouseBatchCounts(source) {
+ const result={};
+ for(const sex of batchSexes){const key=batchField[sex],value=typeof source?.get==='function'?source.get(key):source?.[sex]??source?.[key];
+  if(typeof value!=='number'&&typeof value!=='string'||!/^\d+$/.test(String(value)))throw new Error('Enter a whole number of mice for each sex.');
+  const count=Number(value);if(!Number.isSafeInteger(count)||count<0||count>MOUSE_BATCH_LIMIT)throw new Error(`Enter between 0 and ${MOUSE_BATCH_LIMIT} mice for each sex.`);result[sex]=count;
+ }
+ const total=batchSexes.reduce((sum,sex)=>sum+result[sex],0);
+ if(total<1||total>MOUSE_BATCH_LIMIT)throw new Error(`Choose between 1 and ${MOUSE_BATCH_LIMIT} mice per batch.`);
+ return result;
+}
+
+/** Build and validate each animal without changing the source dataset. Shared
+ * fields are deep copied so an individual can be edited safely after creation. */
+export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requestId=sharedDraft?.registration_request_id,validationContext=null}={}) {
+ const parsed=readMouseBatchCounts(counts),total=batchSexes.reduce((sum,sex)=>sum+parsed[sex],0);
+ const assigned=sids??nextNumericMouseSids(dataset,total);
+ if(!Array.isArray(assigned)||assigned.length!==total||assigned.some(id=>typeof id!=='string'||!/^\d{5}$/.test(id)||BigInt(id)<1n)||new Set(assigned.map(id=>String(BigInt(id)))).size!==total)throw new Error('The SID reservation does not match this batch. Reopen the draft.');
+ const occupied=new Set(mice(dataset).flatMap(mouseSidAliases).map(numericSid).filter(value=>value!==null).map(String));
+ if(assigned.some(id=>occupied.has(String(BigInt(id)))))throw new Error('A reserved SID already exists. Refresh before registering the batch.');
+ const rawTag=String(sharedDraft?.physical_tag||'').trim();
+ if(total>1&&/[-\s][MFU]\s*\d+$/i.test(rawTag))throw new Error('For several mice, enter a shared tag prefix such as FB instead of a complete numbered tag.');
+ if(validationContext&&validationContext.dataset!==dataset)throw new Error('The batch validation context changed. Reopen the draft.');
+ const context=validationContext??createMouseRegistrationValidationContext(dataset);
+ const staged=context.dataset,drafts=[],dependencies=new Map(),warnings=[];
+ let index=0;
+ for(const sex of batchSexes)for(let number=0;number<parsed[sex];number++){
+  const sid=assigned[index],draft={...structuredClone(sharedDraft),mouse_sid:sid,sex};
+  if(requestId)draft.registration_request_id=total===1?requestId:`${requestId}:${index+1}`;
+  draft.physical_tag=total>1?(rawTag?`${rawTag}-${sex==='Unknown'?'U':sex[0]}${sid}`:null):completeMouseTag(rawTag,sex,sid)||null;
+  if(draft.genotype_inference?.basis==='physical_tag')draft.genotype_inference={...draft.genotype_inference,tag:draft.physical_tag};
+  const identity=separateReusedMouseTag(staged,draft);if(identity.error)throw new Error(`Mouse ${index+1}: ${identity.error}`);
+  for(const dependency of identity.readDependencies)dependencies.set(dependency.type+':'+dependency.id,dependency);
+  const validation=validateRecord('mice',identity.draft,staged,null,context);
+  if(validation.errors.length)throw new Error(`Mouse ${index+1} (SID ${sid}): ${validation.errors.join(' ')}`);
+  warnings.push(...validation.warnings);drafts.push(identity.draft);staged.tables.mice.push(identity.draft);index++;
+ }
+ return {drafts,readDependencies:[...dependencies.values()],warnings:[...new Set(warnings)]};
+}
+
+export function mouseBatchPreviewHTML(drafts) {
+ return `<h3>Review ${drafts.length} ${drafts.length===1?'mouse':'mice'}</h3><div class="table-scroll"><table><thead><tr><th>SID</th><th>Sex</th><th>Physical tag</th><th>Date of birth</th><th>Genotype</th></tr></thead><tbody>${drafts.map(draft=>`<tr><td>${escapeHTML(draft.mouse_sid)}</td><td>${escapeHTML(draft.sex)}</td><td>${escapeHTML(draft.physical_tag||'—')}</td><td>${escapeHTML(draft.date_of_birth||'Unknown')}</td><td>${escapeHTML(draft.genotype||'Unknown')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 export function inferMouseTag(tag) {
@@ -121,8 +190,8 @@ export function mouseRegistrationDependencies(dataset,draft,registration=null,be
 }
 
 export function finalizeMouseRegistration(dataset,draft,registration,{at=new Date().toISOString(),identity=null}={}) {
- if(!/^\d{5,6}$/.test(draft.mouse_sid))throw new Error('New mouse SIDs must contain 5 or 6 digits.');
- if(mice(dataset).some(m=>/^\d+$/.test(m.mouse_sid)&&Number(m.mouse_sid)===Number(draft.mouse_sid)))throw new Error('This SID already exists. Reload before registering the mouse.');
+ if(!/^\d{5}$/.test(draft.mouse_sid)||BigInt(draft.mouse_sid)<1n)throw new Error('New mouse SIDs must contain five digits, from 00001 through 99999.');
+ if(mice(dataset).some(mouse=>mouseSidAliases(mouse).some(alias=>numericSid(alias)===BigInt(draft.mouse_sid))))throw new Error('This SID already exists. Reload before registering the mouse.');
  const identityFences=identity?.readDependencies||[];
  for(const guard of registration?.guarded||[]){const key={mice:'mouse_sid',cages:'cage_sid',locations:'location_id',rooms:'room_id',racks:'rack_id'}[guard.type];if(JSON.stringify(find(dataset,guard.type,key,guard.id))!==JSON.stringify(guard.payload))throw new Error('Cage or parent records changed. Reopen Add mouse.');}
  if(registration&&draft.cage_sid!==registration.prefill.cage_sid)throw new Error('Use the selected cage for this registration. Move the mouse afterward.');
