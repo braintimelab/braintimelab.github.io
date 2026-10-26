@@ -1,3 +1,4 @@
+import {formatMouseSid} from './mouse-sid.js?v=188';
 /* Family-tree classification is descriptive. Only reviewed structured calls are
  * confirmed; source notation and tag primes never establish assay verification.
  * Omitted loci are unrecorded, never wild type. No archive prose is attributed
@@ -165,6 +166,6 @@ export function filterFamilyAnimals(animals,{codes:chosen=[],match='all',combina
     if(evidence==='unclassified'&&!animal.unclassified)return false;
     if(['inferred','recorded'].includes(evidence)&&!animal.traits.some(trait=>trait.evidence===evidence))return false;
     if(wanted.length){const accepted=code=>animal.traits.some(trait=>trait.code===code&&(trait.presence==='present'||includeUncertain&&trait.presence==='uncertain'));if(!(match==='any'?wanted.some(accepted):wanted.every(accepted)))return false;}
-    return !needle||[animal.id,animal.label,animal.shorthand,animal.mouse.genotype,animal.mouse.cage_sid,animal.mouse.cage_tag,...animal.traits.map(trait=>trait.name)].some(value=>str(value).toLowerCase().includes(needle));
+    return !needle||[animal.id,formatMouseSid(animal.id,{tables:{mice:[animal.mouse]}}),animal.label,animal.shorthand,animal.mouse.genotype,animal.mouse.cage_sid,animal.mouse.cage_tag,...(Array.isArray(animal.mouse.legacy_sids)?animal.mouse.legacy_sids:[]),...animal.traits.map(trait=>trait.name)].some(value=>str(value).toLowerCase().includes(needle));
   });
 }

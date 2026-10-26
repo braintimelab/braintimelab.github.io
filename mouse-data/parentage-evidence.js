@@ -44,10 +44,10 @@ export function sharedParentageInferred(first,second){
  return roles.flatMap(role=>parentRoleEvidence(second,role).ids).some(id=>firstIds.has(id)&&(parentageLinkInferred(first,id)||parentageLinkInferred(second,id)));
 }
 
-export function parentageCardValue(mouse,role){
+export function parentageCardValue(mouse,role,formatSid=value=>value){
  const row=parentRoleEvidence(mouse,role);
  if(!row.ids.length)return 'Not recorded';
- const value=row.ids.join(', ')+(row.ambiguous?' (alternatives)':'');
+ const value=row.ids.map(formatSid).join(', ')+(row.ambiguous?' (alternatives)':'');
  if(!row.inferred)return value;
  return row.label+(row.origin==='cage parent candidates'?' · cage candidates':'')+': '+value+(row.confirmedInEditor?' · confirmed in editor':'');
 }

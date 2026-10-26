@@ -1,3 +1,4 @@
+import {formatMouseSid,resolveMouseSid} from './mouse-sid.js?v=188';
 import {compareRooms} from './room-order.js?v=100';
 import { lightClock } from './husbandry.js?v=174';
 import {mouseManager,cageManager} from './model.js?v=174';
@@ -44,7 +45,7 @@ export function projectAnimalSheet(dataset,options={}) {
   if(Number.isNaN(new Date(capturedAt).getTime()))throw new Error('Choose a valid export capture time.');
   const dateFrom=options.dateFrom||'',dateTo=options.dateTo||'';
   if((dateFrom&&!dateOnly(dateFrom))||(dateTo&&!dateOnly(dateTo))||(dateFrom&&dateTo&&dateFrom>dateTo))throw new Error('Choose a valid, ordered export date range.');
-  const roomId=id(options.roomId),rackId=id(options.rackId),cageIds=new Set(list(options.cageIds).map(id)),mouseIds=new Set(list(options.mouseIds).map(id));
+  const roomId=id(options.roomId),rackId=id(options.rackId),cageIds=new Set(list(options.cageIds).map(id)),mouseIds=new Set(list(options.mouseIds).map(value=>resolveMouseSid(dataset,id(value))));
   const rooms=byId(get('rooms'),'room_id'),racks=byId(get('racks'),'rack_id'),positions=byId(get('locations'),'location_id');
   const stock=get('mice').filter(m=>alive(m)&&m.state==='Stock'),selectedStock=stock.filter(m=>!mouseIds.size||mouseIds.has(id(m.mouse_sid)));
   const residents=new Map(),selectedResidents=new Map();
@@ -121,7 +122,8 @@ export function projectAnimalSheet(dataset,options={}) {
   for(const event of contextTables?.husbandry_events||[])if(associationIds.has(id(event.event_id))&&!events.has(id(event.event_id)))events.set(id(event.event_id),event);
   const observationDataset={...dataset,tables:{...tables,mice:[...contextMice.values()],husbandry_events:[...events.values()]}};
   const observations=projectCurrentAnimalSheetObservations(observationDataset).observations.filter(row=>(!roomId||row.sourceRoomId===roomId)&&(!rackId||row.sourceRackId===rackId)&&(!mouseIds.size||mouseIds.has(row.mouseSid)||row.candidateMouseSids.some(sid=>mouseIds.has(sid)))&&(!cageIds.size||cageIds.has(row.recordedCageSid)));
-  const projection={title:'Current Animal Sheet',capturedAt,groups,rows,warnings,observations,scope:{roomId,rackId,cageIds:[...cageIds],mouseIds:[...mouseIds],dateFrom,dateTo},
+  const mouseSidContext={tables:{mice:[...(options.sidContext?.tables?.mice||[]),...contextMice.values()].map(mouse=>({mouse_sid:mouse.mouse_sid,canonical_sid:mouse.canonical_sid,legacy_sids:mouse.legacy_sids}))}};
+  const projection={mouseSidContext,title:'Current Animal Sheet',capturedAt,groups,rows,warnings,observations,scope:{roomId,rackId,cageIds:[...cageIds],mouseIds:[...mouseIds],dateFrom,dateTo},
     counts:{rooms:new Set(groups.map(g=>g.roomId).filter(Boolean)).size,racks:new Set(groups.map(g=>g.rackId).filter(Boolean)).size,groups:groups.length,positions:new Set(rows.map(r=>r.locationId).filter(Boolean)).size,cages:rows.filter(r=>r.cage).length,mice:rows.reduce((n,r)=>n+r.mice.length,0)}};
   projection.observationCounts={linked:new Set(observations.filter(row=>row.placementStatus==='observed').map(row=>row.mouseSid).filter(Boolean)).size,needsReview:observations.filter(row=>row.placementStatus!=='observed').length};
   projection.sheets=buildSheets(projection,tables,options.entityTypes??['mice','cages','locations','light_events']);
@@ -136,7 +138,7 @@ function panels(group) {
   if(unplaced.length)result.push({label:'No complete rack coordinates recorded',bands:Array.from({length:Math.ceil(unplaced.length/2)},(_,i)=>({row:null,slots:unplaced.slice(i*2,i*2+2).map(item=>({column:null,items:[item]}))}))});
   return result;
 }
-function cardLines(item) {
+function cardLines(item,dataset) {
   if(!item)return [['No position record','','','','','']];
   const selected=item.mice.length!==item.totalStockCount?`${item.mice.length} selected / ${item.totalStockCount} total Stock`:`${item.mice.length} Stock`;
   return [
@@ -144,11 +146,11 @@ function cardLines(item) {
     [`${item.state} · ${selected} · Manager: ${managerText(item.manager)}`],
     [item.applicableLights.map(lightText).join('\n')||'No date-applicable light schedule recorded'],
     ['Mouse SID','Tag / Ear marking','Sex','Born','Genotype','Manager'],
-    ...item.mice.map(m=>[id(m.mouse_sid),[m.physical_tag,m.ear_mark?`Ear: ${m.ear_mark}`:null].filter(Boolean).join('\n'),m.sex,m.date_of_birth,m.genotype,managerText(mouseManager(m))]),
+    ...item.mice.map(m=>[formatMouseSid(m.mouse_sid,dataset),[m.physical_tag,m.ear_mark?`Ear: ${m.ear_mark}`:null].filter(Boolean).join('\n'),m.sex,m.date_of_birth,m.genotype,managerText(mouseManager(m))]),
     [item.warnings.join('; ')||(!item.cage&&item.kind==='position'&&item.position?.record_origin!=='app_created'?'Source-listed animals are historical evidence, not assigned residents.':'')]
   ];
 }
-function mapSheet(projection) {
+function mapSheet(projection,dataset) {
   const sheet={name:'Animal Sheet',rows:[],widths:Array(2).fill([12,17,10,13,24,20]).flat(),merges:[],rowHeights:[],cellStyles:{},frozenRows:0,autoFilter:false};
   function full(value,style=2,height=25){const r=sheet.rows.length;sheet.rows.push([value,...Array(11).fill('')]);sheet.merges.push(`A${r+1}:L${r+1}`);sheet.cellStyles[`A${r+1}`]=style;sheet.rowHeights[r]=height;}
   full('Braintime · Recorded cage assignments',4,30);full(`Captured ${projection.capturedAt} · ${projection.counts.mice} recorded Stock assignments · ${projection.counts.cages} recorded cages`,3);
@@ -162,7 +164,7 @@ function mapSheet(projection) {
         full(band.row===null?'Unpositioned records':`Recorded row ${band.row}`,3);
         const stacks=band.slots.map(slot=>slot.items.length?slot.items:[null]),depth=Math.max(...stacks.map(items=>items.length));
         for(let n=0;n<depth;n++){
-          const cards=stacks.map(items=>cardLines(items[n])),height=Math.max(...cards.map(lines=>lines.length)),base=sheet.rows.length;
+          const cards=stacks.map(items=>cardLines(items[n],dataset)),height=Math.max(...cards.map(lines=>lines.length)),base=sheet.rows.length;
           for(let r=0;r<height;r++){
             const cells=Array(12).fill('');sheet.rows.push(cells);
             for(let c=0;c<cards.length;c++){
@@ -191,7 +193,10 @@ const columns={
   matings:['mating_sid','mating_tag','state','set_up_date','disbanded_date','cage_sid','male_sids','female_sids','linked_litter_sids','comment','source'],
   litters:['litter_sid','litter_tag','state','date_of_birth','wean_date','mating_sid','cage_sid','size_reported','sire_sids','dam_sids','listed_pup_sids','comment','source']
 };
+const exportedMouseSidLists=new Set(['sire_sids','dam_sids','male_sids','female_sids','listed_pup_sids','source_observed_mouse_sids','source_candidate_mouse_sids']);
+function exportSidValue(field,value,dataset){if(field==='mouse_sid')return formatMouseSid(value,dataset);if(exportedMouseSidLists.has(field)&&Array.isArray(value))return value.map(sid=>formatMouseSid(sid,dataset));return value;}
 function buildSheets(p,tables,selectedTypes) {
+  const dataset=p.mouseSidContext;
   if(!Array.isArray(selectedTypes)||selectedTypes.some(type=>!Object.hasOwn(columns,type)))throw new Error('Choose supported entity tables for this export.');
   const summary={name:'Export details',rows:[['Field','Value'],['Title',p.title],['Captured at',p.capturedAt],['Scope',JSON.stringify(p.scope)],['Current Stock mice',p.counts.mice],['Cages',p.counts.cages],['Positions',p.counts.positions],['Current assignment rule','Stock mice excluding archived records. Source-listed animals never establish occupancy.'],['Date filters','Supporting data only; this map does not reconstruct historical occupancy.'],['Lighting','Applicable in each event time zone; missing dates excluded. Overlaps and unverified exposure are retained.'],...p.warnings.map(w=>['Review note',w])],widths:[30,120]};
   const mice=p.rows.flatMap(r=>r.mice),cages=p.rows.filter(r=>r.cage),mouseSet=new Set(mice.map(m=>id(m.mouse_sid))),cageSet=new Set(cages.map(r=>r.cageId)),positionSet=new Set(p.rows.map(r=>r.locationId).filter(Boolean)),roomSet=new Set(p.groups.map(g=>g.roomId).filter(Boolean)),rackSet=new Set(p.groups.map(g=>g.rackId).filter(Boolean));
@@ -215,13 +220,13 @@ function buildSheets(p,tables,selectedTypes) {
     litters:list(tables.litters).filter(l=>alive(l)&&(litterSet.has(id(l.litter_sid))||cageSet.has(id(l.cage_sid))))
   };
   // Existing managed-table columns and worksheet order remain unchanged.
-  return [summary,mapSheet(p),...[...new Set(selectedTypes)].map(type=>({name:type.replaceAll('_',' '),rows:[columns[type],...resolved[type].filter(record=>range(record,type)).map(r=>columns[type].map(field=>field==='source'?source(r):r[field]??''))],widths:columns[type].map(field=>/notes|comment|source|genotype/.test(field)?40:20)})),observationSheet(p.observations)];
+  return [summary,mapSheet(p,dataset),...[...new Set(selectedTypes)].map(type=>({name:type.replaceAll('_',' '),rows:[columns[type],...resolved[type].filter(record=>range(record,type)).map(r=>columns[type].map(field=>field==='source'?source(r):exportSidValue(field,r[field],dataset)??''))],widths:columns[type].map(field=>/notes|comment|source|genotype/.test(field)?40:20)})),observationSheet(p.observations,dataset)];
 }
 
 const observationColumns=['AS label','Mouse SID','Identity basis','AS DOB','AS sex','AS ear mark','AS note cell','AS note','AnimalSheet position','Source location ID','Source cell','Sheet captured','Placement status','Recorded mouse label','Recorded cage SID','Recorded cage tag','Effective move date','Review notes'];
-function observationValues(row){return [row.sourceTag,row.mouseSid||'',row.identityLabel,row.sourceDob||'',row.sourceSex||'',row.sourceEarMark||'',row.sourceNoteCell||'',row.sourceNoteKnown?(row.sourceNote??''):'Unknown / not separable from source annotations',observationLocationLabel(row),row.sourceLocationId,row.sourceCell||'',row.sourceCaptureAt||'Not recorded',row.placementStatus==='observed'?'Listed in current AnimalSheet':'Needs review',row.recordedTag||'',row.recordedCageSid||'',row.recordedCageTag||'','Not recorded',row.warnings.map(warning=>warning.message).join('; ')];}
-function observationSheet(rows=[]){return {name:'AS observations',rows:[observationColumns,...rows.map(observationValues)],widths:observationColumns.map(name=>/note|position|label|basis/i.test(name)?35:20)};}
-function observationPrintHTML(rows=[]){return `<section><h2>Current AnimalSheet listings</h2><p>AnimalSheet labels and listed positions are separate from recorded cage assignments. Sheet capture time does not record a physical inspection or cage move.</p><table><thead><tr>${observationColumns.map(value=>`<th>${esc(value)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${observationValues(row).map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${observationColumns.length}">No current observations match this export.</td></tr>`}</tbody></table></section>`;}
+function observationValues(row,dataset){return [row.sourceTag,formatMouseSid(row.mouseSid,dataset)||'',row.identityLabel,row.sourceDob||'',row.sourceSex||'',row.sourceEarMark||'',row.sourceNoteCell||'',row.sourceNoteKnown?(row.sourceNote??''):'Unknown / not separable from source annotations',observationLocationLabel(row),row.sourceLocationId,row.sourceCell||'',row.sourceCaptureAt||'Not recorded',row.placementStatus==='observed'?'Listed in current AnimalSheet':'Needs review',row.recordedTag||'',row.recordedCageSid||'',row.recordedCageTag||'','Not recorded',row.warnings.map(warning=>warning.message).join('; ')];}
+function observationSheet(rows=[],dataset=null){return {name:'AS observations',rows:[observationColumns,...rows.map(row=>observationValues(row,dataset))],widths:observationColumns.map(name=>/note|position|label|basis/i.test(name)?35:20)};}
+function observationPrintHTML(rows=[],dataset=null){return `<section><h2>Current AnimalSheet listings</h2><p>AnimalSheet labels and listed positions are separate from recorded cage assignments. Sheet capture time does not record a physical inspection or cage move.</p><table><thead><tr>${observationColumns.map(value=>`<th>${esc(value)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${observationValues(row,dataset).map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${observationColumns.length}">No current observations match this export.</td></tr>`}</tbody></table></section>`;}
 
 export function createAnimalSheetXlsx(projection) {return createWorkbookXlsx(projection);}
 
@@ -229,22 +234,22 @@ const esc=v=>text(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&g
 function safeLogo(value) {
   try{const url=new URL(value||'./icons/braintime-mark.png',import.meta.url);return /^(https?:|file:)$/.test(url.protocol)?url.href:'';}catch{return '';}
 }
-function printCard(item) {
+function printCard(item,dataset) {
   if(!item)return '<article class="missing">No position record</article>';
   const mice=item.mice,parts=[];
   for(let start=0;start<Math.max(1,mice.length);start+=8){const part=mice.slice(start,start+8);
-    parts.push(`<article class="cage"><h4>${esc(item.positionName)}${item.cage?` · Cage ${esc(item.cageTag||item.cageId)} <small>SID ${esc(item.cageId)}</small>`:''}${start?' (continued)':''}</h4><p>${esc(item.state)} · ${mice.length!==item.totalStockCount?`${mice.length} selected / ${item.totalStockCount} total`:mice.length} Stock · <b>Manager:</b> ${esc(managerText(item.manager))}</p>${!start?`<p class="light">${item.applicableLights.length?item.applicableLights.map(e=>esc(lightText(e))).join('<br>'):'No date-applicable light schedule recorded'}</p>`:''}<table><thead><tr><th>SID / Tag</th><th>Sex / Born</th><th>Genotype</th><th>Manager</th></tr></thead><tbody>${part.length?part.map(m=>`<tr><td><b>${esc(m.mouse_sid)}</b><br>${esc(m.physical_tag)}${m.ear_mark?`<br>Ear: ${esc(m.ear_mark)}`:''}</td><td>${esc(m.sex)}<br>${esc(m.date_of_birth)}</td><td>${esc(m.genotype||'Unknown')}</td><td>${esc(managerText(mouseManager(m)))}</td></tr>`).join(''):`<tr><td colspan="4">${item.kind==='position'&&item.position?.record_origin!=='app_created'?'Unlinked source position. Source-listed animals are not current assignments.':'No Stock mice assigned.'}</td></tr>`}</tbody></table>${item.warnings.length?`<p class="warning">${esc(item.warnings.join('; '))}</p>`:''}</article>`);
+    parts.push(`<article class="cage"><h4>${esc(item.positionName)}${item.cage?` · Cage ${esc(item.cageTag||item.cageId)} <small>SID ${esc(item.cageId)}</small>`:''}${start?' (continued)':''}</h4><p>${esc(item.state)} · ${mice.length!==item.totalStockCount?`${mice.length} selected / ${item.totalStockCount} total`:mice.length} Stock · <b>Manager:</b> ${esc(managerText(item.manager))}</p>${!start?`<p class="light">${item.applicableLights.length?item.applicableLights.map(e=>esc(lightText(e))).join('<br>'):'No date-applicable light schedule recorded'}</p>`:''}<table><thead><tr><th>SID / Tag</th><th>Sex / Born</th><th>Genotype</th><th>Manager</th></tr></thead><tbody>${part.length?part.map(m=>`<tr><td><b>${esc(formatMouseSid(m.mouse_sid,dataset))}</b><br>${esc(m.physical_tag)}${m.ear_mark?`<br>Ear: ${esc(m.ear_mark)}`:''}</td><td>${esc(m.sex)}<br>${esc(m.date_of_birth)}</td><td>${esc(m.genotype||'Unknown')}</td><td>${esc(managerText(mouseManager(m)))}</td></tr>`).join(''):`<tr><td colspan="4">${item.kind==='position'&&item.position?.record_origin!=='app_created'?'Unlinked source position. Source-listed animals are not current assignments.':'No Stock mice assigned.'}</td></tr>`}</tbody></table>${item.warnings.length?`<p class="warning">${esc(item.warnings.join('; '))}</p>`:''}</article>`);
   }
   return parts.join('');
 }
 
 /** Print preview HTML; the browser's Print / Save as PDF action creates the PDF. */
 export function animalSheetPrintHTML(projection,{logoUrl,title}={}) {
-  const heading=title||projection.title||'Braintime Mouse Data',logo=safeLogo(logoUrl);
+  const heading=title||projection.title||'Braintime Mouse Data',logo=safeLogo(logoUrl),dataset=projection.mouseSidContext;
   let body='';
-  if(Array.isArray(projection.groups))body=projection.groups.map(group=>`<section class="rack"><h2>${esc(group.roomName)} / ${esc(group.rackName)}</h2>${group.items.length?panels(group).map(panel=>`<h3>${esc(panel.label)}</h3>${panel.bands.map(band=>`<div class="band"><div class="coordinate">${band.row===null?'Coordinates unrecorded':`Recorded row ${esc(band.row)}`}</div><div class="grid">${band.slots.map(slot=>`<div class="slot"><div class="coordinate">${slot.column===null?'':`Recorded column ${esc(slot.column)}`}</div>${slot.items.length?slot.items.map(printCard).join(''):printCard(null)}</div>`).join('')}</div></div>`).join('')}`).join(''):'<p>No positions or cages recorded.</p>'}</section>`).join('');
+  if(Array.isArray(projection.groups))body=projection.groups.map(group=>`<section class="rack"><h2>${esc(group.roomName)} / ${esc(group.rackName)}</h2>${group.items.length?panels(group).map(panel=>`<h3>${esc(panel.label)}</h3>${panel.bands.map(band=>`<div class="band"><div class="coordinate">${band.row===null?'Coordinates unrecorded':`Recorded row ${esc(band.row)}`}</div><div class="grid">${band.slots.map(slot=>`<div class="slot"><div class="coordinate">${slot.column===null?'':`Recorded column ${esc(slot.column)}`}</div>${slot.items.length?slot.items.map(item=>printCard(item,dataset)).join(''):printCard(null,dataset)}</div>`).join('')}</div></div>`).join('')}`).join(''):'<p>No positions or cages recorded.</p>'}</section>`).join('');
   else body=list(projection.sheets).map(sheet=>`<section><h2>${esc(sheet.name)}</h2><table><thead><tr>${list(sheet.rows?.[0]).map(v=>`<th>${esc(v)}</th>`).join('')}</tr></thead><tbody>${list(sheet.rows).slice(1).map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>`).join('');
-  if(Array.isArray(projection.groups))body=observationPrintHTML(projection.observations)+'<h2>Recorded cage assignments</h2>'+body;
+  if(Array.isArray(projection.groups))body=observationPrintHTML(projection.observations,dataset)+'<h2>Recorded cage assignments</h2>'+body;
   return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(heading)}</title><style>
     :root{font-family:Arial,Helvetica,sans-serif;color:#303438;background:#f7f4e7;font-size:12px}body{margin:20px}header{display:flex;gap:16px;align-items:center;border-bottom:3px solid #1f4c7d;padding-bottom:12px}header img{width:48px;height:auto}h1{font-size:24px;color:#1f4c7d;margin:0}h2{background:#1f4c7d;color:#fff;padding:9px;font-size:17px;margin:24px 0 12px}h3{font-size:12px;margin:14px 0 4px;color:#1f4c7d}h4{font-size:12px;margin:0;background:#f7f4e7;padding:7px;color:#1f4c7d}p{margin:6px 0;line-height:1.4}.intro{font-size:10px;color:#5e6265}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.coordinate{font-size:10px;color:#5e6265;margin:4px 0}.cage{background:white;border:1px solid #b9c3cc;padding:5px;margin-bottom:10px;break-inside:avoid}.cage p{font-size:10px}.light{color:#4b5662}.warning{background:#fff0d1;padding:4px}.missing{border:1px dashed #b9c3cc;color:#5e6265;padding:12px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#fff}th,td{text-align:left;vertical-align:top;border:1px solid #d5d8db;padding:5px;overflow-wrap:anywhere;white-space:pre-wrap}th{font-size:10px;background:#edf2f7}td{font-size:10px}small{font-weight:normal}thead{display:table-header-group}.rack{break-before:page}.rack:first-of-type{break-before:auto}@page{size:A4 landscape;margin:10mm}@media print{body{margin:0;background:white}.no-print{display:none}h2,h3,.coordinate{break-after:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.grid{align-items:start}}
     </style></head><body><header>${logo?`<img src="${esc(logo)}" alt="Braintime logo">`:''}<div><h1>${esc(heading)}</h1><p>Captured ${esc(projection.capturedAt||'')}</p></div></header><p class="no-print">Use Print → Save as PDF to save this document.</p><p class="intro">${projection.groups?'AnimalSheet listings appear first. Recorded cage assignments and lighting are shown separately; listing links do not record a cage move or verify exposure.':'Exported records, retaining text IDs and source uncertainty.'}</p>${list(projection.warnings).map(w=>`<p class="warning">${esc(w)}</p>`).join('')}${body}</body></html>`;

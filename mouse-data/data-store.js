@@ -1471,6 +1471,17 @@ async function writeAtomic(pending,{checkScope,requiredSource=null}={}){
     invalidate();statusMessage=`${e.message} Cloud save was not confirmed; pull the latest data before retrying.`;throw new Error(statusMessage);
   }
 }
+/** Reserve from the authoritative colony sequence. The caller keeps requestId on retries. */
+export async function reserveMouseSids({requestId,count}={}){
+ if(!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId||'')||!Number.isInteger(count)||count<1||count>100)throw new Error('Choose between 1 and 100 mice.');
+ if(mode()==='local')return null;
+ const context=exportContext(),generation=authGeneration;
+ const check=()=>{if(context!==exportContext()||generation!==authGeneration||pendingAccount(session())||session()?.passwordRecovery)throw new Error('Account changed. Reopen the mouse draft.');};
+ await requireEditor();check();
+ const result=await request('rpc/reserve_mouse_sids',{method:'POST',body:{p_colony_id:configuration().colonyId,p_request_id:requestId,p_count:count}});check();
+ if(result?.request_id!==requestId||!Array.isArray(result.sids)||result.sids.length!==count||result.sids.some(id=>typeof id!=='string'||!/^\d{5}$/.test(id)||Number(id)<1)||new Set(result.sids).size!==count)throw new Error('The SID reservation could not be confirmed. Retry this draft.');
+ return result.sids;
+}
 async function requireEditor(){const role=await membership();if(role==='viewer')throw new Error('Your colony role is viewer; cloud changes require editor or owner access.');}
 export async function pushToCloud(dataset){
   if(dataset?.source_archive_deferred||dataset?.managed_records_deferred)throw new Error('Load all records and history before an initial upload.');
@@ -1534,7 +1545,7 @@ export async function acknowledgeSourceTagReview({issueId,mouseSid,expectedScope
   statusMessage='Source label check saved. Scientific fields were preserved.';
  }finally{activeDatasetSaves.delete(scope);}
 }
-async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDependencies=[]}={}){
+async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDependencies=[],requiredSource=null}={}){
  if(isGuest(session())){if(localOnly)throw new Error('Guest changes must be verified by the shared database.');return saveGuestDataset(dataset,{readDependencies});}
   if(!Array.isArray(readDependencies)||readDependencies.length>500)throw new Error('Invalid save dependencies. Reload and review the changes.');
   const dependencyKeys=new Set();
@@ -1592,7 +1603,7 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
   // final transaction leaves old data authoritative and new chunks unreferenced.
   const saved=[];
   for(const batch of partitionChanges(chunks.map(([r,expected_version])=>({...r,expected_version}))))saved.push(...await writeAtomic(batch.map(({expected_version,...r})=>[r,expected_version]),{checkScope:checkSaveEpoch}));
-  saved.push(...await writeAtomic(atomic,{checkScope:checkSaveEpoch}));
+  saved.push(...await writeAtomic(atomic,{checkScope:checkSaveEpoch,requiredSource}));
   try{
    checkSaveEpoch();const finalPolicy=await refreshFeeVisibility();checkSaveEpoch();
    if(!sameFeeVisibility(finalPolicy,policy)||!synced)throw new Error('Fee visibility changed during save. Pull the latest cloud data.');
