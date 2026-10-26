@@ -1,5 +1,5 @@
 import {projectCurrentAnimalSheetObservations,observationLocationLabel} from './animal-sheet-current-observation.js?v=183';
-import {renderSourceReconciliation} from './source-reconciliation-view.js?v=183';
+import {renderSourceReconciliation} from './source-reconciliation-view.js?v=187';
 import {appAllows,mouseAppFeature,APP_PERMISSION_KEYS} from './app-access.js?v=175';
 import {guestQuotaLabel,isGuest,guestAllows,mouseGuestMenu} from './guest-access.js?v=175';
 import {mouseEntrainmentHistory,entrainmentClarifications,entrainmentConditionLabel} from './entrainment-history.js?v=132';
@@ -94,7 +94,7 @@ function loadSectionStyle(key){
  if(!href||document.querySelector(`link[data-section-style="${key}"]`))return;
  const link=document.createElement('link');link.rel='stylesheet';link.href=href;link.dataset.sectionStyle=key;document.head.appendChild(link);
 }
-let renderMouseReview=()=>{};
+let renderMouseReview=()=>{},renderParentageReview=()=>{};
 let runBrainbotMouseReview=()=>{};
 let renderBrainbot=()=>{},brainbotHelpHTML=()=>'';
 let renderStrainManagement=()=>{},hasStrainDrafts=()=>false,clearStrainManagement=()=>{};
@@ -106,7 +106,7 @@ let renderLocobox=()=>{},locoboxHelpHTML=()=>'';
 let renderIacuc=()=>{},iacucHelpHTML=()=>'';
 let renderCageLabelEditor=()=>{};
 const sectionLoaders = {
- review:()=>import('./mouse-review-view.js?v=100').then(module=>({renderMouseReview}=module)),
+ review:()=>Promise.all([import('./mouse-review-view.js?v=100'),import('./parentage-review.js?v=187')]).then(([animal,parentage])=>{renderMouseReview=animal.renderMouseReview;renderParentageReview=parentage.renderParentageReview;}),
  reviewRunner:()=>import('./brainbot-review-runner.js?v=174').then(module=>({runBrainbotMouseReview}=module)),
  brainbot:()=>import('./brainbot.js?v=112').then(module=>({renderBrainbot,brainbotHelpHTML}=module)),
  strains:()=>import('./strain-management.js?v=178').then(module=>({renderStrainManagement,hasStrainDrafts,clearStrainManagement}=module)),
@@ -493,7 +493,7 @@ function render() {
  if(route==='iacuc'){renderIacuc($('main'),dataset,{initialEntity:iacucEntity,canEdit:()=>canEditRecords('iacuc'),openMouse:id=>navigate('mice',id),openCage:id=>navigate('cages',id),toast:showToast,save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='fees'){renderLacFees($('main'),dataset,{isCurrent:()=>generation===pageRenderGeneration&&route==='fees'&&!detail,getVisibility:()=>store.getLacFeeVisibility(),saveVisibility:input=>store.saveLacFeeVisibility(input),canEdit:()=>canEditRecords('fees'),toast:showToast,help:()=>showHelp(false,false,false,false,false,false,false,true),save:async next=>{await store.saveDataset(next);dataset=await store.loadDataset();await refreshCloud();render();}});return;}
  if(route==='archive'){renderArchive();return}
- if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;$('main').innerHTML=entrainmentReviewHTML()+'<div id="animal-review-content"></div>';$('main').onclick=event=>{const target=event.target.closest?.('[data-entrainment-position]');if(target){locoboxContextKey++;locoboxCage=null;locoboxSourceEvent=null;locoboxPosition=target.dataset.entrainmentPosition;navigate('locobox');}};renderMouseReview($('animal-review-content'),dataset,{canEdit:()=>canEditRecords('review')&&canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
+ if(route==='review'){const current=()=>generation===pageRenderGeneration&&route==='review'&&!detail;$('main').innerHTML=entrainmentReviewHTML()+'<div id="parentage-review-content"></div><div id="animal-review-content"></div>';$('main').onclick=event=>{const target=event.target.closest?.('[data-entrainment-position]');if(target){locoboxContextKey++;locoboxCage=null;locoboxSourceEvent=null;locoboxPosition=target.dataset.entrainmentPosition;navigate('locobox');}};renderParentageReview($('parentage-review-content'),dataset,{isCurrent:current,openFamily:canReadGuestRoute('family')?id=>{familyFocus=String(id);navigate('family')}:undefined});renderMouseReview($('animal-review-content'),dataset,{canEdit:()=>canEditRecords('review')&&canEditRecords('mice')&&canEditRecords('housing'),canBatchReview:canBatchMouseReview,batchReview:options=>runMouseReviewBatch(options,current),isCurrent:current,openMouse:id=>navigate('mice',id),completeMouse:openReviewMouse,toast:showToast});return}
  renderTable();
 }
 function workspaceProgressMeasure(value){
