@@ -352,3 +352,8 @@
 #record-dialog .registration-rows input:not([type=checkbox]){min-width:150px;width:100%}
 #record-dialog .registration-rows td:nth-child(5) input{min-width:220px}
 @media(max-width:620px){#record-dialog.registration-batch-dialog{width:calc(100vw - 16px);height:calc(100dvh - 20px)}#record-dialog.registration-batch-dialog .dialog-content{padding:14px}#record-dialog.registration-batch-dialog .dialog-actions{padding:12px;flex-wrap:wrap}}
+/* Batch registration and colony workflows. */
+.registration-memory{border:1px solid var(--line);border-radius:8px;padding:14px;margin:0 0 16px;min-width:0}.registration-memory legend{font-weight:650;padding:0 5px}.registration-memory .settings-actions{flex-wrap:wrap;margin:10px 0}.registration-memory .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.registration-memory .checkbox-label{margin-top:12px;align-items:flex-start}.registration-memory [role=status]:empty{display:none}
+.animal-card .colony-qr{margin-top:3mm!important}.animal-card .colony-qr-local{display:block;margin-top:3mm;font:8pt Arial,sans-serif;overflow-wrap:anywhere}.animal-card .colony-qr svg{display:block;max-width:none}.animal-card .colony-qr figcaption{margin-top:1mm}.colony-workbench input,.colony-workbench select{max-width:100%}
+@media(max-width:620px){.registration-memory .form-grid{grid-template-columns:1fr}.registration-memory .settings-actions .button{flex:1 1 140px}#main fieldset{min-width:0}#main video{max-width:100%}}
+.animal-card .card-heading span{white-space:normal;overflow-wrap:anywhere;text-align:right;max-width:58%}

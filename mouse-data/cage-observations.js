@@ -1,5 +1,6 @@
 /* Literal Animal Sheet cage observations. This module never assigns a mouse to
  * a cage, invents an SID, or changes a saved record. */
+import {reconcileGenotypeText} from './genotype-reconciliation.js?v=192';
 const text=value=>typeof value==='string'?value.trim():typeof value==='number'&&Number.isFinite(value)?String(value):'';
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const active=value=>value&&!value.app_archived_at&&value.archived!==true;
@@ -156,9 +157,17 @@ function reviewedMice(ctx,position,animal){
  * This is a pure record transformation; source positions and assignments never
  * change. A rename binds only one unique current observation. Any changed source
  * details invalidate that binding rather than identifying a new occupant. */
-export function prepareMouseCageSheetEdit(dataset,before,after){
+export function prepareMouseCageSheetEdit(dataset,before,after,{fullGenotypeEvidence=false,genotypeDecision=null,at=new Date().toISOString()}={}){
  const result=structuredClone(after);
+ const retiredTagInference=object(before)&&object(after)&&before.mouse_sid===after.mouse_sid&&text(before.physical_tag)!==text(after.physical_tag)&&text(before.genotype)===text(after.genotype)&&(before.genotype_status==='inferred_from_physical_tag'||before.genotype_inference?.basis==='physical_tag');if(retiredTagInference)result.genotype=null;
+ if(object(before)&&object(after)&&text(before.genotype)!==text(result.genotype)&&(historical(before)||dataset?.history_projection?.read_only===true))throw new Error('Historical genotype evidence is read-only. Open the current mouse record before reviewing a correction.');
  if(!object(before)||!object(after)||!text(before.mouse_sid)||text(before.mouse_sid)!==text(after.mouse_sid)||historical(before)||dataset?.history_projection?.read_only===true)return result;
+ if(text(before.genotype)!==text(result.genotype)){
+  const checked=reconcileGenotypeText(before,result.genotype??null,{fullGenotypeEvidence,decision:genotypeDecision,at});
+  if(checked.errors.length)throw new Error(checked.errors.join(' '));
+  if(JSON.stringify(after.genetic_profile)!==JSON.stringify(before.genetic_profile)&&JSON.stringify(after.genetic_profile)!==JSON.stringify(checked.draft.genetic_profile))throw new Error('Review allele-call changes in the genotype results workflow.');
+  for(const field of ['genotype','genotype_status','genotype_inference','genetic_profile']){if(Object.hasOwn(checked.draft,field))result[field]=structuredClone(checked.draft[field]);else delete result[field];}
+ }
  const fields=['comment','ear_mark','date_of_birth','physical_tag'],changed=fields.filter(field=>text(before[field])!==text(after[field]));
  if(!changed.length)return result;
  result.cage_sheet_overrides={...(object(before.cage_sheet_overrides)?before.cage_sheet_overrides:{}),...(object(after.cage_sheet_overrides)?after.cage_sheet_overrides:{}),...Object.fromEntries(changed.map(field=>[field,true]))};

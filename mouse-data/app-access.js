@@ -22,4 +22,4 @@ export function appAllows(context,key){
  if(['notes.boards.common.write','notes.boards.projects.write'].includes(key))return ['manager','editor','viewer'].includes(context.role)&&validAppPermissions(app,permissions)&&permissions['notes.boards.read']!==false&&(Object.hasOwn(permissions,key)?permissions[key]:permissions['notes.boards.write']!==false);
  return validAppPermissions(app,permissions)&&permissions[key]!==false;
 }
-export function mouseAppFeature(section){return ({matings:'breeding',locobox:'housing',locations:'housing',rooms:'housing',racks:'housing',light_events:'housing'})[section]||section;}
+export function mouseAppFeature(section){return ({today:'overview',workbench:'mice',genotyping:'mice',care:'litters',scan:'cages',matings:'breeding',locobox:'housing',locations:'housing',rooms:'housing',racks:'housing',light_events:'housing'})[section]||section;}
