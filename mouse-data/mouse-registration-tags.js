@@ -1,7 +1,8 @@
-import {createMouseRegistrationValidationContext,validateRecord,validateMouseBatchEdits} from './model.js?v=188';
+import {createMouseRegistrationValidationContext,validateRecord,validateMouseBatchEdits} from './model.js?v=192';
 import {separateReusedMouseTag,MOUSE_BATCH_LIMIT} from './mouse-registration.js?v=188';
 import {canonicalMouseSidKey} from './mouse-sid.js?v=188';
 import {automaticMousePhysicalTag} from './mouse-auto-tags.js?v=191';
+import {reconcileGenotypeText} from './genotype-reconciliation.js?v=192';
 
 const clone=structuredClone;
 const editable=new Set(['sex','physical_tag','genotype','ear_mark','comment']);
@@ -44,10 +45,10 @@ function checkField(field,value){
  * Per-SID row exceptions apply last. No parent/litter key or genotype inference
  * is invented or rewritten. Existing mode requires complete existing records.
  */
-export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,overrides={},existing=false,automaticTagSids=[]}={}){
+export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,overrides={},existing=false,automaticTagSids=[],fullGenotypeEvidence=false,genotypeDecisions={},at=new Date().toISOString()}={}){
  if(!dataset||!plain(dataset)||!plain(dataset.tables)||!Array.isArray(dataset.tables.mice))fail('Load the mouse records before reviewing physical tags.');
  if(!Array.isArray(drafts)||drafts.length<1||drafts.length>MOUSE_BATCH_LIMIT)fail(`Review between 1 and ${MOUSE_BATCH_LIMIT} mice per batch.`);
- if(typeof existing!=='boolean'||!plain(overrides))fail('Use a per-SID row override object.');
+ if(typeof existing!=='boolean'||!plain(overrides)||!plain(genotypeDecisions))fail('Use per-SID row overrides and genotype review decisions.');
  const source=dataset.tables.mice,originals=new Map(source.map(row=>[String(row.mouse_sid),row])),seen=new Set(),numeric=new Set();
  const result=drafts.map((draft,index)=>{
   if(!plain(draft)||typeof draft.mouse_sid!=='string'||!draft.mouse_sid.trim()||draft.mouse_sid!==draft.mouse_sid.trim())fail(`Mouse ${index+1}: keep the exact assigned SID.`);
@@ -91,8 +92,15 @@ export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,over
   // A manual call must not retain an earlier tag-derived genotype assertion.
   const before=existing?originals.get(row.mouse_sid):drafts[index],manualGenotypeChanged=!same(before.genotype,row.genotype);
   const oldTagInference=before.genotype_status==='inferred_from_physical_tag'||before.genotype_inference?.basis==='physical_tag';
-  if(manualGenotypeChanged){row.genotype_status=row.genotype==null||String(row.genotype).trim()===''?'not_recorded':'user_entered';delete row.genotype_inference;}
-  else if(!same(before.physical_tag,row.physical_tag)&&oldTagInference){
+  const retireInference=!manualGenotypeChanged&&!same(before.physical_tag,row.physical_tag)&&oldTagInference;
+  if(existing&&(manualGenotypeChanged||retireInference)){
+   const checked=reconcileGenotypeText(before,retireInference?null:row.genotype,{fullGenotypeEvidence,decision:genotypeDecisions[row.mouse_sid]??null,at});
+   if(checked.errors.length)fail(`SID ${row.mouse_sid}: ${checked.errors.join(' ')}`);
+   for(const field of ['genotype','genotype_status','genotype_inference','genetic_profile']){if(Object.hasOwn(checked.draft,field))row[field]=clone(checked.draft[field]);else delete row[field];}
+   metadataWarnings.push(...checked.warnings.map(message=>`SID ${row.mouse_sid}: ${message}`));
+  }else if(manualGenotypeChanged){row.genotype_status=row.genotype==null||String(row.genotype).trim()===''?'not_recorded':'user_entered';delete row.genotype_inference;}
+  else if(retireInference){row.genotype=null;row.genotype_status='not_recorded';delete row.genotype_inference;}
+  if(retireInference){
    row.genotype=null;row.genotype_status='not_recorded';delete row.genotype_inference;
    metadataWarnings.push(`SID ${row.mouse_sid}: the old tag-based genotype was cleared after the physical tag changed. Enter a genotype only from reviewed evidence.`);
   }

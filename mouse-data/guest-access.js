@@ -15,7 +15,7 @@ export function isGuest(context){return Object.hasOwn(GUEST_LEVELS,context?.gues
 export function guestQuotaLabel(context){if(!isGuest(context))return '';return 'Personal space: up to 300 MB';}
 export function guestAllows(context,key){if(context?.active===false)return false;if(isGuest(context)&&['notes.boards.common.write','notes.boards.projects.write'].includes(key)&&(context.role!=='viewer'||(context.exportLevel??context.export_level)!=='low'||validateGuestPermissions(context.guestPermissions??context.guest_permissions??{}).length))return false;return !isGuest(context)||guestAvailabilityStatus(context)==='active'&&guestPermissions(context.guestLevel??context.guest_level,context.guestPermissions??context.guest_permissions)[key]===true;}
 export function validateGuestPermissions(value){if(!value||typeof value!=='object'||Array.isArray(value))return ['Guest permissions must be an object.'];return Object.entries(value).filter(([k,v])=>!GUEST_PERMISSION_KEYS.includes(k)||typeof v!=='boolean').map(([k])=>'Unsupported guest permission: '+k);}
-export function mouseGuestMenu(section){return ({matings:'breeding',locobox:'housing'})[section]||section;}
+export function mouseGuestMenu(section){return ({today:'overview',workbench:'mice',genotyping:'mice',care:'litters',scan:'cages',matings:'breeding',locobox:'housing'})[section]||section;}
 
 export const GUEST_AVAILABILITY_MODES=Object.freeze({unspecified:'Unspecified',until:'Until a date',range:'Date range'});
 const availabilityValue=(context,camel,snake)=>Object.hasOwn(context||{},camel)?context[camel]:context?.[snake];

@@ -7,6 +7,7 @@ import {mouseLineAssignments,parseCompactStrainNotation} from './mouse-summary.j
 import {getStrainRegistry,canonicalLocusName,canonicalStrainName,explicitCreName,strainNameAliases,strainNamingWarning,legacyVgatCreName,FOXJ1_STRAIN_ALIASES,LAB_STRAIN_CODE_ORDER} from './strain-registry.js?v=146';
 import {discoverGenotypes,sourceProfile} from './genotype-catalog.js?v=146';
 import {validateGeneticProfile} from './genotype-schema.js?v=100';
+import {genotypeReconciliationWarnings} from './genotype-reconciliation.js?v=192';
 const str=value=>typeof value==='string'?value:'';
 const archived=row=>Boolean(row?.app_archived_at)||row?.archived===true;
 const unique=values=>[...new Set(values)];
@@ -122,7 +123,7 @@ function classify(mouse,genes,loci,registry) {
     const old=traits.get(code)||sourceAlias;if(sourceAlias)traits.delete(sourceAlias.code);
     if(trait.evidence==='inferred'&&old&&(old.presence==='uncertain'||old.presence!==trait.presence||old.alleles&&pairKey(old.alleles)!==pairKey(trait.alleles||[])))traits.set(code,{...trait,presence:'uncertain',dosage:'unknown',evidence:'uncertain',alleles:undefined});else traits.set(code,trait);
   }
-  const warnings=contextual?['Contextual or historical genotype prose requires review before use as a current allele call.']:[];
+  const warnings=[...(contextual?['Contextual or historical genotype prose requires review before use as a current allele call.']:[]),...genotypeReconciliationWarnings(mouse)];
   for(const locus of [...loci,...(Array.isArray(mouse.genetic_profile?.loci)?mouse.genetic_profile.loci:[])]){const warning=strainNamingWarning(locus);if(warning&&[...traits.values()].some(trait=>trait.locus?.id===locus.id))warnings.push(warning);}
   if(['32','96'].every(code=>traits.get(code)?.presence==='present')&&!['32','96'].every(code=>reviewed.get(code)?.alleles?.length===2&&rosa(reviewed.get(code)?.locus))) {
     for(const code of ['32','96'])traits.set(code,{...traits.get(code),dosage:'unknown',evidence:'uncertain',alleles:undefined,dosageUncertain:true});

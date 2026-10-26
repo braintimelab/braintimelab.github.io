@@ -1,4 +1,5 @@
 import {formatMouseSid} from './mouse-sid.js?v=188';
+import {genotypeReconciliationWarnings,prepareReviewedGenotypeProfile} from './genotype-reconciliation.js?v=192';
 import { predictCross, validateScenario, rankPairs } from './genetics.js?v=100';
 import { discoverGenotypes, sourceProfile, catalogueStrains } from './genotype-catalog.js?v=146';
 import {canonicalLocusName,strainNamingWarning,legacyVgatCreName,getStrainRegistry,targetGenotypeLabel} from './strain-registry.js?v=146';
@@ -56,6 +57,7 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   const mice=()=>data().tables?.mice||[];
   const mouse=id=>mice().find(row=>row.mouse_sid===id);
   const canEdit=()=>!state.historyLoading&&api().canEdit?.()===true;
+  const fullEvidence=()=>typeof api().fullGenotypeEvidence==='function'?api().fullGenotypeEvidence()===true:api().fullGenotypeEvidence===true;
   const historyDeferred=()=>api().historyDeferred===true;
   const genotypeDeferred=()=>api().genotypeHistoryDeferred===true;
   async function loadGenotypeHistory(){
@@ -257,16 +259,22 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   }
   function genotypesHTML() {
     if(genotypeDeferred())return genotypeGate();
-    const record=mouse(state.profileId),locked=!canEdit()||archived(record);
+    const record=mouse(state.profileId),locked=!canEdit()||!fullEvidence()||archived(record);
     return `${catalogue()}<section class="panel"><div class="panel-body"><div class="field"><label for="planner-profile-mouse">Mouse</label><select id="planner-profile-mouse" data-planner-field="profile-mouse">${option('','Choose a mouse',state.profileId)}${mice().map(row=>option(row.mouse_sid,`${formatMouseSid(row.mouse_sid,data())}${(row.physical_tag||row.mouse_tag)?' · '+(row.physical_tag||row.mouse_tag):''} · ${row.sex||'Unknown'}`,state.profileId)).join('')}</select></div>${record?`<p><strong>Source genotype:</strong> ${esc(record.genotype||'Unknown')}</p><p class="small muted">Review the loci configured in Cross planner. Missing calls stay unknown. The source genotype text is preserved.</p><div class="settings-actions">${!locked?button('source-profile','Use source suggestions'):''}${button('open-mouse','View mouse',`data-id="${esc(record.mouse_sid)}"`)}</div>${state.scenario.loci.length?`<div class="planner-loci">${state.scenario.loci.map(locus=>`<section class="planner-locus"><h3>${esc(canonicalLocusName(locus))}</h3>${callEditor(locus,'profile','profile',locked)}</section>`).join('')}</div>`:'<p class="muted">Add loci in Cross planner before reviewing calls.</p>'}<div class="field"><label for="planner-profile-notes">Genotype notes</label><textarea id="planner-profile-notes" data-planner-field="profile-notes"${locked?' readonly':''}>${esc(state.profileNotes)}</textarea></div>${!locked?`<div class="settings-actions">${button('save-profile',api().isCloud?.()?'Save reviewed genotypes to colony':'Save reviewed genotypes locally','', 'primary')}</div>`:'<p class="small muted">Read only</p>'}`:'<p class="muted">Choose an existing animal to review its structured allele calls.</p>'}</div></section>`;
   }
   function helpHTML() {
     return `<details class="panel planner-help"><summary>Planner help and scientific limits</summary><div class="panel-body"><p>This tool models diploid autosomal Mendelian segregation. Multiple loci require an explicit independent-assortment assumption; linked loci, sex-linked inheritance, copy number and recombination phase are not modeled. Keep alternative alleles at the same insertion locus together.</p><p>Source suggestions and hypothetical offspring remain inferred until reviewed. Genotype does not establish Cre recombination, reporter expression, viability, fertility or experimental suitability. Expected pups are a mean; confidence counts use a binomial model. Litter estimates use a nominal size and do not predict pregnancies or timing.</p><p>Calculating and loading plans changes no animals. Saving reviewed genotypes updates only the structured profile; saving a plan creates a planning record.</p><p><a href="https://resources.jax.org/husbandry/strategies-for-creating-complex-breeding-schemes" target="_blank" rel="noopener noreferrer">JAX: complex breeding schemes</a> · <a href="https://www.jax.org/news-and-insights/jax-blog/2012/november/breeding-strategies-for-tissue-specific-knockout-mice" target="_blank" rel="noopener noreferrer">JAX: Cre-lox breeding considerations</a></p></div></details>`;
   }
+  function reconciliationNotices(){
+    const selected=state.tab==='genotypes'?[mouse(state.profileId)]:state.tab==='candidates'&&state.ranking?[...new Set(state.ranking.pairs.flatMap(pair=>[pair.sireId,pair.damId]))].map(mouse):[mouse(state.scenario.sire.id),mouse(state.scenario.dam.id)];
+    const notices=selected.filter(Boolean).flatMap(record=>genotypeReconciliationWarnings(record).map(warning=>`SID ${formatMouseSid(record.mouse_sid,data())}: ${warning}`));
+    if(state.tab==='genotypes'&&!fullEvidence())notices.push('Complete genotype evidence is unavailable in this view. Reload with full Mouse read access before saving allele calls.');
+    return notices;
+  }
   function paint() {
     const previousQuickPlans=container.querySelector?.('[data-planner-quick-plans]');if(previousQuickPlans)state.quickPlansOpen=previousQuickPlans.open;
     const tabs=[['design','Target designer'],['cross','Manual cross'],['candidates','Colony candidates'],['plans','Saved plans'],['genotypes','Genotypes']];
-    container.innerHTML=`<div class="breeding-planner"${state.busy||state.historyLoading?' aria-busy="true"':''}><div class="planner-tabs archive-tabs" role="tablist" aria-label="Planning">${tabs.map(([value,label])=>`<button type="button" role="tab" aria-selected="${state.tab===value}" class="${state.tab===value?'active':''}" data-planner-action="tab" data-tab="${value}">${label}</button>`).join('')}</div>${list(state.error?[state.error]:[],'error')}${state.notice?`<p class="banner" role="status">${esc(state.notice)}</p>`:''}${list(state.sourceWarnings)}${state.genotypeLoading?'<p class="small muted" role="status">Loading genotypes…</p>':''}${state.illustrative?'<p class="banner">Illustrative example · no colony parents assumed. Choose colony loci before recording real genotype calls.</p>':''}<div role="tabpanel">${({design:designHTML,cross:crossHTML,candidates:candidatesHTML,plans:plansHTML,genotypes:genotypesHTML}[state.tab]||designHTML)()}</div>${helpHTML()}</div>`;
+    container.innerHTML=`<div class="breeding-planner"${state.busy||state.historyLoading?' aria-busy="true"':''}><div class="planner-tabs archive-tabs" role="tablist" aria-label="Planning">${tabs.map(([value,label])=>`<button type="button" role="tab" aria-selected="${state.tab===value}" class="${state.tab===value?'active':''}" data-planner-action="tab" data-tab="${value}">${label}</button>`).join('')}</div>${list(state.error?[state.error]:[],'error')}${state.notice?`<p class="banner" role="status">${esc(state.notice)}</p>`:''}${list(state.sourceWarnings)}${list(reconciliationNotices())}${state.genotypeLoading?'<p class="small muted" role="status">Loading genotypes…</p>':''}${state.illustrative?'<p class="banner">Illustrative example · no colony parents assumed. Choose colony loci before recording real genotype calls.</p>':''}<div role="tabpanel">${({design:designHTML,cross:crossHTML,candidates:candidatesHTML,plans:plansHTML,genotypes:genotypesHTML}[state.tab]||designHTML)()}</div>${helpHTML()}</div>`;
     const quickPlansElement=container.querySelector?.('[data-planner-quick-plans]');if(quickPlansElement)quickPlansElement.ontoggle=event=>{if(container.querySelector?.('[data-planner-quick-plans]')===quickPlansElement)state.quickPlansOpen=event.target.open};
     const catalogueElement=container.querySelector?.('[data-planner-catalogue]');if(catalogueElement)catalogueElement.ontoggle=event=>{state.catalogueOpen=event.target.open};
     if(state.busy||state.historyLoading)container.querySelectorAll?.('button,input,select,textarea').forEach(node=>node.disabled=true);
@@ -306,11 +314,11 @@ export function renderBreedingPlanner(container,dataset,hooks) {
   }
   async function saveProfile() {
     if(!canEdit())throw new Error('Edit access is required to save genotypes.');
+    if(!fullEvidence())throw new Error('Complete genotype evidence is required before replacing reviewed allele calls.');
     const original=mouse(state.profileId);if(!original||archived(original))throw new Error('Choose an active mouse record.');
     if(!state.scenario.loci.length)throw new Error('Add a locus before saving reviewed genotypes.');
-    const record=clone(original),old=object(record.genetic_profile)?record.genetic_profile:{},loci=new Map((Array.isArray(old.loci)?old.loci:[]).filter(locus=>object(locus)&&typeof locus.id==='string').map(locus=>[locus.id,clone(locus)])),calls=object(old.calls)?clone(old.calls):{};
-    for(const locus of state.scenario.loci){loci.set(locus.id,locusFields(locus));const value=clone(state.profileCalls[locus.id]||unknown());calls[locus.id]=value.evidence==='unknown'?{...value,alleles:value.alleles?.length===2&&value.alleles.every(Boolean)?value.alleles:[]}:value}
-    const now=new Date().toISOString();record.genetic_profile={...old,schema_version:1,loci:[...loci.values()],calls,recorded_at:now,notes:state.profileNotes};record.app_modified_at=now;
+    const calls=Object.fromEntries(state.scenario.loci.map(locus=>{const value=clone(state.profileCalls[locus.id]||unknown());return[locus.id,value.evidence==='unknown'?{...value,alleles:value.alleles?.length===2&&value.alleles.every(Boolean)?value.alleles:[]}:value]}));
+    const prepared=prepareReviewedGenotypeProfile(original,{loci:state.scenario.loci.map(locusFields),calls,notes:state.profileNotes,reviewId:crypto.randomUUID(),fullGenotypeEvidence:fullEvidence()});if(prepared.errors.length)throw new Error(prepared.errors.join(' '));const record=prepared.draft;
     review('mice',record,record.mouse_sid);const next=clone(data());next.tables.mice[next.tables.mice.findIndex(row=>row.mouse_sid===record.mouse_sid)]=record;
     await persist(next,'Reviewed genotype profile saved.');
   }
@@ -346,7 +354,7 @@ export function renderBreedingPlanner(container,dataset,hooks) {
         state.illustrative=false;invalidate();state.notice='Locus definition changed. Review its parent calls and genotype evidence again.';
       }
     } else if(field==='call'){
-      if(meta.mode==='profile'&&!canEdit())return;
+      if(meta.mode==='profile'&&(!canEdit()||!fullEvidence()))return;
       const calls=meta.mode==='profile'?state.profileCalls:state.scenario[meta.role].calls,current=calls[meta.locus]||(calls[meta.locus]=unknown());
       if(meta.index==='evidence')current.evidence=value;else{const alleles=[current.alleles?.[0]||'',current.alleles?.[1]||''];if(alleles[Number(meta.index)]!==value&&current.evidence==='confirmed')current.evidence='inferred';alleles[Number(meta.index)]=value;current.alleles=alleles}
       if(meta.mode!=='profile'){const selectedId=state.scenario[meta.role].id;delete state.scenario[meta.role].id;invalidate();state.illustrative=false;if(selectedId)state.notice=`Edited calls are now a hypothetical ${meta.role}; ${selectedId}'s stored genotype is unchanged.`}else{state.error='';state.notice=''}

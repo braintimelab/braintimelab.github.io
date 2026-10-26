@@ -11,6 +11,7 @@ import { cageBreedingLayout } from './mouse-registration.js?v=174';
 import { resolveCageStart, planCageStartDateEdit, validateCageStartDrafts, applyCageEntryStartDates, cageStartReadDependencies } from './cage-start.js?v=174';
 import { BADGE_TYPES, WORK_BADGE_STATUSES, badgeLabel, validateWorkBadges, planWorkBadgeEdit, createCageBadgeIndex, cageBadgesForItem, cageNoteBadgesForItem, applyEquipmentBadgeDrafts } from './cage-badges.js?v=132';
 import {sourceBadgeRows,applySourceBadgeDrafts,sourceBadgeReadDependencies} from './cage-note-badges.js?v=103';
+import {reconcileGenotypeText} from './genotype-reconciliation.js?v=192';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const keys={mice:'mouse_sid',cages:'cage_sid',locations:'location_id',husbandry_events:'event_id'};
@@ -22,6 +23,13 @@ const active=r=>r&&!r.app_archived_at&&!r.archived;
 const noteColors=['none','green','red'];
 const noteColor=value=>noteColors.includes(value)?value:'green';
 const currentOverrides=r=>r?.cage_sheet_overrides&&typeof r.cage_sheet_overrides==='object'&&!Array.isArray(r.cage_sheet_overrides)?r.cage_sheet_overrides:{};
+/** Resolve text-affecting proposals from the fresh mouse payload, including
+ * retirement of a stale tag inference. Never resolve source-card occupants. */
+export function cageSheetGenotypeChanges(dataset,drafts){
+  const targets=new Map();for(const change of drafts)if(change.type==='mice'&&['genotype','physical_tag'].includes(change.field)){const mouse=record(dataset,'mice',change.id);if(!mouse)continue;const target=targets.get(String(change.id))||{mouse,nextText:mouse.genotype,tag:mouse.physical_tag,explicitText:false};if(change.field==='genotype'){target.nextText=change.value;target.explicitText=!equal(change.value,mouse.genotype);}else target.tag=change.value;targets.set(String(change.id),target);}
+  for(const target of targets.values())if(!target.explicitText&&!equal(target.tag,target.mouse.physical_tag)&&(target.mouse.genotype_status==='inferred_from_physical_tag'||target.mouse.genotype_inference?.basis==='physical_tag'))target.nextText=null;
+  return [...targets.values()].filter(target=>!equal(target.nextText,target.mouse.genotype));
+}
 const projectionCages=data=>{const occupied=new Set((data.tables.mice||[]).filter(m=>active(m)&&m.state==='Stock').map(m=>String(m.cage_sid)));return (data.tables.cages||[]).filter(c=>active(c)&&(occupied.has(String(c.cage_sid))||/^(Active|Occupied)$/i.test(c.state||''))).sort((a,b)=>String(a.cage_tag||a.cage_sid).localeCompare(String(b.cage_tag||b.cage_sid),undefined,{numeric:true}));};
 function phaseApplies(event,capturedAt){
   if(!validTimingDate(event.start_date)||!validTimingDate(event.end_date))return false;
@@ -72,7 +80,7 @@ export function clearCageSheetDrafts(){activeDraftControls=null;clearTimeout(sta
 export function hasCageSheetDrafts(){return state.drafts.size>0||[...state.entrainmentForms.values()].some(form=>form.dirty);}
 
 /** Apply only explicit edits to fresh records. Unrelated remote edits survive. */
-export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Date().toISOString()}={}){
+export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Date().toISOString(),fullGenotypeEvidence=false,canEditGenotypes=false,genotypeDecisions={}}={}){
   const changes=Array.from(drafts),conflicts=[],updates=new Map(),observationContext=createCageObservationContext(dataset);
   const beforeIndexes=new Map(Object.entries(keys).map(([type,key])=>{const index=new Map();for(const row of dataset.tables[type]||[]){const id=String(row[key]);if(!index.has(id))index.set(id,row);}return [type,index];}));
   const beforeRecord=(type,id)=>beforeIndexes.get(type)?.get(String(id));
@@ -128,6 +136,12 @@ export function applyCageSheetDrafts(dataset,drafts,{canEdit=()=>true,at=new Dat
       next.cage_tag=cage.cage_tag||null;
     }
     if(type==='mice'){
+      const retiredTagInference=!equal(before.physical_tag,next.physical_tag)&&(before.genotype_status==='inferred_from_physical_tag'||before.genotype_inference?.basis==='physical_tag')&&equal(before.genotype,next.genotype),genotype=retiredTagInference?null:next.genotype;
+      if(!equal(before.genotype,genotype)){
+        if(canEditGenotypes!==true)throw new Error('Mouse and Strains edit permission is required for genotype changes. Your cage draft is kept.');
+        const reviewed=reconcileGenotypeText(before,genotype??null,{fullGenotypeEvidence,decision:genotypeDecisions[id]??null,at});if(reviewed.errors.length)throw new Error(`Mouse ${id}: ${reviewed.errors.join(' ')}`);
+        for(const field of ['genotype','genotype_status','genotype_inference','genetic_profile']){if(Object.hasOwn(reviewed.draft,field))next[field]=structuredClone(reviewed.draft[field]);else delete next[field];}
+      }
       const explicit=changes.filter(c=>c.type==='mice'&&String(c.id)===id&&['comment','ear_mark','date_of_birth','cage_sid'].includes(c.field));
       if(explicit.length)next.cage_sheet_overrides={...currentOverrides(before),...Object.fromEntries(explicit.map(c=>[c.field,true]))};
     }
@@ -371,7 +385,7 @@ export function renderCageSheet(host,dataset,hooks={}){
   const racks=[...new Map(projection.groups.filter(g=>g.rackId&&(!state.room||g.roomId===state.room)).map(g=>[g.rackId,g.rackName]))];
   const input=(type,id,field,label,options={})=>{
     const raw=Object.hasOwn(options,'value')?options.value:field==='manager'&&Object.hasOwn(viewRecord(type,id)||{},'manager')?viewRecord(type,id).manager:val(type,id,field,options.fallback),value=options.managerSelect?cageManagerValue(managers,raw):raw,pending=state.drafts.has(draftKey(type,id,field));
-    const attrs=`data-sheet-type="${type}" data-sheet-id="${esc(id)}" data-sheet-field="${field}" aria-label="${esc(label)}"${options.managerSelect?` title="${esc(raw||'Unassigned')}"`:''}${canEdit(type)&&(!options.managerSelect||!managersLoading&&!managersError)&&!(type==='cages'&&state.drafts.has(draftKey(type,id,'$create')))?'':' disabled'}${pending||options.managerSelect?` class="${options.managerSelect?'sheet-manager-select ':''}${pending?'sheet-pending':''}"`:''}`;
+    const attrs=`data-sheet-type="${type}" data-sheet-id="${esc(id)}" data-sheet-field="${field}" aria-label="${esc(label)}"${options.managerSelect?` title="${esc(raw||'Unassigned')}"`:''}${canEdit(type)&&(field!=='genotype'||hooks.canEditGenotypes?.()===true&&hooks.fullGenotypeEvidence?.()===true)&&(!options.managerSelect||!managersLoading&&!managersError)&&!(type==='cages'&&state.drafts.has(draftKey(type,id,'$create')))?'':' disabled'}${pending||options.managerSelect?` class="${options.managerSelect?'sheet-manager-select ':''}${pending?'sheet-pending':''}"`:''}`;
     if(options.choices)return `<select ${attrs}>${options.choices.map(([v,n,disabled])=>`<option value="${esc(v)}"${String(value)===String(v)?' selected':''}${disabled?' disabled':''}>${esc(n)}</option>`).join('')}</select>`;
     if(options.multiline)return `<textarea ${attrs} rows="2" placeholder="${esc(options.placeholder||'Notes')}">${esc(value)}</textarea>`;
     return `<input ${attrs} type="${options.type||'text'}" value="${esc(value)}" placeholder="${esc(options.placeholder||'—')}"${field==='ear_mark'?' maxlength="160"':''}>`;
@@ -648,7 +662,14 @@ export function renderCageSheet(host,dataset,hooks={}){
         const latest=await hooks.loadManagers({force:true});if(state!==saveState||!current())throw new Error('This cage view changed. Reload the sheet before saving.');if(!editable())throw new Error('Edit permission changed. Your draft is kept.');managers=Array.isArray(latest)?latest:latest?.managers||[];
         for(const change of pending.filter(change=>change.field==='manager'&&!change.positionManager&&['cages','locations'].includes(change.type)&&change.value))if(!buildCageManagerChoices(managers,'').some(([value,,disabled])=>!disabled&&value===change.value))throw new Error('Selected manager is no longer in the manager list. Choose again.');
       }
-      const next=applyCageSheetDrafts(fresh,pending,{canEdit:type=>hooks.canEdit?.(type)===true});
+      const genotypeChanges=cageSheetGenotypeChanges(fresh,pending),genotypeDecisions={};
+      if(genotypeChanges.length){
+        if(hooks.canEditGenotypes?.()!==true||hooks.fullGenotypeEvidence?.()!==true)throw new Error('Mouse and Strains edit access with complete genotype evidence is required. Your cage draft is kept.');
+        const retained=genotypeChanges.filter(change=>change.mouse.genetic_profile!=null);
+        if(retained.length){if(typeof hooks.reviewGenotypeEdits!=='function')throw new Error('Open the mouse or bulk genotype editor to explicitly review its existing allele calls. Your cage draft is kept.');if(await hooks.reviewGenotypeEdits(retained)!==true)throw new Error('Genotype review was cancelled. Your cage draft is kept.');for(const change of retained)genotypeDecisions[change.mouse.mouse_sid]='keep_profile';}
+        if(state!==saveState||!current()||hooks.canEditGenotypes?.()!==true||hooks.fullGenotypeEvidence?.()!==true)throw new Error('Genotype access or the cage view changed. Review your draft again.');
+      }
+      const next=applyCageSheetDrafts(fresh,pending,{canEdit:type=>hooks.canEdit?.(type)===true,canEditGenotypes:hooks.canEditGenotypes?.()===true,fullGenotypeEvidence:hooks.fullGenotypeEvidence?.()===true,genotypeDecisions});
       if(state!==saveState||!current())throw new Error('This cage view changed. Reload the sheet before saving.');if(!editable())throw new Error('Edit permission changed. Your draft is kept.');
       const result=await hooks.save(next,{readDependencies:[...getMouseMoveReadDependencies(fresh,pending),...cageStartReadDependencies(fresh,next),...cageEntrainmentReadDependencies(fresh,next,pending),...sourceBadgeReadDependencies(fresh,pending)]});
       if(result===false)throw new Error('Save was not completed. Your draft is kept.');

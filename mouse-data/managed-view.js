@@ -4,6 +4,7 @@ export const MANAGED_TABLES=Object.freeze(['mice','matings','litters','cages','r
 const HOUSING=['mice','cages','rooms','racks','locations','light_events'];
 const SOURCE_ASSOCIATIONS=['animal_sheet_mouse_review','source_reconciliation_batch'];
 const STRAINS=['strain_definition'];
+const CARE=['litter_parent_correction','litter_foster_care','mouse_weaning_batch'];
 const LIGHT=['locobox_protocol','locobox_revision','mouse_entrainment'];
 const MOVES=['cage_move','cage_assignment','cage_location_assignment'];
 const IACUC=['iacuc_protocol','iacuc_assignment','iacuc_usage','iacuc_design'];
@@ -16,9 +17,14 @@ export function managedViewNeeds(route,{detail=null,cageDate=''}={}){
  if(['settings','brainbot','archive'].includes(route))return needs();
  if(route==='cages'&&!cageDate)return needs();
  if(route==='cages')return needs(HOUSING,CAGE_HISTORY);
+ if(route==='workbench')return needs(['mice','matings','litters','cages','rooms','racks','locations'],[...CARE,...STRAINS,...MOVES,...LIGHT,'iacuc_protocol','iacuc_assignment','iacuc_usage']);
+ if(route==='genotyping')return needs(['mice'],[...STRAINS,'experiment_sample']);
+ if(route==='care')return needs(['mice','litters','matings','cages'],CARE);
+ if(route==='today')return needs(['mice','cages','litters','matings','locations'],['cage_card_badge_status','cage_equipment_status','iacuc_protocol','iacuc_assignment']);
+ if(route==='scan')return needs(['mice','cages','locations'],[]);
  if(route==='mice')return needs(detail?[...HOUSING,'matings','litters']:['mice','cages','locations'],detail?[...STRAINS,...LIGHT,...EXPERIMENTS,...IACUC,...SOURCE_ASSOCIATIONS]:STRAINS);
  if(route==='matings')return needs(['mice','matings','litters','cages','locations'],['breeding_options',...STRAINS,...IACUC]);
- if(route==='litters')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...IACUC]);
+ if(route==='litters')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...IACUC,...CARE]);
  if(route==='overview')return needs([...HOUSING,'matings','litters'],['breeding_options','cage_summary_options',...STRAINS]);
  if(route==='family'||route==='planner')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...(route==='planner'?['breeding_options','breeding_plan']:[])]);
  if(route==='strains')return needs([],STRAINS);
