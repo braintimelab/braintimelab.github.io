@@ -1104,7 +1104,7 @@ function bindNewMouseBatchControls(){
  $('save-record').textContent='Review mice';
  if(!context.mouseReview)$('field-sex').closest('.field').hidden=true;
  $('field-mouse_sid').value='Assigned automatically';
- const invalidate=()=>{if(editor!==context)return;context.reviewedFingerprint=null;$('draft-preview').hidden=true;$('save-record').textContent='Review mice';};
+ const invalidate=()=>{if(editor!==context)return;context.reviewedFingerprint=null;context.preparedMouseBatch=null;$('draft-preview').hidden=true;$('save-record').textContent='Review mice';};
  const sync=()=>{const sheet=mode?.value==='sheet';if(mode){$('mouse-count-entry').hidden=sheet;$('mouse-sheet-entry').hidden=!sheet;}invalidate();};
  if(mode)mode.onchange=sync;
  const file=$('mouse-sheet-file');if(file)file.onchange=async()=>{const chosen=file.files?.[0];if(!chosen)return;try{if(chosen.size>256000)throw new Error('Choose a CSV or TSV file smaller than 256 KB.');const value=await chosen.text();if(editor!==context)return;$('mouse-sheet-rows').value=value;mode.value='sheet';sync();}catch(error){newMouseFormError(error);}};
@@ -1122,7 +1122,7 @@ async function prepareNewMouseDrafts(){
  const options={counts,rows,registration:context.registration,requestId:context.record.registration_request_id};
  // Validate all shared and per-row fields before reserving any identifiers.
  let batch=prepareMouseRegistrationBatch(source,shared,options);
- for(const draft of batch.drafts){const validation=validateDraft(draft);if(validation.errors.length)throw new Error(validation.errors.join('\n'));}
+ if(context.mouseReview&&!$('confirm-mouse-review')?.checked)throw new Error('Confirm the animal and its Mice record before saving.');if(context.mouseReview&&(!batch.drafts[0].physical_tag||!batch.drafts[0].date_of_birth))throw new Error('Enter the physical tag and date of birth before saving.');if(context.registration?.newborn&&batch.drafts.some(draft=>draft.sire_sids?.length||draft.dam_sids?.length)&&!$('confirm-newborn-parents')?.checked)throw new Error('Confirm the proposed parents, or clear the parent fields.');
  const total=batch.drafts.length,needsAutomatic=rows?rows.some(row=>!row.mouse_sid):true;
  if(cloud.mode==='cloud'&&needsAutomatic){
   let reservation=context.sidReservations.get(total);
@@ -1136,7 +1136,7 @@ function showNewMouseDraft(batch){
  $('form-errors').hidden=true;$('draft-preview').hidden=false;
  $('draft-preview').innerHTML=mouseBatchPreviewHTML(batch.drafts)+(batch.warnings.length?`<p class="small muted">${batch.warnings.map(esc).join('<br>')}</p>`:'')+`<p class="small muted">Shared manager, cage, dates, parents and notes apply to each mouse. ${cloud.mode==='cloud'?'All mice and housing histories save together to the shared colony. Reserved SIDs remain fixed if this save needs a retry.':'This saves in this browser only; shared registration assigns SIDs from the colony sequence.'}</p>`;
  $('field-mouse_sid').value=batch.drafts.length===1?batch.drafts[0].mouse_sid:`${batch.drafts[0].mouse_sid} … ${batch.drafts.at(-1).mouse_sid}`;
- batch.context.reviewedFingerprint=batch.fingerprint;
+ batch.context.reviewedFingerprint=batch.fingerprint;batch.context.preparedMouseBatch=batch;
  $('draft-preview').scrollIntoView?.({block:'start',behavior:'auto'});
  $('save-record').textContent=`Save ${batch.drafts.length} ${batch.drafts.length===1?'mouse':'mice'}`;
 }
@@ -1150,7 +1150,7 @@ async function saveNewMouseBatch(){
  const context=editor,reviewed=context.reviewedFingerprint===newMouseFingerprint();
  busy=true;$('save-record').disabled=true;
  try{
-  const batch=await prepareNewMouseDrafts();showNewMouseDraft(batch);if(!reviewed)return;
+  const cached=context.preparedMouseBatch;const batch=reviewed&&cached&&cached.source===dataset&&cached.account===cageSheetContext()&&cached.fingerprint===newMouseFingerprint()?cached:await prepareNewMouseDrafts();showNewMouseDraft(batch);if(!reviewed)return;
   const current=()=>{if(editor!==context||dataset!==batch.source||batch.account!==cageSheetContext()||batch.fingerprint!==newMouseFingerprint())throw new Error('The draft or account changed. Review again.');};current();
   if(context.mouseReview&&context.mouseReview.datasetAtOpen!==dataset)throw new Error('Data changed. Reopen this entry from Review.');
   let drafts=batch.drafts.map(clone),review=null;

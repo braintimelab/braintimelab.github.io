@@ -1,5 +1,6 @@
 import {buildMouseBatchDrafts,nextNumericMouseSids,registrationDataset,MOUSE_BATCH_LIMIT} from './mouse-registration.js?v=188';
 import {canonicalMouseSidKey,formatMouseSid,resolveMouseSid} from './mouse-sid.js?v=188';
+import {createMouseRegistrationValidationContext} from './model.js?v=188';
 export {resolveMouseSid} from './mouse-sid.js?v=188';
 
 function resolveParents(dataset,draft) {
@@ -45,13 +46,13 @@ export function prepareMouseRegistrationBatch(dataset,sharedDraft,{counts,rows,r
   pool=reserved.filter(sid=>!explicit.has(canonicalMouseSidKey(sid)));
   if(pool.length<missing)throw new Error('The SID reservation does not cover all blank SIDs. Reopen the draft.');
  }
- const staged=structuredClone(base),drafts=[],dependencies=new Map(),warnings=[];
+ const validationContext=createMouseRegistrationValidationContext(base),staged=validationContext.dataset,drafts=[],dependencies=new Map(),warnings=[];
  let automatic=0;
  for(let index=0;index<proposals.length;index++){
   const proposal=resolveParents(staged,proposals[index]),sid=proposal.mouse_sid||pool[automatic++];
   try{
-   const result=buildMouseBatchDrafts(staged,proposal,countFor(proposal.sex),{sids:[sid],requestId:requestId?`${requestId}:${index+1}`:undefined});
-   drafts.push(result.drafts[0]);staged.tables.mice.push(result.drafts[0]);warnings.push(...result.warnings);
+   const result=buildMouseBatchDrafts(staged,proposal,countFor(proposal.sex),{sids:[sid],requestId:requestId?`${requestId}:${index+1}`:undefined,validationContext});
+   drafts.push(result.drafts[0]);warnings.push(...result.warnings);
    for(const dependency of result.readDependencies)dependencies.set(dependency.type+':'+dependency.id,dependency);
   }catch(error){throw new Error(`Row ${index+1}: ${error.message}`);}
  }

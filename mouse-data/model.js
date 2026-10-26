@@ -203,7 +203,12 @@ export function normalizeDataset(dataset) {
   return result;
 }
 
-function problems(dataset) {
+function problems(dataset,dateValidity=null) {
+  const dateIsValid=dateValidity?value=>{
+    if(typeof value!=='string')return false;
+    if(!dateValidity.has(value))dateValidity.set(value,validDate(value));
+    return dateValidity.get(value);
+  }:validDate;
   const found=[];
   const tables=dataset.tables??{};
   const index={};
@@ -217,10 +222,10 @@ function problems(dataset) {
       if(seen.has(id))add('duplicate',type,id,null,`${type} identifier ${id} is duplicated.`);
       seen.add(id);
       for(const name of ['sire_sids','dam_sids','male_sids','female_sids'])if(Array.isArray(r[name])&&new Set(r[name]).size!==r[name].length)add('duplicate_parent',type,id,[name,r[name]],`${id}: ${name} contains duplicate identifiers.`);
-      for(const [name,value] of Object.entries(r))if((name.endsWith('_date')||name==='date_of_birth')&&populated(value)&&!validDate(value))add('date',type,id,[name,value],`${id}: ${name} must be a valid YYYY-MM-DD date.`);
+      for(const [name,value] of Object.entries(r))if((name.endsWith('_date')||name==='date_of_birth')&&populated(value)&&!dateIsValid(value))add('date',type,id,[name,value],`${id}: ${name} must be a valid YYYY-MM-DD date.`);
       const born=r.date_of_birth;
-      if(validDate(born))for(const name of ['end_date','wean_date','mature_date','received_date','procedure_date','tail_tag_date'])if(validDate(r[name])&&r[name]<born)add('date_order',type,id,[name,r[name],born],`${id}: ${name} precedes birth.`);
-      if(validDate(r.set_up_date)&&validDate(r.disbanded_date)&&r.disbanded_date<r.set_up_date)add('mating_dates',type,id,[r.set_up_date,r.disbanded_date],`${id}: disbanded date precedes set up date.`);
+      if(dateIsValid(born))for(const name of ['end_date','wean_date','mature_date','received_date','procedure_date','tail_tag_date'])if(dateIsValid(r[name])&&r[name]<born)add('date_order',type,id,[name,r[name],born],`${id}: ${name} precedes birth.`);
+      if(dateIsValid(r.set_up_date)&&dateIsValid(r.disbanded_date)&&r.disbanded_date<r.set_up_date)add('mating_dates',type,id,[r.set_up_date,r.disbanded_date],`${id}: disbanded date precedes set up date.`);
       if(populated(r.cage_sid)&&!index.cages.has(r.cage_sid))add('cage',type,id,r.cage_sid,`${id}: cage ${r.cage_sid} is not in this dataset.`);
       if(type==='mice'&&populated(r.litter_sid)&&!index.litters.has(r.litter_sid))add('litter',type,id,r.litter_sid,`${id}: litter ${r.litter_sid} is not in this dataset.`);
       if(type==='litters'&&populated(r.mating_sid)&&!index.matings.has(r.mating_sid))add('mating',type,id,r.mating_sid,`${id}: mating ${r.mating_sid} is not in this dataset.`);
@@ -228,7 +233,7 @@ function problems(dataset) {
       if(type==='husbandry_events'&&populated(r.mouse_sid)&&!index.mice.has(r.mouse_sid))add('mouse_ref',type,id,r.mouse_sid,`${id}: mouse ${r.mouse_sid} does not exist.`);
       if(populated(r.rack_id)&&populated(r.room_id)&&index.racks.has(r.rack_id)&&index.racks.get(r.rack_id).room_id!==r.room_id)add('rack_room',type,id,[r.rack_id,r.room_id],`${id}: the selected rack belongs to a different room.`);
       if(populated(r.location_id)&&index.locations.has(r.location_id))for(const name of ['room_id','rack_id'])if(populated(r[name])&&populated(index.locations.get(r.location_id)[name])&&r[name]!==index.locations.get(r.location_id)[name])add('location_parent',type,id,[name,r[name],r.location_id],`${id}: ${name} differs from the selected location.`);
-      if(validDate(r.start_date)&&validDate(r.end_date)&&r.end_date<r.start_date)add('event_dates',type,id,[r.start_date,r.end_date],`${id}: end date precedes start date.`);
+      if(dateIsValid(r.start_date)&&dateIsValid(r.end_date)&&r.end_date<r.start_date)add('event_dates',type,id,[r.start_date,r.end_date],`${id}: end date precedes start date.`);
       if(type==='light_events') {
         for(const name of ['lights_on','lights_off'])if(populated(r[name])&&(typeof r[name]!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(r[name])))add('time',type,id,[name,r[name]],`${id}: ${name} must use 24-hour HH:mm.`);
         for(const name of ['cycle_hours','light_hours','transition_minutes','intensity_lux'])if(populated(r[name])){
@@ -251,7 +256,7 @@ function problems(dataset) {
         if(!p)add('parent_missing','mice',m.mouse_sid,[field,pid],`${m.mouse_sid}: parent ${pid} does not exist.`);
         else {
           if(p.sex!==expected)add('parent_sex','mice',m.mouse_sid,[field,pid,p.sex],`${m.mouse_sid}: ${field==='sire_sids'?'sire':'dam'} ${pid} has sex ${p.sex??'unknown'}; ${expected} is required.`);
-          if(validDate(p.date_of_birth)&&validDate(m.date_of_birth)&&p.date_of_birth>=m.date_of_birth)add('parent_date','mice',m.mouse_sid,[pid,p.date_of_birth,m.date_of_birth],`${m.mouse_sid}: parent ${pid} must be born before the offspring.`);
+          if(dateIsValid(p.date_of_birth)&&dateIsValid(m.date_of_birth)&&p.date_of_birth>=m.date_of_birth)add('parent_date','mice',m.mouse_sid,[pid,p.date_of_birth,m.date_of_birth],`${m.mouse_sid}: parent ${pid} must be born before the offspring.`);
         }
         if(pid===m.mouse_sid)add('self','mice',m.mouse_sid,field,`${m.mouse_sid} cannot be its own parent.`);
       }
@@ -279,17 +284,30 @@ function problems(dataset) {
     if(!p)add('parent_missing','litters',litter.litter_sid,[name,pid],`${litter.litter_sid}: parent ${pid} does not exist.`);
     else {
       if(p.sex!==expected)add('parent_sex','litters',litter.litter_sid,[name,pid,p.sex],`${litter.litter_sid}: parent ${pid} must be ${expected}.`);
-      if(validDate(p.date_of_birth)&&validDate(litter.date_of_birth)&&p.date_of_birth>=litter.date_of_birth)add('parent_date','litters',litter.litter_sid,[pid,p.date_of_birth,litter.date_of_birth],`${litter.litter_sid}: parent ${pid} must be born before the litter.`);
+      if(dateIsValid(p.date_of_birth)&&dateIsValid(litter.date_of_birth)&&p.date_of_birth>=litter.date_of_birth)add('parent_date','litters',litter.litter_sid,[pid,p.date_of_birth,litter.date_of_birth],`${litter.litter_sid}: parent ${pid} must be born before the litter.`);
     }
   }
   return found;
 }
 
-export function validateRecord(type,draft,dataset,originalId=null) {
+const appendOnlyValidationContexts=new WeakMap();
+
+/** A private working copy for an append-only mouse batch. Existing rows and
+ * other tables remain unchanged; append a mouse only after validation succeeds.
+ * Keeping the original problem set avoids rescanning unchanged source evidence. */
+export function createMouseRegistrationValidationContext(dataset) {
+  const base=normalizeDataset(dataset),context=Object.freeze({dataset:base}),dateValidity=new Map();
+  appendOnlyValidationContexts.set(context,{dataset:base,dateValidity,prior:new Set(problems(base,dateValidity).map(problem=>problem.fingerprint))});
+  return context;
+}
+
+export function validateRecord(type,draft,dataset,originalId=null,validationContext=null) {
   const errors=[],warnings=[];
   if(!ID_FIELDS[type])return {errors:[`Unsupported record type: ${type}.`],warnings};
   if(!draft||typeof draft!=='object'||Array.isArray(draft))return {errors:['A record object is required.'],warnings};
-  const base=normalizeDataset(dataset),field=ID_FIELDS[type],old=base.tables[type].find(r=>r[field]===originalId);
+  const prepared=type==='mice'&&originalId===null&&appendOnlyValidationContexts.get(validationContext);
+  const usePrepared=Boolean(prepared&&prepared.dataset===dataset);
+  const base=usePrepared?prepared.dataset:normalizeDataset(dataset),field=ID_FIELDS[type],old=base.tables[type].find(r=>r[field]===originalId);
   if(originalId!==null&&!old)errors.push('The original record no longer exists. Reload before editing.');
   if(typeof draft[field]!=='string'||!draft[field].trim())errors.push(`${field} must be a nonempty text identifier.`);
   if(old&&draft[field]!==originalId)errors.push('An existing record identifier cannot be changed. Create a new record instead.');
@@ -327,11 +345,11 @@ export function validateRecord(type,draft,dataset,originalId=null) {
       else {const check=validateScenario(plan.scenario);errors.push(...check.errors);warnings.push(...check.warnings);}
     }
   }
-  const candidate=copy(base);
+  const candidate=usePrepared?{...base,tables:{...base.tables}}:copy(base);
   candidate.tables[type]=base.tables[type].filter(r=>r[field]!==originalId);
   candidate.tables[type].push(copy(draft));
-  const prior=new Set(problems(base).map(p=>p.fingerprint));
-  for(const issue of problems(candidate)) {
+  const prior=usePrepared?prepared.prior:new Set(problems(base).map(p=>p.fingerprint));
+  for(const issue of problems(candidate,usePrepared?prepared.dateValidity:null)) {
     if(!prior.has(issue.fingerprint))errors.push(issue.message);
     else if(issue.type===type&&issue.id===originalId)warnings.push(`Existing source issue retained: ${issue.message}`);
   }

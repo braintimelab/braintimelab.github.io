@@ -1,7 +1,7 @@
 import { parseCompactStrainNotation } from './mouse-summary.js?v=146';
 import { cageSheetAnimals, ageWeeks, todayTaipei } from './cage-observations.js?v=100';
 import { getBreedingOptions } from './breeding-options.js?v=100';
-import { cageManager, buildCageLocationEvent, validateRecord } from './model.js?v=174';
+import { cageManager, buildCageLocationEvent, validateRecord, createMouseRegistrationValidationContext } from './model.js?v=188';
 import {FOXJ1_STRAIN_NAME} from './strain-registry.js?v=146';
 import {formatMouseSid} from './mouse-sid.js?v=188';
 
@@ -56,7 +56,7 @@ export function readMouseBatchCounts(source) {
 
 /** Build and validate each animal without changing the source dataset. Shared
  * fields are deep copied so an individual can be edited safely after creation. */
-export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requestId=sharedDraft?.registration_request_id}={}) {
+export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requestId=sharedDraft?.registration_request_id,validationContext=null}={}) {
  const parsed=readMouseBatchCounts(counts),total=batchSexes.reduce((sum,sex)=>sum+parsed[sex],0);
  const assigned=sids??nextNumericMouseSids(dataset,total);
  if(!Array.isArray(assigned)||assigned.length!==total||assigned.some(id=>typeof id!=='string'||!/^\d{5}$/.test(id)||BigInt(id)<1n)||new Set(assigned.map(id=>String(BigInt(id)))).size!==total)throw new Error('The SID reservation does not match this batch. Reopen the draft.');
@@ -64,7 +64,9 @@ export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requ
  if(assigned.some(id=>occupied.has(String(BigInt(id)))))throw new Error('A reserved SID already exists. Refresh before registering the batch.');
  const rawTag=String(sharedDraft?.physical_tag||'').trim();
  if(total>1&&/[-\s][MFU]\s*\d+$/i.test(rawTag))throw new Error('For several mice, enter a shared tag prefix such as FB instead of a complete numbered tag.');
- const staged=structuredClone(dataset),drafts=[],dependencies=new Map(),warnings=[];
+ if(validationContext&&validationContext.dataset!==dataset)throw new Error('The batch validation context changed. Reopen the draft.');
+ const context=validationContext??createMouseRegistrationValidationContext(dataset);
+ const staged=context.dataset,drafts=[],dependencies=new Map(),warnings=[];
  let index=0;
  for(const sex of batchSexes)for(let number=0;number<parsed[sex];number++){
   const sid=assigned[index],draft={...structuredClone(sharedDraft),mouse_sid:sid,sex};
@@ -73,7 +75,7 @@ export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requ
   if(draft.genotype_inference?.basis==='physical_tag')draft.genotype_inference={...draft.genotype_inference,tag:draft.physical_tag};
   const identity=separateReusedMouseTag(staged,draft);if(identity.error)throw new Error(`Mouse ${index+1}: ${identity.error}`);
   for(const dependency of identity.readDependencies)dependencies.set(dependency.type+':'+dependency.id,dependency);
-  const validation=validateRecord('mice',identity.draft,staged);
+  const validation=validateRecord('mice',identity.draft,staged,null,context);
   if(validation.errors.length)throw new Error(`Mouse ${index+1} (SID ${sid}): ${validation.errors.join(' ')}`);
   warnings.push(...validation.warnings);drafts.push(identity.draft);staged.tables.mice.push(identity.draft);index++;
  }
