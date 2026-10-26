@@ -1,7 +1,7 @@
 /* Display-only parentage evidence. Stored IDs, source facts and inference
  * metadata remain unchanged. Human editor confirmation is not biological proof. */
 const roles=['sire','dam'];
-const inferenceKinds=new Set(['source_reconciliation_inference','cage_parent_candidates']);
+const inferenceKinds=new Set(['source_reconciliation_inference','cage_parent_candidates','litter_parent_candidates']);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const ids=value=>Array.isArray(value)?value.map(String):String(value||'').split(/[,;\n]/).map(value=>value.trim()).filter(Boolean);
 const validRoles=value=>Array.isArray(value)&&value.length>0&&value.every(role=>roles.includes(role))&&new Set(value).size===value.length;
@@ -16,7 +16,7 @@ export function parentRoleEvidence(mouse={},role){
  const ambiguous=parentIds.length>1;
  const confidence=inferred&&basis.kind==='source_reconciliation_inference'&&['high','moderate'].includes(basis.confidence)?basis.confidence:null;
  const confirmedInEditor=inferred&&basis.confirmed_in_editor===true;
- const origin=inferred?(basis.kind==='cage_parent_candidates'?'cage parent candidates':'source reconciliation'):null;
+ const origin=inferred?(basis.kind==='cage_parent_candidates'?'cage parent candidates':basis.kind==='litter_parent_candidates'?'litter and mating parent candidates':'source reconciliation'):null;
  let label=parentIds.length?(ambiguous?'Recorded alternatives':'Single recorded parent'):'Not recorded';
  if(inferred)label=(ambiguous?'Inferred alternatives':'Inferred')+(confidence?' · '+confidence+' confidence':'');
  const detail=inferred?'Inferred from '+origin+'.'+(confidence?' '+confidence[0].toUpperCase()+confidence.slice(1)+' confidence.':'')+(confirmedInEditor?' Confirmed in editor; biological parentage remains inferred.':'')+(ambiguous?' Candidate parents remain unresolved.':''):ambiguous?'Candidate parents · Unresolved':'';

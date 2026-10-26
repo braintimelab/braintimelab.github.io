@@ -336,3 +336,19 @@
 .presence-strip{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0}.presence-strip[hidden]{display:none!important}.presence-unavailable{font-size:10px;font-weight:400;color:var(--muted,#6a747b)}.presence-person{position:relative;flex:none;margin:0}.presence-badge{display:flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 5px;box-sizing:border-box;border:1px solid var(--control-line,var(--line,#cbd3d9));border-radius:50%;background:transparent;color:var(--link,var(--accent,#244e78));font-family:inherit;font-weight:600;font-size:10px;line-height:1;cursor:pointer;list-style:none;letter-spacing:.02em}.presence-badge::-webkit-details-marker{display:none}.presence-badge:focus-visible{outline:2px solid currentColor;outline-offset:2px}.presence-detail{position:absolute;right:0;top:calc(100% + 6px);z-index:60;min-width:160px;max-width:min(280px,80vw);padding:8px 10px;background:var(--surface,#fffdf7);border:1px solid var(--line,#cbd3d9);border-radius:7px;color:var(--ink,#243038);font-size:11px;font-weight:400;line-height:1.4;box-shadow:0 3px 12px #00000012;white-space:normal}.presence-person:not([open])>.presence-detail{display:none}@media(max-width:620px){.presence-badge{min-width:26px;height:26px;font-size:9px}}@media print{.presence-strip{display:none!important}}
 
 .workspace-sync-progress{margin:14px 32px 0;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}.workspace-sync-progress p{margin:0}.workspace-sync-progress .workspace-progress{margin:7px 0}.workspace-sync-progress progress{height:7px}.workspace-sync-progress .small{font-size:11px}@media(max-width:620px){.workspace-sync-progress{margin:10px 14px 0;padding:9px 12px}.workspace-sync-progress .small{font-size:10px}}
+
+/* Registration batches keep SID columns intact and scroll inside a wide dialog. */
+#record-dialog.registration-batch-dialog{width:min(1100px,calc(100vw - 24px));max-width:1100px;height:min(94dvh,980px);max-height:calc(100dvh - 24px)}
+#record-dialog.registration-batch-dialog form{display:flex;flex-direction:column;height:100%;max-height:100%;overflow:hidden}
+#record-dialog.registration-batch-dialog .dialog-heading,#record-dialog.registration-batch-dialog .dialog-actions{flex:none}
+#record-dialog.registration-batch-dialog .dialog-content{flex:1;min-height:0;max-height:none;overflow:auto}
+#record-dialog.registration-batch-dialog fieldset{min-width:0;margin:10px 0 18px;padding:14px;border:1px solid var(--line);border-radius:7px}
+#record-dialog.registration-batch-dialog .draft-preview{scroll-margin-top:12px}
+#record-dialog .registration-rows{table-layout:auto;width:100%;min-width:940px}
+#record-dialog .registration-rows th,#record-dialog .registration-rows td{max-width:none;overflow-wrap:normal;word-break:normal;vertical-align:middle;padding:10px}
+#record-dialog .registration-rows th:first-child,#record-dialog .registration-rows td:first-child{width:52px;min-width:52px;text-align:center}
+#record-dialog .registration-rows .registration-sid{min-width:94px;white-space:nowrap;font-variant-numeric:tabular-nums}
+#record-dialog .registration-rows select{min-width:110px}
+#record-dialog .registration-rows input:not([type=checkbox]){min-width:150px;width:100%}
+#record-dialog .registration-rows td:nth-child(5) input{min-width:220px}
+@media(max-width:620px){#record-dialog.registration-batch-dialog{width:calc(100vw - 16px);height:calc(100dvh - 20px)}#record-dialog.registration-batch-dialog .dialog-content{padding:14px}#record-dialog.registration-batch-dialog .dialog-actions{padding:12px;flex-wrap:wrap}}
