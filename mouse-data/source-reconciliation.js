@@ -5,6 +5,9 @@ import {compareVerifiedSourceLabels,expectedNoteCell,readCurrentLiteralNote} fro
 // Bound only after the private source plan and its complete CAS closure pass review.
 // This contains no source observations, animal identifiers or private directory.
 export const APPROVED_SOURCE_RECONCILIATION=Object.freeze({sha256:'8d4f9e881ae93fd75899dbc38f342e06e13634c2fafb7f799dd712ccb548a1da',intent:'owner-authorized-softmouse-animal-sheet-identity-associations-v2-2026-10-25'});
+// Enabled only after the exact fresh private parentage plan passes review.
+export const APPROVED_PARENTAGE_RECONCILIATION=Object.freeze({sha256:'6b213f45e390b7b285a830f284cee56328b091da0ac391d414d092c09e31a093',intent:'owner-authorized-parentage-candidate-refinement-2026-10-26'});
+const APPROVED_SOURCE_PLANS=Object.freeze([APPROVED_SOURCE_RECONCILIATION,APPROVED_PARENTAGE_RECONCILIATION]);
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const HASH=/^[a-f0-9]{64}$/;
 const timestamp=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-3]):[0-5]\d|[+-]14:00)$/.test(value)&&Number.isFinite(Date.parse(value));
@@ -19,13 +22,79 @@ const fail=message=>{throw new Error(message);};
 const assert=(condition,message)=>{if(!condition)fail(message);};
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=200&&value.trim()===value&&!/[\u0000-\u001f\u007f]/.test(value);
 const inactive=row=>row?.archived===true||Boolean(row?.app_archived_at)||row?.history_read_only===true||row?.source_historical===true;
-const allowedKinds=new Set(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end','resolve_current_animal_sheet_mouse','set_ear_mark','record_source_reconciliation_batch']);
+const allowedKinds=new Set(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end','resolve_current_animal_sheet_mouse','set_ear_mark','narrow_inferred_parentage','record_source_reconciliation_batch']);
 const tagKey=value=>typeof value==='string'?value.trim().replace(/[′’‘]/g,"'").replace(/[‐‑‒–—―−]/g,'-').replace(/^(.*?)(?:\s+|-)([MF]\d+)$/,'$1-$2'):'';
 const fullTags=mouse=>{const raw=[mouse.physical_tag,...(Array.isArray(mouse.physical_tag_aliases)?mouse.physical_tag_aliases:[])];if(/^\d+$/.test(mouse.mouse_sid||'')&&/[-\s][MF]$/.test(mouse.physical_tag||''))raw.push(mouse.physical_tag+mouse.mouse_sid);return [...new Set(raw.map(tagKey).filter(value=>/^.+(?:-|\s)[MF]\s*\d+[A-Za-z]?$/.test(value)))];};
 const uniqueRows=rows=>{const map=new Map();for(const row of rows){assert(plain(row)&&Object.hasOwn(IDS,row.entity_type)&&text(row.entity_id)&&!map.has(key(row)),'The plan contains invalid or repeated record keys.');map.set(key(row),row);}return map;};
 const resolutionOf=operation=>operation.association?.resolution??operation.resolution;
 const associationPresentation=operation=>operation.association?{identityAssociation:{inferred:true,confidence:operation.association.identityEvidence.confidence,recordedTag:operation.association.identityEvidence.recorded_tag,observedTag:operation.association.identityEvidence.observed_tag,tagNeedsCheck:operation.association.identityEvidence.tag_review?.status==='needs_check'},...(operation.association.identityEvidence.owner_lifecycle_decision?{ownerLifecycleCorrection:copy(operation.association.identityEvidence.owner_lifecycle_decision)}:{})}:{};
 export async function sourcePlanDigest(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');}
+
+
+const PARENTAGE_POLICY='owner_authorized_parentage_candidate_refinement';
+const PARENTAGE_RULE='dam_terminal_end_before_offspring_birth';
+const PARENTAGE_INTENT='owner-authorized-parentage-candidate-refinement-2026-10-26';
+// These exact source endpoints establish death/removal for this narrow rule.
+// Retirement, end of breeding, source absence and sire death are not this rule.
+const TERMINAL_PARENT_END_TYPES=new Set(['Harvested','Sacrificed','Found Dead']);
+const day=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value+'T00:00:00Z'))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
+const exactIds=value=>Array.isArray(value)&&value.every(text)&&new Set(value).size===value.length;
+const sameSet=(first,second)=>exactIds(first)&&exactIds(second)&&first.length===second.length&&first.every(id=>second.includes(id));
+function parentageSource(payload){
+ assert(payload?.record_origin==='explicit_export'&&text(payload.source_record_id)&&text(payload.source_filename)&&text(payload.source_sheet)&&Number.isSafeInteger(payload.source_row)&&payload.source_row>0&&HASH.test(payload.source_sha256||''),'Parentage evidence requires exact original export provenance.');
+ return Object.fromEntries(['record_origin','source_record_id','source_filename','source_sheet','source_row','source_sha256'].map(field=>[field,copy(payload[field])]));
+}
+
+/** Exact compact evidence for the one supported, source-backed dam refinement. */
+export function parentageEvidenceRefs(before,afterDamSids,dependencyRows,supportingSourceRefs){
+ assert(plain(before)&&text(before.mouse_sid)&&day(before.date_of_birth)&&exactIds(before.sire_sids)&&exactIds(before.dam_sids)&&before.dam_sids.length>=2&&exactIds(afterDamSids)&&afterDamSids.length>0&&afterDamSids.length<before.dam_sids.length&&afterDamSids.every(id=>before.dam_sids.includes(id)),'A parentage refinement must retain a strict nonempty subset of existing dam alternatives.');
+ assert(before.lineage_basis==null,'An existing lineage basis requires a separate reviewed history policy.');
+ const dependencies=uniqueRows(dependencyRows),refs=[{kind:'child_parentage',mouse_sid:before.mouse_sid,date_of_birth:before.date_of_birth,sire_sids:copy(before.sire_sids),dam_sids:copy(before.dam_sids),source:parentageSource(before)}];
+ for(const id of before.dam_sids){
+  const row=dependencies.get('mice:'+id),parent=row?.payload,excluded=!afterDamSids.includes(id);
+  assert(row&&!row.archived&&!parent?.app_archived_at&&parent?.mouse_sid===id&&parent.sex==='Female'&&day(parent.date_of_birth)&&parent.date_of_birth<before.date_of_birth,'A dam candidate lacks its exact valid identity and chronology.');
+  if(parent.state==='Ended'&&TERMINAL_PARENT_END_TYPES.has(parent.end_type))assert(day(parent.end_date)&&parent.end_date>=parent.date_of_birth,'The terminal dam endpoint has invalid source chronology.');
+  const terminalBefore=parent.state==='Ended'&&TERMINAL_PARENT_END_TYPES.has(parent.end_type)&&day(parent.end_date)&&parent.end_date<before.date_of_birth;
+  assert(excluded?terminalBefore:!terminalBefore,'Only an exact terminal dam endpoint before offspring birth supports this exclusion.');
+  refs.push({kind:'parent_lifecycle',role:'dam',mouse_sid:id,date_of_birth:parent.date_of_birth,sex:parent.sex,state:parent.state??null,end_date:parent.end_date??null,end_type:parent.end_type??null,outcome:excluded?'excluded_before_birth':'retained_candidate',source:parentageSource(parent)});
+ }
+ assert(Array.isArray(supportingSourceRefs)&&supportingSourceRefs.length===2&&supportingSourceRefs.every(ref=>plain(ref)&&equal(Object.keys(ref).sort(),['entity_id','entity_type'])&&text(ref.entity_id)),'The refinement requires exact linked litter and mating source references.');
+ const litterRef=supportingSourceRefs.find(ref=>ref.entity_type==='litters'),matingRef=supportingSourceRefs.find(ref=>ref.entity_type==='matings');
+ assert(litterRef&&matingRef&&litterRef.entity_id===before.litter_sid,'The linked source references do not identify the child litter and mating.');
+ const litterRow=dependencies.get(key(litterRef)),matingRow=dependencies.get(key(matingRef)),litter=litterRow?.payload,mating=matingRow?.payload;
+ assert(litterRow&&!litterRow.archived&&!litter?.app_archived_at&&matingRow&&!matingRow.archived&&!mating?.app_archived_at&&litter?.litter_sid===litterRef.entity_id&&mating?.mating_sid===matingRef.entity_id&&litter.mating_sid===matingRef.entity_id,'The linked parentage source dependencies are unavailable or inconsistent.');
+ assert(litter.date_of_birth===before.date_of_birth&&sameSet(litter.sire_sids,before.sire_sids)&&sameSet(litter.dam_sids,before.dam_sids)&&Array.isArray(litter.listed_pup_sids)&&litter.listed_pup_sids.includes(before.mouse_sid),'The linked litter does not retain the exact original child parentage.');
+ assert(exactIds(mating.male_sids)&&exactIds(mating.female_sids)&&before.sire_sids.every(id=>mating.male_sids.includes(id))&&before.dam_sids.every(id=>mating.female_sids.includes(id))&&day(mating.set_up_date)&&mating.set_up_date<before.date_of_birth&&(!mating.disbanded_date||day(mating.disbanded_date)&&mating.disbanded_date>=mating.set_up_date),'The linked mating does not support the original candidates and dated setup.');
+ refs.push({kind:'linked_litter',entity_type:'litters',entity_id:litterRef.entity_id,date_of_birth:litter.date_of_birth,mating_sid:litter.mating_sid,sire_sids:copy(litter.sire_sids),dam_sids:copy(litter.dam_sids),child_listed:true,source:parentageSource(litter)});
+ refs.push({kind:'linked_mating',entity_type:'matings',entity_id:matingRef.entity_id,set_up_date:mating.set_up_date,disbanded_date:mating.disbanded_date??null,male_sids:copy(mating.male_sids),female_sids:copy(mating.female_sids),source:parentageSource(mating)});
+ return refs;
+}
+
+/** Privacy-bounded batch audit: references and before/after IDs, no source body. */
+export function parentageBatchPayload(plan,operation,eventId){
+ return {event_id:eventId,event_type:'source_reconciliation_batch',schema_version:1,operation_id:plan.operation_id,plan_id:plan.plan_id,recorded_at:operation.patch.app_modified_at,parentage_policy:PARENTAGE_POLICY,changed_parentage:[{mouse_sid:operation.entity_id,role:'dam',before_sids:copy(operation.before.dam_sids),after_sids:copy(operation.patch.dam_sids),confidence:'moderate',decision_rule:PARENTAGE_RULE}],original_parentage_preserved:true,biological_confirmation:false};
+}
+function checkParentageShape(operation,dependencies){
+ assert(equal(Object.keys(operation).sort(),['archived','before','entity_id','entity_type','expected_version','kind','parent_role','patch','supporting_source_refs']),'A parentage refinement contains unsupported operation fields.');
+ const prior=dependencies.get(key(operation));
+ assert(operation.parent_role==='dam'&&Number.isSafeInteger(operation.expected_version)&&operation.expected_version>0&&plain(operation.before)&&operation.before.mouse_sid===operation.entity_id&&prior&&!prior.archived&&prior.version===operation.expected_version&&equal(prior.payload,operation.before),'A parentage refinement lacks its exact original mouse and version.');
+ assert(plain(operation.patch)&&equal(Object.keys(operation.patch).sort(),['app_modified_at','dam_sids','lineage_basis'])&&timestamp(operation.patch.app_modified_at),'A parentage refinement may change only dam alternatives, lineage evidence and app modification time.');
+ const basis=operation.patch.lineage_basis;
+ assert(plain(basis)&&equal(Object.keys(basis).sort(),['confidence','decision_rule','evidence_refs','inferred_roles','kind','original_parentage','policy','recorded_at','schema_version'])&&basis.schema_version===1&&basis.kind==='source_reconciliation_inference'&&basis.policy===PARENTAGE_POLICY&&basis.decision_rule===PARENTAGE_RULE&&basis.confidence==='moderate'&&equal(basis.inferred_roles,['dam'])&&basis.recorded_at===operation.patch.app_modified_at&&equal(basis.original_parentage,{sire_sids:operation.before.sire_sids,dam_sids:operation.before.dam_sids}),'The parentage inference must preserve its exact original alternatives and moderate evidence label.');
+ const evidence=parentageEvidenceRefs(operation.before,operation.patch.dam_sids,[...dependencies.values()],operation.supporting_source_refs);
+ assert(equal(evidence,basis.evidence_refs),'The parentage evidence differs from exact guarded source facts.');
+}
+function checkParentageAncestry(operation,scope,mice){
+ const pending=[operation.entity_id,...operation.before.sire_sids,...operation.before.dam_sids],seen=new Set();
+ while(pending.length){
+  const id=pending.pop();if(seen.has(id))continue;seen.add(id);
+  const row=mice.get('mice:'+id),dep=scope.dependencies.get('mice:'+id);
+  assert(row&&dep&&!row.archived&&!dep.archived&&row.version===dep.version&&equal(row.payload,dep.payload),'A parentage ancestry or candidate identity is missing from the exact current CAS closure.');
+  assert(exactIds(row.payload.sire_sids)&&exactIds(row.payload.dam_sids),'A parentage ancestor has malformed parent arrays.');
+  pending.push(...row.payload.sire_sids,...row.payload.dam_sids);
+ }
+}
+const parentagePresentation=operation=>operation.kind==='narrow_inferred_parentage'?{parentageRefinement:{role:'dam',before:copy(operation.before.dam_sids),after:copy(operation.patch.dam_sids),confidence:'moderate',decisionRule:PARENTAGE_RULE,originalParentagePreserved:true}}:{};
 
 function applyReviewedFreshComment(expected,operation,proof,sourceRow){
  const policy=operation.evidence?.fresh_comment_policy;if(policy===undefined)return expected;
@@ -67,6 +136,8 @@ function planShape(plan,binding){
   if(operation.evidence?.fresh_comment_policy!==undefined)assert(operation.kind==='resolve_current_animal_sheet_mouse','Fresh source comments are limited to new AnimalSheet registrations.');
   if(['associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end'].includes(operation.kind)){
    const prior=dependencies.get(key(operation));assert(Number.isSafeInteger(operation.expected_version)&&operation.expected_version>0&&plain(operation.before)&&plain(operation.payload)&&operation.before.mouse_sid===operation.entity_id&&operation.payload.mouse_sid===operation.entity_id&&prior&&!prior.archived&&prior.version===operation.expected_version&&equal(prior.payload,operation.before)&&plain(operation.association),'An existing source association lacks its exact original record and version.');
+  }else if(operation.kind==='narrow_inferred_parentage'){
+   checkParentageShape(operation,dependencies);
   }else if(operation.kind==='set_ear_mark'){
    assert(Number.isSafeInteger(operation.expected_version)&&operation.expected_version>0&&plain(operation.before)&&plain(operation.patch)&&equal(Object.keys(operation.patch).sort(),['ear_mark','reconciliation_evidence']),'An ear correction contains other field changes.');
    assert(dependencies.has(key(operation))&&equal(dependencies.get(key(operation)).payload,operation.before)&&dependencies.get(key(operation)).version===operation.expected_version&&!dependencies.get(key(operation)).archived,'An ear correction lacks its exact original dependency.');
@@ -85,6 +156,12 @@ function planShape(plan,binding){
    assert(!writes.has(key(resolution)),'Two operations share a Review resolution.');writes.set(key(resolution),resolution);
   }
   assert(!writes.has(key(operation)),'The plan repeats a mutation.');writes.set(key(operation),operation);
+ }
+ const parentage=[...operations.values()].filter(operation=>operation.kind==='narrow_inferred_parentage');
+ if(parentage.length){
+  assert(parentage.length===1&&plan.intent===PARENTAGE_INTENT&&operations.size===2,'A parentage-only plan must contain one refinement and one batch audit.');
+  const audit=[...operations.values()].find(operation=>operation.kind==='record_source_reconciliation_batch');
+  assert(audit&&equal(audit.payload,parentageBatchPayload(plan,parentage[0],audit.entity_id)),'The parentage-only audit differs from its exact compact decision.');
  }
  assert([...missing.keys()].every(value=>writes.has(value)),'The plan contains unrelated absence checks.');
  assert(new Set([...writes.keys(),...dependencies.keys()]).size<=500,'This plan exceeds the atomic record limit.');
@@ -160,6 +237,7 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
  for(const [id,row]of scope.dependencies){const found=actual.get(id);assert(found&&found.version===row.version&&found.archived===row.archived&&equal(found.payload,row.payload),'A source or target record changed. Obtain a fresh reviewed plan.');}
  for(const id of scope.missing.keys())assert(!actual.has(id)&&!mice.has(id),'A planned new record already exists. Check the original operation before continuing.');
  const data=datasetForReview([...mice.values()],scope.dependencies),changes=new Map(),managerMap=[],warnings=[],validated=[];
+ for(const operation of scope.operations.values())if(operation.kind==='narrow_inferred_parentage')checkParentageAncestry(operation,scope,mice);
  // A fresh full identity scan includes alternate full tags. Conservative
  // conflicts are held for a new review rather than creating another animal.
  const tagOwners=new Map();for(const {payload:mouse}of mice.values())for(const tag of fullTags(mouse)){const ids=tagOwners.get(tag)||new Set();ids.add(mouse.mouse_sid);tagOwners.set(tag,ids);}
@@ -177,7 +255,7 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
   await yieldProgress('preparing',preparedCount++,scope.operations.size);
   if(operation.kind==='record_source_reconciliation_batch'){const result=validate('husbandry_events',operation.payload,data,null);assert(result?.errors?.length===0,'The batch audit record failed validation.');changes.set(key(operation),{entity_type:operation.entity_type,entity_id:operation.entity_id,payload:copy(operation.payload),archived:false,expected_version:0});continue;}
   let payload;
-  if(operation.kind==='set_ear_mark')payload={...copy(operation.before),...copy(operation.patch)};
+  if(['set_ear_mark','narrow_inferred_parentage'].includes(operation.kind))payload={...copy(operation.before),...copy(operation.patch)};
   else if(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end'].includes(operation.kind)){
    payload=operation.association?await compileIdentityAssociation(operation,reviewData,scope,reviewContext):copy(operation.payload);
    if(operation.association){const resolution=operation.association.resolution;changes.set(key(resolution),{entity_type:resolution.entity_type,entity_id:resolution.entity_id,payload:copy(resolution.payload),archived:false,expected_version:0});}
@@ -222,8 +300,8 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
  for(const [id,row]of scope.dependencies)if(!changes.has(id))changes.set(id,{entity_type:row.entity_type,entity_id:row.entity_id,payload:copy(row.payload),archived:row.archived,expected_version:row.version});
  const body={p_colony_id:plan.colony_id,p_changes:[...changes.values()].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0)};
  assert(body.p_changes.length<=500&&bytes(body)<=1000000,'The reviewed command exceeds the atomic request limit.');
- const review=plan.operations.filter(operation=>operation.entity_type==='mice').map(operation=>{const payload=changes.get(key(operation)).payload;return {kind:operation.kind,mouseSid:operation.entity_id,tag:payload.physical_tag||'',dob:payload.date_of_birth||'',sex:payload.sex||'',state:payload.state||'',manager:payload.manager||null,...(operation.kind==='set_ear_mark'?{beforeEar:operation.before.ear_mark??null,afterEar:payload.ear_mark}:{}),sourceVerifiedStock:operation.kind==='resolve_current_animal_sheet_mouse',...associationPresentation(operation),...(operation.evidence?.fresh_comment_policy?{freshComment:copy({before:operation.evidence.fresh_comment_policy.before,after:operation.evidence.fresh_comment_policy.after})}:{})};});
- return {body,review,managerMap,warnings:[...new Set(warnings)],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:body.p_changes.length,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length}};
+ const review=plan.operations.filter(operation=>operation.entity_type==='mice').map(operation=>{const payload=changes.get(key(operation)).payload;return {kind:operation.kind,mouseSid:operation.entity_id,tag:payload.physical_tag||'',dob:payload.date_of_birth||'',sex:payload.sex||'',state:payload.state||'',manager:payload.manager||null,...(operation.kind==='set_ear_mark'?{beforeEar:operation.before.ear_mark??null,afterEar:payload.ear_mark}:{}),sourceVerifiedStock:operation.kind==='resolve_current_animal_sheet_mouse',...associationPresentation(operation),...parentagePresentation(operation),...(operation.evidence?.fresh_comment_policy?{freshComment:copy({before:operation.evidence.fresh_comment_policy.before,after:operation.evidence.fresh_comment_policy.after})}:{})};});
+ return {body,review,managerMap,warnings:[...new Set(warnings)],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:body.p_changes.length,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length}};
  }finally{releaseMouseReviewContext(reviewContext);}
 }
 
@@ -238,7 +316,7 @@ function frozenCompilation(operation,plan,scope){
  assert(plain(operation)&&operation.operation_id===plan.operation_id&&equal(Object.keys(operation).sort(),['operation_id','request'])&&plain(operation.request)&&equal(Object.keys(operation.request).sort(),['body','method','route'])&&operation.request.route==='rpc/save_records'&&operation.request.method==='POST'&&plain(operation.request.body)&&equal(Object.keys(operation.request.body).sort(),['p_changes','p_colony_id'])&&operation.request.body.p_colony_id===plan.colony_id&&Array.isArray(operation.request.body.p_changes)&&bytes(operation)<=1000000,'The saved command is not the exact source import intent.');
  const rows=uniqueRows(operation.request.body.p_changes),expected=new Map(),review=[],managerMap=[];
  for(const row of scope.operations.values()){
-  let payload=row.kind==='set_ear_mark'?{...row.before,...row.patch}:copy(row.payload);
+  let payload=['set_ear_mark','narrow_inferred_parentage'].includes(row.kind)?{...copy(row.before),...copy(row.patch)}:copy(row.payload);
   if(row.association){const association=row.association,resolution=association.resolution;
    if(row.kind==='create_softmouse_mouse'){assert(!Object.hasOwn(payload,'animal_sheet_review_links')&&!Object.hasOwn(payload,'reconciliation_evidence'),'Original SoftMouse fields contain app metadata.');payload={...payload,animal_sheet_review_links:[{schema_version:1,issue_id:association.helperInput.issue_id,reviewed_mouse:copy(resolution.payload.reviewed_mouse),source_refs:copy(association.helperInput.source_refs),association_ref:copy(association.reconciliationEvidence)}],reconciliation_evidence:[copy(association.reconciliationEvidence)]};}
    expected.set(key(resolution),{...resolution,payload:copy(resolution.payload)});
@@ -249,26 +327,27 @@ function frozenCompilation(operation,plan,scope){
    expected.set(key(row.resolution),{...row.resolution,payload:copy(row.resolution.payload)});
   }
   expected.set(key(row),{...row,payload});
-  if(row.entity_type==='mice')review.push({kind:row.kind,mouseSid:row.entity_id,tag:payload.physical_tag||'',dob:payload.date_of_birth||'',sex:payload.sex||'',state:payload.state||'',manager:payload.manager||null,...(row.kind==='set_ear_mark'?{beforeEar:row.before.ear_mark??null,afterEar:payload.ear_mark}:{}),sourceVerifiedStock:row.kind==='resolve_current_animal_sheet_mouse',...associationPresentation(row),...(row.evidence?.fresh_comment_policy?{freshComment:copy({before:row.evidence.fresh_comment_policy.before,after:row.evidence.fresh_comment_policy.after})}:{})});
+  if(row.entity_type==='mice')review.push({kind:row.kind,mouseSid:row.entity_id,tag:payload.physical_tag||'',dob:payload.date_of_birth||'',sex:payload.sex||'',state:payload.state||'',manager:payload.manager||null,...(row.kind==='set_ear_mark'?{beforeEar:row.before.ear_mark??null,afterEar:payload.ear_mark}:{}),sourceVerifiedStock:row.kind==='resolve_current_animal_sheet_mouse',...associationPresentation(row),...parentagePresentation(row),...(row.evidence?.fresh_comment_policy?{freshComment:copy({before:row.evidence.fresh_comment_policy.before,after:row.evidence.fresh_comment_policy.after})}:{})});
  }
  for(const [id,row]of scope.dependencies)if(!expected.has(id))expected.set(id,{...row,expected_version:row.version});
  assert(rows.size===expected.size&&rows.size<=500,'The saved command has missing or unrelated records.');
  for(const [id,row]of expected){const actual=rows.get(id);assert(actual&&equal(Object.keys(actual).sort(),['archived','entity_id','entity_type','expected_version','payload'])&&actual.expected_version===row.expected_version&&actual.archived===row.archived&&equal(actual.payload,row.payload),'The saved command differs from the reviewed source plan.');}
- return {body:copy(operation.request.body),review,managerMap,warnings:['Recovered the original command. A retry retains its exact operation ID and field values.'],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:rows.size,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length}};
+ return {body:copy(operation.request.body),review,managerMap,warnings:['Recovered the original command. A retry retains its exact operation ID and field values.'],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:rows.size,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length}};
 }
 
 /** The I/O capability remains private to the authenticated data store. */
-export function createSourceReconciliation({binding=APPROVED_SOURCE_RECONCILIATION,io,validate}={}){
+export function createSourceReconciliation({binding=APPROVED_SOURCE_PLANS,io,validate}={}){
  let current=null,busy=false,revision=0;
- const ready=()=>assert(HASH.test(binding?.sha256||'')&&binding.intent!=null,'The reviewed source plan is not enabled in this release.');
+ const bindings=()=>Array.isArray(binding)?binding:[binding];
+ const ready=()=>assert(bindings().some(value=>HASH.test(value?.sha256||'')&&value.intent!=null),'The reviewed source plan is not enabled in this release.');
  const locked=async run=>{assert(!busy,'A source reconciliation is already in progress.');busy=true;try{return await run();}finally{busy=false;}};
  const check=entry=>{assert(current===entry,'This preview is no longer available.');io.checkContext(entry.context);};
  return {
   clear(){revision++;current=null;},
   preview:raw=>locked(async()=>{
    current=null;const token=++revision,checkPreview=()=>assert(token===revision,'This source preview was closed.');ready();assert(typeof raw==='string'&&bytes(raw)<=4000000,'Choose the bounded reviewed JSON plan.');
-   const context=await io.verifyOwner();checkPreview();const digest=await sourcePlanDigest(raw);checkPreview();io.checkContext(context);assert(digest===binding.sha256,'The file differs from the independently reviewed plan.');
-   let plan;try{plan=JSON.parse(raw);}catch{fail('The source plan is not valid JSON.');}const scope=planShape(plan,binding);
+   const context=await io.verifyOwner();checkPreview();const digest=await sourcePlanDigest(raw);checkPreview();io.checkContext(context);const reviewedBinding=bindings().find(value=>value?.sha256===digest&&value.intent!=null);assert(reviewedBinding,'The file differs from the independently reviewed plan.');
+   let plan;try{plan=JSON.parse(raw);}catch{fail('The source plan is not valid JSON.');}const scope=planShape(plan,reviewedBinding);
    assert(plan.colony_id===context.colonyId,'The source plan belongs to another colony.');
    const recovered=await io.recover?.(plan.operation_id,context);checkPreview();io.checkContext(context);
    assert(!recovered?.blocked||recovered?.receipt?.status==='applied','The saved command permits receipt checking only. Keep its original operation ID for review.');
