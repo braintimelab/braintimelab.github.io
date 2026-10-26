@@ -1,13 +1,16 @@
 import {prepareMouseReviewPrefill,attachMouseReviewResolution,createMouseReviewContext,releaseMouseReviewContext} from './mouse-review.js?v=100';
 import {cageObservations} from './cage-observations.js?v=100';
 import {compareVerifiedSourceLabels,expectedNoteCell,readCurrentLiteralNote} from './animal-sheet-current-observation.js?v=183';
+import {HISTORICAL_PARENTAGE_INTENT,checkHistoricalParentageOperation,checkHistoricalParentageCurrent,checkHistoricalParentagePlan,historicalParentagePresentation} from './historical-parentage-recovery.js?v=193';
 
 // Bound only after the private source plan and its complete CAS closure pass review.
 // This contains no source observations, animal identifiers or private directory.
 export const APPROVED_SOURCE_RECONCILIATION=Object.freeze({sha256:'8d4f9e881ae93fd75899dbc38f342e06e13634c2fafb7f799dd712ccb548a1da',intent:'owner-authorized-softmouse-animal-sheet-identity-associations-v2-2026-10-25'});
 // Enabled only after the exact fresh private parentage plan passes review.
 export const APPROVED_PARENTAGE_RECONCILIATION=Object.freeze({sha256:'6b213f45e390b7b285a830f284cee56328b091da0ac391d414d092c09e31a093',intent:'owner-authorized-parentage-candidate-refinement-2026-10-26'});
-const APPROVED_SOURCE_PLANS=Object.freeze([APPROVED_SOURCE_RECONCILIATION,APPROVED_PARENTAGE_RECONCILIATION]);
+// This digest is replaced only after the new private plan and exact dependencies pass review.
+export const APPROVED_HISTORICAL_PARENTAGE_RECOVERY=Object.freeze({sha256:'2b7f2d2abbd1515ddc6fde542c49cb24d5f425be822de5b52551461c499d4b90',intent:HISTORICAL_PARENTAGE_INTENT});
+const APPROVED_SOURCE_PLANS=Object.freeze([APPROVED_SOURCE_RECONCILIATION,APPROVED_PARENTAGE_RECONCILIATION,APPROVED_HISTORICAL_PARENTAGE_RECOVERY]);
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const HASH=/^[a-f0-9]{64}$/;
 const timestamp=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-3]):[0-5]\d|[+-]14:00)$/.test(value)&&Number.isFinite(Date.parse(value));
@@ -22,7 +25,7 @@ const fail=message=>{throw new Error(message);};
 const assert=(condition,message)=>{if(!condition)fail(message);};
 const text=value=>typeof value==='string'&&value.length>0&&value.length<=200&&value.trim()===value&&!/[\u0000-\u001f\u007f]/.test(value);
 const inactive=row=>row?.archived===true||Boolean(row?.app_archived_at)||row?.history_read_only===true||row?.source_historical===true;
-const allowedKinds=new Set(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end','resolve_current_animal_sheet_mouse','set_ear_mark','narrow_inferred_parentage','record_source_reconciliation_batch']);
+const allowedKinds=new Set(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end','resolve_current_animal_sheet_mouse','set_ear_mark','narrow_inferred_parentage','fill_missing_parentage','record_source_reconciliation_batch']);
 const tagKey=value=>typeof value==='string'?value.trim().replace(/[′’‘]/g,"'").replace(/[‐‑‒–—―−]/g,'-').replace(/^(.*?)(?:\s+|-)([MF]\d+)$/,'$1-$2'):'';
 const fullTags=mouse=>{const raw=[mouse.physical_tag,...(Array.isArray(mouse.physical_tag_aliases)?mouse.physical_tag_aliases:[])];if(/^\d+$/.test(mouse.mouse_sid||'')&&/[-\s][MF]$/.test(mouse.physical_tag||''))raw.push(mouse.physical_tag+mouse.mouse_sid);return [...new Set(raw.map(tagKey).filter(value=>/^.+(?:-|\s)[MF]\s*\d+[A-Za-z]?$/.test(value)))];};
 const uniqueRows=rows=>{const map=new Map();for(const row of rows){assert(plain(row)&&Object.hasOwn(IDS,row.entity_type)&&text(row.entity_id)&&!map.has(key(row)),'The plan contains invalid or repeated record keys.');map.set(key(row),row);}return map;};
@@ -94,7 +97,7 @@ function checkParentageAncestry(operation,scope,mice){
   pending.push(...row.payload.sire_sids,...row.payload.dam_sids);
  }
 }
-const parentagePresentation=operation=>operation.kind==='narrow_inferred_parentage'?{parentageRefinement:{role:'dam',before:copy(operation.before.dam_sids),after:copy(operation.patch.dam_sids),confidence:'moderate',decisionRule:PARENTAGE_RULE,originalParentagePreserved:true}}:{};
+const parentagePresentation=operation=>operation.kind==='narrow_inferred_parentage'?{parentageRefinement:{role:'dam',before:copy(operation.before.dam_sids),after:copy(operation.patch.dam_sids),confidence:'moderate',decisionRule:PARENTAGE_RULE,originalParentagePreserved:true}}:historicalParentagePresentation(operation);
 
 function applyReviewedFreshComment(expected,operation,proof,sourceRow){
  const policy=operation.evidence?.fresh_comment_policy;if(policy===undefined)return expected;
@@ -138,6 +141,8 @@ function planShape(plan,binding){
    const prior=dependencies.get(key(operation));assert(Number.isSafeInteger(operation.expected_version)&&operation.expected_version>0&&plain(operation.before)&&plain(operation.payload)&&operation.before.mouse_sid===operation.entity_id&&operation.payload.mouse_sid===operation.entity_id&&prior&&!prior.archived&&prior.version===operation.expected_version&&equal(prior.payload,operation.before)&&plain(operation.association),'An existing source association lacks its exact original record and version.');
   }else if(operation.kind==='narrow_inferred_parentage'){
    checkParentageShape(operation,dependencies);
+  }else if(operation.kind==='fill_missing_parentage'){
+   checkHistoricalParentageOperation(operation,dependencies);
   }else if(operation.kind==='set_ear_mark'){
    assert(Number.isSafeInteger(operation.expected_version)&&operation.expected_version>0&&plain(operation.before)&&plain(operation.patch)&&equal(Object.keys(operation.patch).sort(),['ear_mark','reconciliation_evidence']),'An ear correction contains other field changes.');
    assert(dependencies.has(key(operation))&&equal(dependencies.get(key(operation)).payload,operation.before)&&dependencies.get(key(operation)).version===operation.expected_version&&!dependencies.get(key(operation)).archived,'An ear correction lacks its exact original dependency.');
@@ -158,6 +163,7 @@ function planShape(plan,binding){
   assert(!writes.has(key(operation)),'The plan repeats a mutation.');writes.set(key(operation),operation);
  }
  const parentage=[...operations.values()].filter(operation=>operation.kind==='narrow_inferred_parentage');
+ checkHistoricalParentagePlan(plan,operations);
  if(parentage.length){
   assert(parentage.length===1&&plan.intent===PARENTAGE_INTENT&&operations.size===2,'A parentage-only plan must contain one refinement and one batch audit.');
   const audit=[...operations.values()].find(operation=>operation.kind==='record_source_reconciliation_batch');
@@ -238,6 +244,7 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
  for(const id of scope.missing.keys())assert(!actual.has(id)&&!mice.has(id),'A planned new record already exists. Check the original operation before continuing.');
  const data=datasetForReview([...mice.values()],scope.dependencies),changes=new Map(),managerMap=[],warnings=[],validated=[];
  for(const operation of scope.operations.values())if(operation.kind==='narrow_inferred_parentage')checkParentageAncestry(operation,scope,mice);
+ for(const operation of scope.operations.values())if(operation.kind==='fill_missing_parentage')checkHistoricalParentageCurrent(operation,scope,mice);
  // A fresh full identity scan includes alternate full tags. Conservative
  // conflicts are held for a new review rather than creating another animal.
  const tagOwners=new Map();for(const {payload:mouse}of mice.values())for(const tag of fullTags(mouse)){const ids=tagOwners.get(tag)||new Set();ids.add(mouse.mouse_sid);tagOwners.set(tag,ids);}
@@ -255,7 +262,7 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
   await yieldProgress('preparing',preparedCount++,scope.operations.size);
   if(operation.kind==='record_source_reconciliation_batch'){const result=validate('husbandry_events',operation.payload,data,null);assert(result?.errors?.length===0,'The batch audit record failed validation.');changes.set(key(operation),{entity_type:operation.entity_type,entity_id:operation.entity_id,payload:copy(operation.payload),archived:false,expected_version:0});continue;}
   let payload;
-  if(['set_ear_mark','narrow_inferred_parentage'].includes(operation.kind))payload={...copy(operation.before),...copy(operation.patch)};
+  if(['set_ear_mark','narrow_inferred_parentage','fill_missing_parentage'].includes(operation.kind))payload={...copy(operation.before),...copy(operation.patch)};
   else if(['create_softmouse_mouse','associate_current_animal_sheet_mouse','record_owner_confirmed_mouse_end'].includes(operation.kind)){
    payload=operation.association?await compileIdentityAssociation(operation,reviewData,scope,reviewContext):copy(operation.payload);
    if(operation.association){const resolution=operation.association.resolution;changes.set(key(resolution),{entity_type:resolution.entity_type,entity_id:resolution.entity_id,payload:copy(resolution.payload),archived:false,expected_version:0});}
@@ -301,7 +308,7 @@ async function compile(plan,scope,snapshot,directory,validate,{check=()=>{},prog
  const body={p_colony_id:plan.colony_id,p_changes:[...changes.values()].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0)};
  assert(body.p_changes.length<=500&&bytes(body)<=1000000,'The reviewed command exceeds the atomic request limit.');
  const review=plan.operations.filter(operation=>operation.entity_type==='mice').map(operation=>{const payload=changes.get(key(operation)).payload;return {kind:operation.kind,mouseSid:operation.entity_id,tag:payload.physical_tag||'',dob:payload.date_of_birth||'',sex:payload.sex||'',state:payload.state||'',manager:payload.manager||null,...(operation.kind==='set_ear_mark'?{beforeEar:operation.before.ear_mark??null,afterEar:payload.ear_mark}:{}),sourceVerifiedStock:operation.kind==='resolve_current_animal_sheet_mouse',...associationPresentation(operation),...parentagePresentation(operation),...(operation.evidence?.fresh_comment_policy?{freshComment:copy({before:operation.evidence.fresh_comment_policy.before,after:operation.evidence.fresh_comment_policy.after})}:{})};});
- return {body,review,managerMap,warnings:[...new Set(warnings)],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:body.p_changes.length,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length}};
+ return {body,review,managerMap,warnings:[...new Set(warnings)],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:body.p_changes.length,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length,parentageRecoveries:plan.operations.filter(row=>row.kind==='fill_missing_parentage').reduce((n,row)=>n+row.parent_roles.length,0),historicalReviewCases:plan.operations.find(row=>row.kind==='record_source_reconciliation_batch')?.payload?.parentage_issues?.length||0}};
  }finally{releaseMouseReviewContext(reviewContext);}
 }
 
@@ -316,7 +323,7 @@ function frozenCompilation(operation,plan,scope){
  assert(plain(operation)&&operation.operation_id===plan.operation_id&&equal(Object.keys(operation).sort(),['operation_id','request'])&&plain(operation.request)&&equal(Object.keys(operation.request).sort(),['body','method','route'])&&operation.request.route==='rpc/save_records'&&operation.request.method==='POST'&&plain(operation.request.body)&&equal(Object.keys(operation.request.body).sort(),['p_changes','p_colony_id'])&&operation.request.body.p_colony_id===plan.colony_id&&Array.isArray(operation.request.body.p_changes)&&bytes(operation)<=1000000,'The saved command is not the exact source import intent.');
  const rows=uniqueRows(operation.request.body.p_changes),expected=new Map(),review=[],managerMap=[];
  for(const row of scope.operations.values()){
-  let payload=['set_ear_mark','narrow_inferred_parentage'].includes(row.kind)?{...copy(row.before),...copy(row.patch)}:copy(row.payload);
+  let payload=['set_ear_mark','narrow_inferred_parentage','fill_missing_parentage'].includes(row.kind)?{...copy(row.before),...copy(row.patch)}:copy(row.payload);
   if(row.association){const association=row.association,resolution=association.resolution;
    if(row.kind==='create_softmouse_mouse'){assert(!Object.hasOwn(payload,'animal_sheet_review_links')&&!Object.hasOwn(payload,'reconciliation_evidence'),'Original SoftMouse fields contain app metadata.');payload={...payload,animal_sheet_review_links:[{schema_version:1,issue_id:association.helperInput.issue_id,reviewed_mouse:copy(resolution.payload.reviewed_mouse),source_refs:copy(association.helperInput.source_refs),association_ref:copy(association.reconciliationEvidence)}],reconciliation_evidence:[copy(association.reconciliationEvidence)]};}
    expected.set(key(resolution),{...resolution,payload:copy(resolution.payload)});
@@ -332,7 +339,7 @@ function frozenCompilation(operation,plan,scope){
  for(const [id,row]of scope.dependencies)if(!expected.has(id))expected.set(id,{...row,expected_version:row.version});
  assert(rows.size===expected.size&&rows.size<=500,'The saved command has missing or unrelated records.');
  for(const [id,row]of expected){const actual=rows.get(id);assert(actual&&equal(Object.keys(actual).sort(),['archived','entity_id','entity_type','expected_version','payload'])&&actual.expected_version===row.expected_version&&actual.archived===row.archived&&equal(actual.payload,row.payload),'The saved command differs from the reviewed source plan.');}
- return {body:copy(operation.request.body),review,managerMap,warnings:['Recovered the original command. A retry retains its exact operation ID and field values.'],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:rows.size,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length}};
+ return {body:copy(operation.request.body),review,managerMap,warnings:['Recovered the original command. A retry retains its exact operation ID and field values.'],counts:{softmouse:plan.operations.filter(row=>row.kind==='create_softmouse_mouse').length,associations:plan.operations.filter(row=>row.association).length,lifecycleCorrections:plan.operations.filter(row=>row.kind==='record_owner_confirmed_mouse_end').length,review:plan.operations.filter(row=>row.kind==='resolve_current_animal_sheet_mouse').length,ears:plan.operations.filter(row=>row.kind==='set_ear_mark').length,unassignedManagers:managerMap.filter(row=>row.manager===null).length,guardedRecords:rows.size,freshComments:plan.operations.filter(row=>row.evidence?.fresh_comment_policy).length,parentageRefinements:plan.operations.filter(row=>row.kind==='narrow_inferred_parentage').length,parentageRecoveries:plan.operations.filter(row=>row.kind==='fill_missing_parentage').reduce((n,row)=>n+row.parent_roles.length,0),historicalReviewCases:plan.operations.find(row=>row.kind==='record_source_reconciliation_batch')?.payload?.parentage_issues?.length||0}};
 }
 
 /** The I/O capability remains private to the authenticated data store. */
