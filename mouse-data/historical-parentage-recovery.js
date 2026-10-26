@@ -44,6 +44,14 @@ function checkedIdentity(identity){
  assert(identity.name_cell.value===identity.tag&&identity.dob_cell.value===identity.date_of_birth,'The source identity differs from its literal source cells.');
 }
 function sourceURL(value,id){try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='docs.google.com'&&u.pathname==='/spreadsheets/d/'+id+'/edit'&&!u.username&&!u.password;}catch{return false;}}
+function checkedReviewEvidence(ref){
+ assert(exactKeys(ref,['source_id','source_url','file_sha256','sheet','cell','comment_id','literal']),'A held case has unsupported source evidence fields.');
+ const optional=(value,max)=>typeof value==='string'&&value.length<=max&&!/[\u0000-\u001f\u007f]/.test(value);
+ assert(text(ref.source_id,256)&&optional(ref.sheet,256)&&optional(ref.cell,128)&&optional(ref.comment_id,256)&&typeof ref.literal==='string'&&ref.literal.length<=2000&&(ref.file_sha256===''||hash(ref.file_sha256)),'A held case has invalid source evidence.');
+ if(ref.source_url!==''){
+  let safe=false;try{const u=new URL(ref.source_url);safe=typeof ref.source_url==='string'&&ref.source_url.length<=2048&&!/[\u0000-\u0020\u007f]/.test(ref.source_url)&&u.protocol==='https:'&&!u.username&&!u.password&&(!u.port||u.port==='443')&&(u.hostname==='docs.google.com'&&/^\/(?:spreadsheets|document|presentation)\/d\/[A-Za-z0-9_-]+(?:\/|$)/.test(u.pathname)||u.hostname==='drive.google.com'&&/^\/file\/d\/[A-Za-z0-9_-]+(?:\/|$)/.test(u.pathname));}catch{}assert(safe,'A held case has an unsafe source-document link.');
+ }
+}
 function checkedEvidence(evidence,role,before,parent){
  assert(exactKeys(evidence,['schema_version','rule_id','role','source','child','parent','parent_field','parent_literal']),'The historical parentage evidence has unsupported fields.');
  assert(evidence.schema_version===1&&evidence.rule_id===HISTORICAL_PARENTAGE_RULE&&evidence.role===role,'The historical parentage rule or role changed.');
@@ -96,6 +104,7 @@ export function checkHistoricalParentagePlan(plan,operations){
  const audit=[...operations.values()].find(op=>op.kind==='record_source_reconciliation_batch'),issues=audit?.payload?.parentage_issues;
  assert(audit&&Array.isArray(issues)&&issues.length<=250&&JSON.stringify(issues).length<=500000,'The historical review list is missing or too large.');
  const issueIds=new Set();for(const issue of issues){assert(object(issue)&&issue.schema_version===1&&issue.status==='needs_review'&&text(issue.issue_id)&&!issueIds.has(issue.issue_id)&&['sire','dam','both'].includes(issue.role)&&issue.confidence==='uncertain'&&ids(issue.mouse_sids)&&issue.mouse_sids.length<=100&&ids(issue.candidate_parent_sids)&&issue.candidate_parent_sids.length<=100&&Array.isArray(issue.candidate_parent_tags)&&issue.candidate_parent_tags.length<=100&&issue.candidate_parent_tags.every(t=>text(t))&&Array.isArray(issue.reason_codes)&&issue.reason_codes.length<=25&&issue.reason_codes.every(t=>text(t))&&text(issue.summary,2000)&&Array.isArray(issue.evidence_refs)&&issue.evidence_refs.length<=10,'A historical review case is invalid or repeated.');issueIds.add(issue.issue_id);}
+ for(const issue of issues){assert(exactKeys(issue,['schema_version','issue_id','status','role','mouse_sids','candidate_parent_sids','candidate_parent_tags','confidence','reason_codes','summary','evidence_refs']),'A held case has unsupported fields.');for(const ref of issue.evidence_refs)checkedReviewEvidence(ref);}
  assert(fills.every(op=>op.patch.app_modified_at===fills[0].patch.app_modified_at),'The historical batch has inconsistent evidence dates.');
  assert(same(audit.payload,historicalParentageBatchPayload(plan,audit.entity_id,issues)),'The historical batch audit differs from its exact recovered roles and held cases.');
  const pins=Array.isArray(plan.sourcePins)?plan.sourcePins:[];
