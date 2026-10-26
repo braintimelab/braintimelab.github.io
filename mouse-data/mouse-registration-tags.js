@@ -1,6 +1,7 @@
 import {createMouseRegistrationValidationContext,validateRecord,validateMouseBatchEdits} from './model.js?v=188';
 import {separateReusedMouseTag,MOUSE_BATCH_LIMIT} from './mouse-registration.js?v=188';
 import {canonicalMouseSidKey} from './mouse-sid.js?v=188';
+import {automaticMousePhysicalTag} from './mouse-auto-tags.js?v=191';
 
 const clone=structuredClone;
 const editable=new Set(['sex','physical_tag','genotype','ear_mark','comment']);
@@ -22,9 +23,9 @@ function checkedText(value,field){
 function checkedSequence(input,count){
  if(input===null||input===undefined)return null;
  if(!plain(input)||Object.keys(input).some(key=>!sequenceFields.has(key)))fail('Choose only tag style, prefix, starting number, step and padding width.');
- const style=input.style??'plain';if(!['none','plain','sex'].includes(style))fail('Choose omitted, plain or sex-letter physical tags.');
- if(style==='none'){
-  if(Object.keys(input).some(key=>key!=='style'))fail('Omitted physical tags do not use a prefix or numbering options.');
+ const style=input.style??'plain';if(!['auto','none','plain','sex'].includes(style))fail('Choose automatic, omitted, plain or sex-letter physical tags.');
+ if(['auto','none'].includes(style)){
+  if(Object.keys(input).some(key=>key!=='style'))fail('Automatic or omitted physical tags do not use a prefix or numbering options.');
   return {style};
  }
  const prefix=input.prefix??'';
@@ -43,7 +44,7 @@ function checkField(field,value){
  * Per-SID row exceptions apply last. No parent/litter key or genotype inference
  * is invented or rewritten. Existing mode requires complete existing records.
  */
-export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,overrides={},existing=false}={}){
+export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,overrides={},existing=false,automaticTagSids=[]}={}){
  if(!dataset||!plain(dataset)||!plain(dataset.tables)||!Array.isArray(dataset.tables.mice))fail('Load the mouse records before reviewing physical tags.');
  if(!Array.isArray(drafts)||drafts.length<1||drafts.length>MOUSE_BATCH_LIMIT)fail(`Review between 1 and ${MOUSE_BATCH_LIMIT} mice per batch.`);
  if(typeof existing!=='boolean'||!plain(overrides))fail('Use a per-SID row override object.');
@@ -71,12 +72,16 @@ export function applyRegistrationOverrides(dataset,drafts,{tagSequence=null,over
   for(const[field,value]of Object.entries(fields))checkField(field,value);
  }
  const sequence=checkedSequence(tagSequence,result.length);
+ if(!Array.isArray(automaticTagSids)||automaticTagSids.some(sid=>typeof sid!=='string'||!seen.has(sid)))fail('Automatic tag rows must belong to this preview.');
+ const automatic=new Set(automaticTagSids);
  const metadataWarnings=[];
  for(const[index,row]of result.entries()){
   const fields=Object.hasOwn(overrides,row.mouse_sid)?overrides[row.mouse_sid]:{};
   if(Object.hasOwn(fields,'sex'))row.sex=fields.sex;
+  if(Object.hasOwn(fields,'genotype'))row.genotype=checkField('genotype',fields.genotype);
   if(!['Male','Female','Unknown'].includes(row.sex))fail(`SID ${row.mouse_sid}: Sex must be Male, Female or Unknown.`);
-  if(sequence?.style==='none')row.physical_tag=null;
+  if(sequence?.style==='auto'){if(existing||automatic.has(row.mouse_sid))row.physical_tag=automaticMousePhysicalTag(row);}
+  else if(sequence?.style==='none')row.physical_tag=null;
   else if(sequence){
    const number=String(sequence.start+index*sequence.step).padStart(sequence.padWidth,'0'),letter=sequence.style==='sex'?({Male:'M',Female:'F',Unknown:'U'}[row.sex]):'';
    row.physical_tag=checkedText(sequence.prefix+letter+number,'physical_tag');

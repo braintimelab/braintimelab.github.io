@@ -4,6 +4,7 @@ import { getBreedingOptions } from './breeding-options.js?v=100';
 import { cageManager, buildCageLocationEvent, validateRecord, createMouseRegistrationValidationContext } from './model.js?v=188';
 import {FOXJ1_STRAIN_NAME} from './strain-registry.js?v=146';
 import {formatMouseSid} from './mouse-sid.js?v=188';
+import {automaticMousePhysicalTag,automaticSidTagNumber} from './mouse-auto-tags.js?v=191';
 
 const active=r=>r&&!r.archived&&!r.app_archived_at&&!r.history_read_only&&!r.source_historical;
 const mice=data=>data?.tables?.mice||[];
@@ -38,7 +39,7 @@ const escapeHTML=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<'
 
 export function mouseBatchCountsHTML(defaultSex='Unknown') {
  // Every count starts at zero: entering 3 males and 3 females must not add a hidden unsexed mouse.
- return `<fieldset class="field wide mouse-batch-counts"><legend>Number of mice</legend><p class="small muted">Enter the number of males, females and unsexed mice. The information below applies to the whole batch. SIDs are assigned automatically.</p><div class="form-grid">${batchSexes.map(value=>`<div class="field"><label for="${batchField[value]}">${value==='Unknown'?'Unsexed':value==='Male'?'Males':'Females'}</label><input id="${batchField[value]}" name="${batchField[value]}" type="number" min="0" max="${MOUSE_BATCH_LIMIT}" step="1" value="0" inputmode="numeric"></div>`).join('')}</div><p class="small muted">For several mice, enter a tag prefix such as FB. Each mouse receives its own tag and SID.</p></fieldset>`;
+ return `<fieldset class="field wide mouse-batch-counts"><legend>Number of mice</legend><p class="small muted">Enter the number of males, females and unsexed mice. The information below applies to the whole batch. SIDs are assigned automatically.</p><div class="form-grid">${batchSexes.map(value=>`<div class="field"><label for="${batchField[value]}">${value==='Unknown'?'Unsexed':value==='Male'?'Males':'Females'}</label><input id="${batchField[value]}" name="${batchField[value]}" type="number" min="0" max="${MOUSE_BATCH_LIMIT}" step="1" value="0" inputmode="numeric"></div>`).join('')}</div><p class="small muted">Enter the recorded genotype below for automatic tags in the review. A typed tag or separate numbering can override the suggestion; unknown genotype leaves tags blank.</p></fieldset>`;
 }
 
 /** Accept FormData or a plain object. Fractional, negative and blank counts are
@@ -56,7 +57,7 @@ export function readMouseBatchCounts(source) {
 
 /** Build and validate each animal without changing the source dataset. Shared
  * fields are deep copied so an individual can be edited safely after creation. */
-export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requestId=sharedDraft?.registration_request_id,validationContext=null}={}) {
+export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requestId=sharedDraft?.registration_request_id,validationContext=null,literalTag=false,deferTagValidation=false}={}) {
  const parsed=readMouseBatchCounts(counts),total=batchSexes.reduce((sum,sex)=>sum+parsed[sex],0);
  const assigned=sids??nextNumericMouseSids(dataset,total);
  if(!Array.isArray(assigned)||assigned.length!==total||assigned.some(id=>typeof id!=='string'||!/^\d{5}$/.test(id)||BigInt(id)<1n)||new Set(assigned.map(id=>String(BigInt(id)))).size!==total)throw new Error('The SID reservation does not match this batch. Reopen the draft.');
@@ -66,20 +67,22 @@ export function buildMouseBatchDrafts(dataset,sharedDraft,counts,{sids=null,requ
  if(total>1&&/[-\s][MFU]\s*\d+$/i.test(rawTag))throw new Error('For several mice, enter a shared tag prefix such as FB instead of a complete numbered tag.');
  if(validationContext&&validationContext.dataset!==dataset)throw new Error('The batch validation context changed. Reopen the draft.');
  const context=validationContext??createMouseRegistrationValidationContext(dataset);
- const staged=context.dataset,drafts=[],dependencies=new Map(),warnings=[];
+ const staged=context.dataset,drafts=[],dependencies=new Map(),warnings=[],automaticTagSids=[];
  let index=0;
  for(const sex of batchSexes)for(let number=0;number<parsed[sex];number++){
   const sid=assigned[index],draft={...structuredClone(sharedDraft),mouse_sid:sid,sex};
   if(requestId)draft.registration_request_id=total===1?requestId:`${requestId}:${index+1}`;
-  draft.physical_tag=total>1?(rawTag?`${rawTag}-${sex==='Unknown'?'U':sex[0]}${sid}`:null):completeMouseTag(rawTag,sex,sid)||null;
+  draft.physical_tag=rawTag?(literalTag?rawTag:total>1?`${rawTag}-${sex==='Unknown'?'U':sex[0]}${automaticSidTagNumber(sid)}`:completeMouseTag(rawTag,sex,sid)||null):automaticMousePhysicalTag(draft);
+  if(!rawTag)automaticTagSids.push(sid);
   if(draft.genotype_inference?.basis==='physical_tag')draft.genotype_inference={...draft.genotype_inference,tag:draft.physical_tag};
-  const identity=separateReusedMouseTag(staged,draft);if(identity.error)throw new Error(`Mouse ${index+1}: ${identity.error}`);
+  const identity=deferTagValidation?{draft,readDependencies:[],error:null}:separateReusedMouseTag(staged,draft);if(identity.error)throw new Error(`Mouse ${index+1}: ${identity.error}`);
+  if(literalTag&&identity.draft.physical_tag!==draft.physical_tag)throw new Error(`Mouse ${index+1}: This physical tag is already in use; choose an explicit distinct tag.`);
   for(const dependency of identity.readDependencies)dependencies.set(dependency.type+':'+dependency.id,dependency);
   const validation=validateRecord('mice',identity.draft,staged,null,context);
   if(validation.errors.length)throw new Error(`Mouse ${index+1} (SID ${sid}): ${validation.errors.join(' ')}`);
   warnings.push(...validation.warnings);drafts.push(identity.draft);staged.tables.mice.push(identity.draft);index++;
  }
- return {drafts,readDependencies:[...dependencies.values()],warnings:[...new Set(warnings)]};
+ return {drafts,automaticTagSids,readDependencies:[...dependencies.values()],warnings:[...new Set(warnings)]};
 }
 
 export function mouseBatchPreviewHTML(drafts) {
@@ -87,9 +90,9 @@ export function mouseBatchPreviewHTML(drafts) {
 }
 
 export function inferMouseTag(tag) {
- const raw=String(tag||'').trim(),match=raw.match(/^(.*?)[-\s]([MF])\s*(\d+)$/);
+ const raw=String(tag||'').trim(),match=raw.match(/^(.*?)[-\s]([MFU])\s*(\d+)$/);
  const entries=/^\d+$/.test(raw)?null:parseCompactStrainNotation(match?match[1]:raw);
- if(!entries?.length)return {sex:match?match[2]==='M'?'Male':'Female':null,genotype:null,prefix:null};
+ if(!entries?.length)return {sex:match?{M:'Male',F:'Female',U:'Unknown'}[match[2]]:null,genotype:null,prefix:null};
  const genotype=entries.map(e=>{
   const name=names[e.code]||e.code;if(e.code==='WT')return 'WT';
   if(e.presence==='uncertain')return `${name} (undetermined)`;
@@ -97,7 +100,7 @@ export function inferMouseTag(tag) {
   const floxed=['B','Vg'].includes(e.code),dose=e.dosage==='homozygous'?(floxed?'fl/fl':'+/+'):(floxed?'fl/+':'+/-');
   return `${name} (${dose})`;
  }).join('; ');
- return {sex:match?match[2]==='M'?'Male':'Female':null,genotype,prefix:match?match[1]:raw,tagNumber:match?.[3]||null};
+ return {sex:match?{M:'Male',F:'Female',U:'Unknown'}[match[2]]:null,genotype,prefix:match?match[1]:raw,tagNumber:match?.[3]||null};
 }
 
 /** A reused physical tag identifies a different animal only with an explicit,
@@ -132,7 +135,7 @@ export function separateReusedMouseTag(dataset,draft) {
 
 export function completeMouseTag(tag,sex,sid) {
  const raw=String(tag||'').trim(),info=inferMouseTag(raw);
- return info.prefix&&!info.tagNumber&&['Male','Female'].includes(sex)?`${raw}-${sex[0]}${sid}`:raw;
+ return info.prefix&&!info.tagNumber&&['Male','Female','Unknown'].includes(sex)?`${raw}-${sex==='Unknown'?'U':sex[0]}${automaticSidTagNumber(sid)}`:raw;
 }
 
 export function cageBreedingLayout(dataset,item,rows,{asOf=todayTaipei()}={}) {

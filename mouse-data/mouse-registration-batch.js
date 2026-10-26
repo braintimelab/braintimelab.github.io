@@ -15,10 +15,11 @@ const validSid=value=>typeof value==='string'&&/^\d{5}$/.test(value)&&BigInt(val
 /** Prepare either a count-based group or pasted rows for one atomic save.
  * readDependencies are tag identity fences; the caller adds parent and housing
  * dependencies for each draft through mouseRegistrationDependencies. */
-export function prepareMouseRegistrationBatch(dataset,sharedDraft,{counts,rows,registration=null,requestId=sharedDraft?.registration_request_id,sids=null}={}) {
+export function prepareMouseRegistrationBatch(dataset,sharedDraft,{counts,rows,registration=null,requestId=sharedDraft?.registration_request_id,sids=null,literalTagRows=null,deferTagValidation=false}={}) {
  const base=registrationDataset(dataset,registration),shared=resolveParents(base,sharedDraft);
- if(rows===undefined||rows===null)return buildMouseBatchDrafts(base,shared,counts,{sids,requestId});
+ if(rows===undefined||rows===null)return buildMouseBatchDrafts(base,shared,counts,{sids,requestId,deferTagValidation});
  if(!Array.isArray(rows)||rows.length<1||rows.length>MOUSE_BATCH_LIMIT)throw new Error(`Paste between 1 and ${MOUSE_BATCH_LIMIT} mouse rows.`);
+ if(literalTagRows!==null&&(!Array.isArray(literalTagRows)||literalTagRows.length!==rows.length||literalTagRows.some(value=>typeof value!=='boolean')))throw new Error('The sheet tag ownership changed. Reopen the draft.');
  const explicit=new Set(),occupied=new Set((base.tables?.mice||[]).flatMap(mouse=>[mouse.mouse_sid,mouse.canonical_sid,...(Array.isArray(mouse.legacy_sids)?mouse.legacy_sids:[])]).filter(value=>value!=null).map(canonicalMouseSidKey));
  const proposals=rows.map((row,index)=>{
   if(!row||typeof row!=='object'||Array.isArray(row))throw new Error(`Row ${index+1}: a mouse record is required.`);
@@ -46,15 +47,17 @@ export function prepareMouseRegistrationBatch(dataset,sharedDraft,{counts,rows,r
   pool=reserved.filter(sid=>!explicit.has(canonicalMouseSidKey(sid)));
   if(pool.length<missing)throw new Error('The SID reservation does not cover all blank SIDs. Reopen the draft.');
  }
- const validationContext=createMouseRegistrationValidationContext(base),staged=validationContext.dataset,drafts=[],dependencies=new Map(),warnings=[];
+ const validationContext=createMouseRegistrationValidationContext(base),staged=validationContext.dataset,drafts=[],dependencies=new Map(),warnings=[],automaticTagSids=[];
  let automatic=0;
  for(let index=0;index<proposals.length;index++){
   const proposal=resolveParents(staged,proposals[index]),sid=proposal.mouse_sid||pool[automatic++];
   try{
-   const result=buildMouseBatchDrafts(staged,proposal,countFor(proposal.sex),{sids:[sid],requestId:requestId?`${requestId}:${index+1}`:undefined,validationContext});
+   const literalTag=literalTagRows?.[index]??(Object.hasOwn(rows[index],'physical_tag')&&Boolean(String(rows[index].physical_tag||'').trim()));
+   const result=buildMouseBatchDrafts(staged,proposal,countFor(proposal.sex),{sids:[sid],requestId:requestId?`${requestId}:${index+1}`:undefined,validationContext,literalTag,deferTagValidation});
+   automaticTagSids.push(...result.automaticTagSids);
    drafts.push(result.drafts[0]);warnings.push(...result.warnings);
    for(const dependency of result.readDependencies)dependencies.set(dependency.type+':'+dependency.id,dependency);
   }catch(error){throw new Error(`Row ${index+1}: ${error.message}`);}
  }
- return {drafts,readDependencies:[...dependencies.values()],warnings:[...new Set(warnings)]};
+ return {drafts,automaticTagSids,readDependencies:[...dependencies.values()],warnings:[...new Set(warnings)]};
 }
