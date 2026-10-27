@@ -29,20 +29,20 @@ function resolutionId(id){
  a=Math.imul(c^(a>>>18),597399067);b=Math.imul(d^(b>>>22),2869860233);c=Math.imul(a^(c>>>17),951274213);d=Math.imul(b^(d>>>19),2716044179);
  return 'mouse-review-'+[a^b^c^d,b^a,c^a,d^a].map(value=>(value>>>0).toString(16).padStart(8,'0')).join('');
 }
-function validReviewLink(mouse,id,sources,dataset){
- return matchingReviewLinks(mouse,id,sources,dataset).length>0;
+function validReviewLink(mouse,id,sources,dataset,resolveAssociation){
+ return matchingReviewLinks(mouse,id,sources,dataset,resolveAssociation).length>0;
 }
-function matchingReviewLinks(mouse,id,sources,dataset){
+function matchingReviewLinks(mouse,id,sources,dataset,resolveAssociation=(mouse,link)=>resolveAnimalSheetAssociation(dataset,mouse,link)){
  const current=sources.filter(source=>source.current).map(source=>refKey(source.ref)),all=new Set(sources.map(source=>refKey(source.ref)));
  return list(mouse.animal_sheet_review_links).filter(link=>{
   if(!object(link)||link.schema_version!==1||!sameReviewedIdentity(link.reviewed_mouse,mouse))return false;
-  if(Object.hasOwn(link,'association_ref')||Object.hasOwn(link,'association_basis')){const resolved=resolveAnimalSheetAssociation(dataset,mouse,link);return Boolean(resolved&&current.length===1&&current[0]===refKey(resolved.currentSourceRef));}
+  if(Object.hasOwn(link,'association_ref')||Object.hasOwn(link,'association_basis')){const resolved=resolveAssociation(mouse,link);return Boolean(resolved&&current.length===1&&current[0]===refKey(resolved.currentSourceRef));}
   return link.issue_id===id&&list(link.source_refs).some(ref=>all.has(refKey(ref)))&&current.every(key=>list(link.source_refs).some(ref=>refKey(ref)===key));
  });
 }
-function sourceTagCheck(dataset,mouse,group,sources){
+function sourceTagCheck(dataset,mouse,group,sources,resolveAssociation=(mouse,link)=>resolveAnimalSheetAssociation(dataset,mouse,link)){
  const current=sources.filter(source=>source.current);if(!current.length||!day(mouse.date_of_birth)||group.dateOfBirth!==day(mouse.date_of_birth))return null;
- const link=matchingReviewLinks(mouse,group.id,sources,dataset).find(link=>resolveAnimalSheetAssociation(dataset,mouse,link)?.identityKind==='inferred'),resolved=link?resolveAnimalSheetAssociation(dataset,mouse,link):null;
+ const link=matchingReviewLinks(mouse,group.id,sources,dataset,resolveAssociation).find(link=>resolveAssociation(mouse,link)?.identityKind==='inferred'),resolved=link?resolveAssociation(mouse,link):null;
  if(!link||!sex(mouse.sex)||current.some(source=>source.sex!==sex(mouse.sex)))return null;
  const marker=sex(mouse.sex)==='Male'?'M':'F',sid=text(mouse.mouse_sid);
  if(!sid||current.some(source=>!source.tag.endsWith('-'+marker+sid)))return null;
@@ -53,10 +53,10 @@ function sourceTagCheck(dataset,mouse,group,sources){
  const checked=list(link.source_tag_review_history).some(value=>object(value)&&value.schema_version===1&&value.scope===ack.scope&&value.outcome===ack.outcome&&value.mouse_sid===ack.mouse_sid&&value.recorded_tag===ack.recorded_tag&&value.observed_tag===ack.observed_tag&&value.recorded_prefix===ack.recorded_prefix&&value.observed_prefix===ack.observed_prefix&&value.evidence_sha256===ack.evidence_sha256&&value.date_of_birth===ack.date_of_birth&&value.sex===ack.sex&&JSON.stringify(list(value.source_refs).map(refKey).sort())===JSON.stringify(refs.map(refKey).sort()));
  return {link,resolved,comparison,ack,checked};
 }
-function heldAttention(dataset,id,sources){
+function heldAttention(dataset,id,sources,events=table(dataset,'husbandry_events')){
  const refs=new Set(sources.filter(source=>source.current).map(source=>refKey(source.ref))),out=[];
  const allowed=new Set(['source_ended_conflict','source_terminal_annotation_conflict','source_dob_sex_conflict','source_numeric_id_ambiguous']);
- for(const event of table(dataset,'husbandry_events'))if(active(event)&&event.event_type==='source_reconciliation_batch')for(const held of list(event.held_observations)){
+ for(const event of events)if(active(event)&&event.event_type==='source_reconciliation_batch')for(const held of list(event.held_observations)){
   if(!object(held)||held.issue_id!==id||!allowed.has(held.reason)||!list(held.source_refs).length||!list(held.source_refs).every(ref=>refs.has(refKey(ref))))continue;
   out.push({reason:held.reason,attention:structuredClone(held.attention??null),source_evidence_refs:structuredClone(list(held.source_evidence_refs))});
  }
@@ -116,8 +116,18 @@ const labels={
  * A historical exact match to an Ended mouse is complete. Current sheet
  * presence does not itself change that record to Stock. */
 export function buildMouseReviewIssues(dataset,{includeHistorical=true}={}){
- const mice=editableMice(dataset),index=mouseIndex(mice),groups=new Map(),allSources=sourceRows(dataset,{includeHistorical}),sidCells=new Map(),compactSids=new Set();
- for(const mouse of mice)if(list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&resolveAnimalSheetAssociation(dataset,mouse,link)))compactSids.add(text(mouse.mouse_sid));
+ const mice=editableMice(dataset),reviewMice=mice.filter(mouse=>list(mouse.animal_sheet_review_links).length>0),index=mouseIndex(mice),groups=new Map(),allSources=sourceRows(dataset,{includeHistorical}),sidCells=new Map(),compactSids=new Set();
+ // A synchronous build reads one dataset. Resolve each saved association once
+ // within this call; ordinary helper calls and subsequent builds stay fresh.
+ const associations=new Map(),resolveAssociation=(mouse,link)=>{let links=associations.get(mouse);if(!links){links=new Map();associations.set(mouse,links);}if(!links.has(link))links.set(link,resolveAnimalSheetAssociation(dataset,mouse,link));return links.get(link);};
+ const linkedByIssue=new Map(),linkedByCurrentRef=new Map(),attentionEvents=table(dataset,'husbandry_events').filter(event=>active(event)&&event.event_type==='source_reconciliation_batch');
+ const addLinked=(index,key,mouse)=>{let matches=index.get(key);if(!matches){matches=new Set();index.set(key,matches);}matches.add(mouse);};
+ for(const mouse of reviewMice)for(const link of list(mouse.animal_sheet_review_links)){
+  if(!object(link))continue;
+  if(Object.hasOwn(link,'association_ref')||Object.hasOwn(link,'association_basis')){const resolved=resolveAssociation(mouse,link);if(resolved)addLinked(linkedByCurrentRef,refKey(resolved.currentSourceRef),mouse);}
+  else if(typeof link.issue_id==='string')addLinked(linkedByIssue,link.issue_id,mouse);
+ }
+ for(const mouse of reviewMice)if(list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&resolveAssociation(mouse,link)))compactSids.add(text(mouse.mouse_sid));
  for(const source of allSources){
   const id=issueId(source.tag,source.dateOfBirth),group=groups.get(id)||{id,tag:source.tag,dateOfBirth:source.dateOfBirth,sources:[]};group.sources.push(source);groups.set(id,group);
   const sid=source.current?source.tag.match(/^.+[-\s][MF](\d+)$/)?.[1]:null;if(sid){const cells=sidCells.get(sid)||new Set();cells.add(source.recordId+':'+source.cell);sidCells.set(sid,cells);}
@@ -126,7 +136,9 @@ export function buildMouseReviewIssues(dataset,{includeHistorical=true}={}){
  for(const group of groups.values()){
   const sources=group.sources.sort(sourceOrder),current=sources.some(source=>source.current),sexes=unique(sources.map(source=>source.sex).filter(Boolean)),observedSex=sexes.length===1?sexes[0]:null;
   const candidates=index.get(identifier(group.tag))||[];
-  const linked=mice.filter(mouse=>validReviewLink(mouse,group.id,sources,dataset));
+  const currentRefs=sources.filter(source=>source.current).map(source=>refKey(source.ref)),possibleLinks=new Set(linkedByIssue.get(group.id)||[]);
+  if(currentRefs.length===1)for(const mouse of linkedByCurrentRef.get(currentRefs[0])||[])possibleLinks.add(mouse);
+  const linked=reviewMice.filter(mouse=>possibleLinks.has(mouse)&&validReviewLink(mouse,group.id,sources,dataset,resolveAssociation));
   const exact=group.dateOfBirth?candidates.filter(mouse=>day(mouse.date_of_birth)===group.dateOfBirth):[];
   const candidateRecords=[...new Set([...candidates,...linked])],candidateMouseSids=unique(candidateRecords.map(mouse=>text(mouse.mouse_sid))).sort();
   const validIndividual=individual(group.tag)||candidates.some(mouse=>identifier(mouse.physical_tag)===identifier(group.tag)&&individual(mouse.physical_tag));
@@ -145,14 +157,14 @@ export function buildMouseReviewIssues(dataset,{includeHistorical=true}={}){
    else if(current&&matched.state==='Ended')reason='current_status_conflict';
    else if(current&&matched.state!=='Stock')reason='current_status_unknown';
   }
-  const tagCheck=matched&&linked.length===1?sourceTagCheck(dataset,matched,group,sources):null,attention=heldAttention(dataset,group.id,sources);
-  const compactMatched=matched&&matchingReviewLinks(matched,group.id,sources,dataset).some(link=>link?.association_ref);
+  const tagCheck=matched&&linked.length===1?sourceTagCheck(dataset,matched,group,sources,resolveAssociation):null,attention=heldAttention(dataset,group.id,sources,attentionEvents);
+  const compactMatched=matched&&matchingReviewLinks(matched,group.id,sources,dataset,resolveAssociation).some(link=>link?.association_ref);
   if(compactMatched&&exact.some(mouse=>mouse!==matched)){attention.push({reason:'ambiguous_match',attention:'The current literal label also matches another recorded mouse. The inferred association does not clear that conflict.'});reason='ambiguous_match';}
   const sourceSid=current?group.tag.match(/^.+[-\s][MF](\d+)$/)?.[1]:null;
   if(sourceSid&&compactSids.has(sourceSid)&&sidCells.get(sourceSid)?.size>1){attention.push({reason:'source_numeric_id_ambiguous',attention:'The source SID appears in multiple current cells or cohorts. Identity association does not resolve current placement.'});if(!reason)reason='ambiguous_match';}
-  const invalidAssociation=mice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&refKey(ref)===refKey(source.ref)))&&!resolveAnimalSheetAssociation(dataset,mouse,link)));
+  const invalidAssociation=reviewMice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&refKey(ref)===refKey(source.ref)))&&!resolveAssociation(mouse,link)));
   if(invalidAssociation){attention.push({reason:'source_association_unavailable',attention:'The saved source association evidence is unavailable or inconsistent. Reload and review its stable event.'});if(!reason)reason='source_association_unavailable';}
-  const changedAssociation=mice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref?.kind==='source_reconciliation_association_ref'&&!resolveAnimalSheetAssociation(dataset,mouse,link)&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&ref.kind==='current_position'&&ref.record_id===source.recordId&&ref.source_cell===source.cell&&day(ref.date_of_birth)===source.dateOfBirth&&sex(ref.sex)===source.sex&&ref.tag!==source.rawTag))));
+  const changedAssociation=reviewMice.some(mouse=>list(mouse.animal_sheet_review_links).some(link=>link?.association_ref?.kind==='source_reconciliation_association_ref'&&!resolveAssociation(mouse,link)&&list(link.source_refs).some(ref=>sources.some(source=>source.current&&ref.kind==='current_position'&&ref.record_id===source.recordId&&ref.source_cell===source.cell&&day(ref.date_of_birth)===source.dateOfBirth&&sex(ref.sex)===source.sex&&ref.tag!==source.rawTag))));
   if(changedAssociation){attention.push({reason:'source_association_changed',attention:'The current source label changed after its saved identity association. Review the current source evidence.'});if(!reason)reason='source_association_changed';}
   if(tagCheck&&!tagCheck.checked){attention.unshift({reason:'source_tag_conflict',attention:'Identity association only; the differing source label has not been checked.'});if(!reason)reason='source_tag_conflict';}
   if(current&&attention.some(row=>row.reason==='source_ended_conflict'))reason='current_status_conflict';
