@@ -63,11 +63,85 @@ let versions=new Map(),baseline=null,baselineIdentity=null,synced=false,refreshP
 const memory=new Map();
 const activeDatasetSaves=new Set();
 const READ_DEPENDENCY_TYPES=new Set(['mice','matings','litters','cages','locations','rooms','racks','husbandry_events','light_events']);
-function getStorage(kind,key){try{return globalThis[kind]?.getItem(key)??null;}catch{return memory.get(`${kind}:${key}`)??null;}}
-function setStorage(kind,key,value){try{if(!globalThis[kind])throw Error();value===null?globalThis[kind].removeItem(key):globalThis[kind].setItem(key,value);}catch{value===null?memory.delete(`${kind}:${key}`):memory.set(`${kind}:${key}`,value);}}
+function getStorage(kind,key){const id=`${kind}:${key}`;if(memory.has(id))return memory.get(id);try{return globalThis[kind]?.getItem(key)??null;}catch{return null;}}
+function setStorage(kind,key,value){const id=`${kind}:${key}`;try{if(!globalThis[kind])throw Error();value===null?globalThis[kind].removeItem(key):globalThis[kind].setItem(key,value);memory.delete(id);return true;}catch{memory.set(id,value);return false;}}
 function readJSON(kind,key){try{return JSON.parse(getStorage(kind,key)||'null');}catch{return null;}}
 const configuration=()=>readJSON('localStorage',CONFIG_KEY);
-const session=()=>readJSON('sessionStorage',SESSION_KEY);
+// Remembering is explicit, browser-local and bounded from successful sign-in.
+// Supabase keeps its existing short access tokens and refresh-token revocation.
+const REMEMBERED_SESSION_KEY='mouse-colony.remembered-session.v1',REMEMBERED_SESSION_MS=7*24*60*60*1000;
+const DEFAULT_SESSION_IDLE_MS=90*60*1000,IDLE_ACTIVITY_WRITE_MS=5000;
+let pendingHumanActivity=null,lastTrustedInputAt=-Infinity;
+function clearDefaultIdle(){pendingHumanActivity=null;}
+function withDefaultIdle(s,before=null){
+ if(!s?.access_token||s.rememberDeviceExpiresAt)return s;
+ const same=before?.user?.id===s.user?.id&&before?.access_token&&!before.rememberDeviceExpiresAt;
+ const fields=same?before:s,valid=SESSION_CLOUD_ID.test(fields.idleSessionId||'')&&Number.isFinite(fields.idleLastActivityAt)&&fields.idleExpiresAt===fields.idleLastActivityAt+DEFAULT_SESSION_IDLE_MS;
+ const last=valid?fields.idleLastActivityAt:Date.now();
+ return {...s,idleSessionId:valid?fields.idleSessionId:crypto.randomUUID(),idleLastActivityAt:last,idleExpiresAt:last+DEFAULT_SESSION_IDLE_MS};
+}
+function checkedDefaultIdle(s){
+ if(!s?.access_token||s.rememberDeviceExpiresAt)return s;
+ // Existing tab sessions acquire the new idle policy on first use; later reads,
+ // network requests and refreshes retain that timestamp unchanged.
+ if(!Object.hasOwn(s,'idleSessionId')){s=withDefaultIdle(s);if(!setStorage('sessionStorage',SESSION_KEY,JSON.stringify(s))){setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='This browser could not preserve your sign-in deadline. Sign in again.';return null;}}
+ const now=Date.now(),valid=SESSION_CLOUD_ID.test(s.idleSessionId||'')&&Number.isFinite(s.idleLastActivityAt)&&s.idleLastActivityAt<=now+300000&&s.idleExpiresAt===s.idleLastActivityAt+DEFAULT_SESSION_IDLE_MS;
+ if(valid&&pendingHumanActivity?.id===s.idleSessionId&&pendingHumanActivity.userId===s.user?.id&&pendingHumanActivity.at>s.idleLastActivityAt&&pendingHumanActivity.at<=now+300000)s={...s,idleLastActivityAt:pendingHumanActivity.at,idleExpiresAt:pendingHumanActivity.at+DEFAULT_SESSION_IDLE_MS};
+ if(!valid||s.idleExpiresAt<=now){setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Your session expired after 90 minutes without activity. Sign in again.';return null;}
+ return s;
+}
+function flushHumanActivity(){
+ const s=session();if(!s?.access_token||s.rememberDeviceExpiresAt||pendingHumanActivity?.id!==s.idleSessionId)return;
+ const encoded=JSON.stringify(s);if(getStorage('sessionStorage',SESSION_KEY)!==encoded)setStorage('sessionStorage',SESSION_KEY,encoded);
+}
+function recordHumanActivity(event){
+ if(event?.isTrusted!==true)return;
+ const now=Date.now(),direct=['pointerdown','keydown','touchstart','wheel'].includes(event.type);
+ if(!direct&&(event.type!=='scroll'||now-lastTrustedInputAt>1500))return;
+ if(direct)lastTrustedInputAt=now;
+ const s=session();if(!s?.access_token||s.rememberDeviceExpiresAt)return;
+ pendingHumanActivity={id:s.idleSessionId,userId:s.user.id,at:Math.max(now,s.idleLastActivityAt)};
+ const stored=readJSON('sessionStorage',SESSION_KEY);if(!stored||now-stored.idleLastActivityAt>=IDLE_ACTIVITY_WRITE_MS)flushHumanActivity();
+}
+const sessionActivityDocument=globalThis.document;
+for(const type of ['pointerdown','keydown','touchstart','wheel','scroll'])sessionActivityDocument?.addEventListener?.(type,recordHumanActivity,{capture:true,passive:true});
+// Flushing saves the last already observed human input, never a new timestamp.
+sessionActivityDocument?.addEventListener?.('visibilitychange',flushHumanActivity,{capture:true,passive:true});
+globalThis.window?.addEventListener?.('pagehide',flushHumanActivity,{capture:true,passive:true});
+
+function readRememberedSession(){
+ const saved=readJSON('localStorage',REMEMBERED_SESSION_KEY),c=configuration(),now=Date.now();
+ if(!saved)return null;
+ if(saved.schemaVersion!==1||saved.url!==c?.url||saved.colonyId!==c?.colonyId||typeof saved.userId!=='string'||!saved.userId||saved.session?.user?.id!==saved.userId||!saved.session?.access_token||!saved.session?.refresh_token||saved.session.passwordRecovery||pendingAccount(saved.session)||!Number.isFinite(saved.startedAt)||!Number.isFinite(saved.expiresAt)||saved.startedAt>now+300000||saved.expiresAt-saved.startedAt!==REMEMBERED_SESSION_MS||saved.expiresAt<=now){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);return null;}
+ return saved;
+}
+function session(){
+ const current=readJSON('sessionStorage',SESSION_KEY),remembered=readRememberedSession();
+ // Removing a remembered login (including another tab's sign-out) removes its
+ // tab copy too. Ordinary tab-only sessions keep their previous behavior.
+ if(current?.rememberDeviceExpiresAt&&(!remembered||remembered.userId!==current.user?.id||remembered.expiresAt!==current.rememberDeviceExpiresAt)){setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);return null;}
+ if(remembered&&(!current||current.rememberDeviceExpiresAt)){
+  const restored={...remembered.session,rememberDeviceExpiresAt:remembered.expiresAt};
+  const encoded=JSON.stringify(restored);if(getStorage('sessionStorage',SESSION_KEY)!==encoded)setStorage('sessionStorage',SESSION_KEY,encoded);
+  if(remembered.cloud){const cloud=JSON.stringify(remembered.cloud);if(getStorage('sessionStorage',SESSION_CLOUD_KEY)!==cloud)setStorage('sessionStorage',SESSION_CLOUD_KEY,cloud);}
+  return restored;
+ }
+ return checkedDefaultIdle(current);
+}
+function persistRememberedSession(s,previous){
+ if(!s?.access_token||!s?.refresh_token||s.passwordRecovery||pendingAccount(s)||!previous||s.user?.id!==previous.userId)return false;
+ const c=configuration(),value={schemaVersion:1,url:c.url,colonyId:c.colonyId,userId:s.user.id,startedAt:previous.startedAt,expiresAt:previous.expiresAt,session:{...s,rememberDeviceExpiresAt:previous.expiresAt},cloud:readJSON('sessionStorage',SESSION_CLOUD_KEY)};
+ // Do not claim browser-restart persistence when durable storage is denied.
+ try{const encoded=JSON.stringify(value);globalThis.localStorage.setItem(REMEMBERED_SESSION_KEY,encoded);if(globalThis.localStorage.getItem(REMEMBERED_SESSION_KEY)===encoded){memory.delete(`localStorage:${REMEMBERED_SESSION_KEY}`);return true;}}catch{}
+ // A successful write followed by failed read-back must not leave a durable
+ // login behind while reporting that this is a tab-only session.
+ try{globalThis.localStorage.removeItem(REMEMBERED_SESSION_KEY);}catch{}memory.set(`localStorage:${REMEMBERED_SESSION_KEY}`,null);return false;
+}
+function rememberCurrentSession(){
+ const s=session(),now=Date.now(),record={userId:s?.user?.id,startedAt:now,expiresAt:now+REMEMBERED_SESSION_MS};
+ if(!persistRememberedSession(s,record))return false;
+ setStorage('sessionStorage',SESSION_KEY,JSON.stringify({...s,rememberDeviceExpiresAt:record.expiresAt}));return true;
+}
 const hasLabSession=(s=session())=>!!s?.access_token||!!(s?.user?.id&&cloud2Identity?.userId===s.user.id&&Date.parse(cloud2Identity.session_expires_at)>Date.now());
 const pendingAccount=s=>s?.role==='pending'||s?.setupRequired===true;
 // Keep explicit malformed values visible to restriction checks; only absent maps default.
@@ -93,10 +167,10 @@ const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==fals
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
 function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;managedReadCoverage=null;startupCacheSnapshot=null;}
-function saveSession(s){const before=session(),sameUser=Boolean(s?.user?.id&&before?.user?.id===s.user.id);if(!sameUser)setStorage('sessionStorage',SESSION_CLOUD_KEY,null);if(s&&sessionCloudPolicy)s={...s,sessionCloudId:sameUser&&SESSION_CLOUD_ID.test(before?.sessionCloudId||'')?before.sessionCloudId:SESSION_CLOUD_ID.test(s.sessionCloudId||'')?s.sessionCloudId:crypto.randomUUID()};else if(s&&sameUser&&before.sessionCloudId)s={...s,sessionCloudId:before.sessionCloudId};if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;cloud1SessionSuspended=false;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);}
+function saveSession(s,{passive=false}={}){const before=session(),remembered=readRememberedSession(),sameUser=Boolean(s?.user?.id&&before?.user?.id===s.user.id);if(passive&&(!sameUser||!before?.access_token||(s.rememberDeviceExpiresAt?before.rememberDeviceExpiresAt!==s.rememberDeviceExpiresAt:before.rememberDeviceExpiresAt||before.idleSessionId!==s.idleSessionId)))return false;if(!s||!sameUser||s.passwordRecovery||pendingAccount(s)){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);if(s){s={...s};delete s.rememberDeviceExpiresAt;}}else if(before?.rememberDeviceExpiresAt&&remembered)s={...s,rememberDeviceExpiresAt:remembered.expiresAt};if(!sameUser){setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();}s=withDefaultIdle(s,sameUser?before:null);if(s?.rememberDeviceExpiresAt&&s.rememberDeviceExpiresAt<=Date.now()){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Your remembered sign-in expired. Sign in again.';return false;}if(s?.access_token&&!s.rememberDeviceExpiresAt&&s.idleExpiresAt<=Date.now()){setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Your session expired after 90 minutes without activity. Sign in again.';return false;}if(s&&sessionCloudPolicy)s={...s,sessionCloudId:sameUser&&SESSION_CLOUD_ID.test(before?.sessionCloudId||'')?before.sessionCloudId:SESSION_CLOUD_ID.test(s.sessionCloudId||'')?s.sessionCloudId:crypto.randomUUID()};else if(s&&sameUser&&before.sessionCloudId)s={...s,sessionCloudId:before.sessionCloudId};if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;cloud1SessionSuspended=false;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);if(s?.rememberDeviceExpiresAt&&!persistRememberedSession(s,remembered)){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Could not preserve your remembered sign-in. Sign in again.';return false;}}
 function sessionEpoch(){return String(providerSessionEpoch)+(sessionCloudPolicy?':'+(session()?.sessionCloudId||''):'');}
 function savedSessionCloud(){const c=configuration(),s=session(),r=readJSON('sessionStorage',SESSION_CLOUD_KEY);return sessionCloudPolicy&&c&&s?.user?.id&&SESSION_CLOUD_ID.test(s.sessionCloudId||'')&&r?.schemaVersion===1&&r.url===c.url&&r.colonyId===c.colonyId&&r.userId===s.user.id&&r.sessionCloudId===s.sessionCloudId&&['cloud1','cloud2'].includes(r.source)?r.source:null;}
-function rememberSessionCloud(source){const c=configuration(),s=session();if(!sessionCloudPolicy||!c||!s?.user?.id||!SESSION_CLOUD_ID.test(s.sessionCloudId||'')||!['cloud1','cloud2'].includes(source))return;setStorage('sessionStorage',SESSION_CLOUD_KEY,JSON.stringify({schemaVersion:1,url:c.url,colonyId:c.colonyId,userId:s.user.id,sessionCloudId:s.sessionCloudId,source}));}
+function rememberSessionCloud(source){const c=configuration(),s=session();if(!sessionCloudPolicy||!c||!s?.user?.id||!SESSION_CLOUD_ID.test(s.sessionCloudId||'')||!['cloud1','cloud2'].includes(source))return;setStorage('sessionStorage',SESSION_CLOUD_KEY,JSON.stringify({schemaVersion:1,url:c.url,colonyId:c.colonyId,userId:s.user.id,sessionCloudId:s.sessionCloudId,source}));const remembered=readRememberedSession();if(s.rememberDeviceExpiresAt&&remembered)persistRememberedSession(s,remembered);}
 
 function stable(value){if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return `{${Object.keys(value).sort().filter(k=>value[k]!==undefined).map(k=>JSON.stringify(k)+':'+stable(value[k])).join(',')}}`;return JSON.stringify(value);}
 function advanceAuthGeneration(){authGeneration++;for(const cancel of guardedCacheWrites)cancel();return authGeneration;}
@@ -260,7 +334,7 @@ export function getCloudStatus(){
   const c=configuration(),s=session(),connections=operationalProvider?.getState()||null,activeCloud=connections?connections.active:synced?'cloud1':null;
   const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
   const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
-  return {configured:Boolean(c),signedIn:hasLabSession(s),userId:s?.user?.id??null,sessionEpoch:sessionEpoch(),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),recoverySource:providerSource,readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced&&baselineIdentity===syncIdentity()&&(!connections||!!connections.active)&&(activeCloud!=='cloud1'||!cloud1SessionSuspended)),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},...appPermissionFields(s),username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
+  return {configured:Boolean(c),signedIn:hasLabSession(s),rememberDevice:Boolean(s?.rememberDeviceExpiresAt),rememberDeviceExpiresAt:s?.rememberDeviceExpiresAt??null,sessionIdleExpiresAt:s?.rememberDeviceExpiresAt?null:s?.idleExpiresAt??null,userId:s?.user?.id??null,sessionEpoch:sessionEpoch(),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),recoverySource:providerSource,readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced&&baselineIdentity===syncIdentity()&&(!connections||!!connections.active)&&(activeCloud!=='cloud1'||!cloud1SessionSuspended)),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},...appPermissionFields(s),username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -307,7 +381,7 @@ async function accessToken(){
     const generation=authGeneration,config=stable(configuration());const current=()=>generation===authGeneration&&config===stable(configuration())&&session()?.user?.id===s.user?.id;
     // Token renewal is shared by optional and core requests. An optional read's
     // shorter timeout must not shorten the session-wide authentication budget.
-    if(!refreshPromise)refreshPromise=authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};saveSession(next);cloud1SessionSuspended=false;return next;}).catch(e=>{
+    if(!refreshPromise)refreshPromise=(async()=>{const renew=async()=>{const latest=session();if(!latest?.access_token||latest.user?.id!==s.user?.id||!current())throw Error('The account changed during session refresh.');s=latest;if(s.expires_at>Date.now()/1000+60)return s;return authRequest('token?grant_type=refresh_token',{refresh_token:s.refresh_token}).then(result=>{if(!current())throw new Error('The account changed during session refresh.');const next={...normalizeSession(result),...(s.rememberDeviceExpiresAt?{rememberDeviceExpiresAt:s.rememberDeviceExpiresAt}:{idleSessionId:s.idleSessionId,idleLastActivityAt:s.idleLastActivityAt,idleExpiresAt:s.idleExpiresAt}),passwordRecovery:s.passwordRecovery===true,passwordRecoveryUpdated:s.passwordRecoveryUpdated===true,role:s.role,guestLevel:s.guestLevel,guestPermissions:s.guestPermissions,guestAccessStartsOn:s.guestAccessStartsOn??null,guestAccessEndsOn:s.guestAccessEndsOn??null,permissions:s.permissions,...appPermissionFields(s,true),username:s.username,setupRequired:s.setupRequired,exportLevel:s.exportLevel};if(!current())throw new Error('The account or sign-in deadline changed during session refresh.');if(saveSession(next,{passive:true})===false)throw new Error('Your session changed or expired. Sign in again.');cloud1SessionSuspended=false;return next;});};return s.rememberDeviceExpiresAt&&globalThis.navigator?.locks?.request?globalThis.navigator.locks.request('braintime-auth-refresh:'+configuration().url+':'+configuration().colonyId,renew):renew();})().catch(e=>{
       if(current()){
         // An independent, verified NAS session does not depend on renewing
         // Supabase credentials. This failure still rejects the Cloud 1 action.
@@ -342,7 +416,7 @@ function provider(){
  const url=cloud2URL();if(!url)return null;
  const key=stable({url,colony:configuration()?.colonyId});if(operationalProvider&&key===operationalConfig)return operationalProvider;
  clearOperationalSession();operationalConfig=key;
- const nas=createCloud2Adapter({url,onSession:identity=>{cloud2Identity=identity;}});
+ const nas=createCloud2Adapter({url,colonyId:configuration()?.colonyId,getUserId:()=>session()?.user?.id??null,onSession:identity=>{cloud2Identity=identity;}});
  const ownMembership=(query,rows)=>{
   if(query.method!=='GET'||!query.route.startsWith('memberships?'))return rows;
   const params=new URLSearchParams(query.route.slice('memberships?'.length)),c=configuration(),s=session();
@@ -475,8 +549,8 @@ export async function connectCloud2({reset=false}={}){
   if(!session()?.access_token)return null;
   try{const rows=await cloud1Request(`memberships?select=active,guest_level,guest_access_starts_on,guest_access_ends_on&user_id=eq.${encodeURIComponent(initialUser)}&colony_id=eq.${encodeURIComponent(configuration().colonyId)}`);check();if(!Array.isArray(rows)||rows.length!==1||rows[0].active!==true)throw new Error('Current lab membership is required to connect Cloud 2.');assertGuestAvailability(rows[0]);return accessToken();}
   catch(error){check();if(!reset&&providerFailure(error).code==='UNAVAILABLE')return null;throw error;}
- },acceptSession:async token=>{
-  check();service.cloud2.setBearer(token);const identity=await service.cloud2.status({});check();
+ },acceptSession:async(token,options)=>{
+  check();service.cloud2.setBearer(token,options);const identity=await service.cloud2.status({});check();
   if(identity.colonyId!==configuration().colonyId||initialUser&&identity.userId!==initialUser){service.cloud2.clear();cloud2Identity=null;throw new Error('Cloud 2 must use the same lab account.');}
   adoptCloud2Identity(identity);epoch=providerSessionEpoch;
   if(preferred)service.choose(preferred);await service.refresh();
@@ -634,10 +708,10 @@ async function passwordSignIn(email,password,action){
   }
   action.check();if(identity?.alias&&result?.user?.id!==identity.user_id)throw new Error('Sign-in could not be confirmed. Try again later.');return {candidate:normalizeSession(result),identity};
 }
-export async function signIn(email,password){
+export async function signIn(email,password,{rememberDevice=false}={}){
   if(typeof email!=='string'||typeof password!=='string'||!email.trim()||!password)throw new Error('Enter your email or username and password.');
   const action=beginAuthAction();saveSession(null);invalidate();const {candidate,identity}=await passwordSignIn(email,password,action);action.check();saveSession(candidate);invalidate();
-  try{await establishMembershipOrSetup(action);action.check();if(identity?.alias&&session()?.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');statusMessage='Signed in.';}catch(e){if(action.current()){saveSession(null);statusMessage=e.message;}throw e;}
+  try{await establishMembershipOrSetup(action);action.check();if(identity?.alias&&session()?.role!=='owner')throw new Error('This sign-in is unavailable. Use your registered account.');statusMessage='Signed in.';if(rememberDevice===true&&!session()?.passwordRecovery&&!pendingAccount(session()))statusMessage=rememberCurrentSession()?'Signed in. This browser will remember you for 7 days.':'Signed in for this tab only. Browser storage could not remember this login.';}catch(e){if(action.current()){saveSession(null);statusMessage=e.message;}throw e;}
   return getCloudStatus();
 }
 /** Reconnect Cloud 1 without discarding an independently signed-in NAS account. */

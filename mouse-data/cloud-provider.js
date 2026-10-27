@@ -45,13 +45,47 @@ export function cloud2Endpoint(value,{origin=globalThis.location?.origin}={}){
  url.pathname=url.pathname.replace(/\/?$/,'/');return url;
 }
 
-/** The NAS session stays in memory. Supabase tokens never enter this adapter. */
-export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=globalThis.location?.origin,timeout=30000,onSession=()=>{}}={}){
- const base=cloud2Endpoint(url,{origin});let bearer=null,csrf=null,verified=null,refreshing=null,epoch=0;
+/** NAS sessions restore only after a fresh server identity check. */
+export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=globalThis.location?.origin,timeout=30000,onSession=()=>{},colonyId=null,getUserId=()=>null,now=()=>Date.now(),storage,sessionStorage:tabStorage,eventTarget=globalThis.window}={}){
+ const base=cloud2Endpoint(url,{origin}),IDLE_MS=90*60000;let bearer=null,csrf=null,verified=null,epoch=0,rememberChoice=false,rememberDeadline=null,normalDeadline=null,restoredUser=null,lastActivityAttempt=-Infinity,activityPending=false,lastTrustedInput=-Infinity;
+ if(storage===undefined)try{storage=globalThis.localStorage;}catch{storage=null;}
+ if(tabStorage===undefined)try{tabStorage=globalThis.sessionStorage;}catch{tabStorage=null;}
+ const scope=base&&UUID.test(colonyId||'')?encodeURIComponent(base.href)+':'+colonyId:null,storageKey=scope?'braintime.cloud2.remembered.v1:'+scope:null,normalPrefix=scope?'braintime.cloud2.session.v1:'+scope+':':null,normalIndex=normalPrefix&&normalPrefix+'active';
  const state=()=>verified?clone(verified):null;
- const sameOrigin=base&&base.origin===origin;
+ const sameOrigin=base&&base.origin===origin,opaque=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value);
+ const expectedUser=()=>{try{return getUserId()||null;}catch{return 'unavailable';}};
+ const removeRemembered=()=>{try{if(storageKey)storage?.removeItem(storageKey);}catch{}};
+ const removeNormal=()=>{try{if(!normalPrefix)return;const indexed=tabStorage?.getItem(normalIndex),user=restoredUser||expectedUser()||indexed;if(UUID.test(user||''))tabStorage?.removeItem(normalPrefix+user);if(!indexed||indexed===user)tabStorage?.removeItem(normalIndex);}catch{}};
+ const readSaved=remembered=>{
+  let key;try{
+   const user=expectedUser(),indexed=!remembered&&normalIndex&&tabStorage?.getItem(normalIndex);key=remembered?storageKey:normalPrefix&&normalPrefix+(user||indexed||'');
+   if(!remembered&&!UUID.test(user||indexed||''))return null;
+   const text=key&&(remembered?storage:tabStorage)?.getItem(key);if(!text)return null;if(text.length>2048)throw Error();
+   const row=JSON.parse(text),deadline=Date.parse(row?.expiresAt);
+   if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).sort().join(',')!=='colonyId,expiresAt,schemaVersion,token,url,userId'||row.schemaVersion!==1||row.url!==base.href||row.colonyId!==colonyId||!UUID.test(row.userId||'')||user&&user!==row.userId||!remembered&&key!==normalPrefix+row.userId||!opaque(row.token)||!Number.isFinite(deadline)||deadline<=now()||deadline>now()+(remembered?7*86400000:IDLE_MS)+60000)throw Error();return row;
+  }catch{try{if(key)(remembered?storage:tabStorage)?.removeItem(key);if(!remembered&&normalIndex)tabStorage?.removeItem(normalIndex);}catch{}return null;}
+ };
+ function reset({forget=true}={}){if(forget){removeRemembered();removeNormal();}epoch++;bearer=null;csrf=null;verified=null;rememberChoice=false;rememberDeadline=null;normalDeadline=null;restoredUser=null;lastActivityAttempt=-Infinity;activityPending=false;lastTrustedInput=-Infinity;onSession(null);}
+ function persistIdentity(result,{allowIdleExtension=false}={}){
+  if(!bearer)return;
+  const absolute=Date.parse(result.session_absolute_expires_at),expires=Date.parse(result.session_expires_at),user=result.userId||result.user?.id,remembered=result.session_remembered===true;
+  let deadline=Math.min(absolute,expires);
+  if(rememberChoice)deadline=Math.min(rememberDeadline,deadline);
+  else if(!allowIdleExtension&&normalDeadline!==null)deadline=Math.min(normalDeadline,deadline);
+  if(remembered!==rememberChoice||!Number.isFinite(deadline)||deadline<=now()||deadline>now()+(rememberChoice?7*86400000:IDLE_MS)+60000||!UUID.test(user||'')||restoredUser&&restoredUser!==user||expectedUser()&&expectedUser()!==user){reset();throw problem('UNAUTHORIZED','Cloud 2 sign-in could not be verified.');}
+  restoredUser=user;result.session_expires_at=new Date(deadline).toISOString();
+  if(rememberChoice){rememberDeadline=deadline;result.session_absolute_expires_at=new Date(deadline).toISOString();}
+  else normalDeadline=deadline;
+  const key=rememberChoice?storageKey:normalPrefix&&normalPrefix+user,target=rememberChoice?storage:tabStorage;if(!key)return;
+  try{target?.setItem(key,JSON.stringify({schemaVersion:1,url:base.href,colonyId,userId:user,token:bearer,expiresAt:new Date(deadline).toISOString()}));if(!rememberChoice)tabStorage?.setItem(normalIndex,user);}catch{if(rememberChoice)removeRemembered();else removeNormal();}
+ }
+ const savedRemembered=readSaved(true),saved=savedRemembered||readSaved(false);if(saved){bearer=saved.token;rememberChoice=Boolean(savedRemembered);if(rememberChoice)rememberDeadline=Date.parse(saved.expiresAt);else normalDeadline=Date.parse(saved.expiresAt);restoredUser=saved.userId;}
+ const storageChanged=event=>{if(!storageKey||event.key!==null&&event.key!==storageKey||!rememberChoice)return;const row=readSaved(true);if(!row||row.token!==bearer||restoredUser&&row.userId!==restoredUser){reset({forget:false});return;}rememberDeadline=Math.min(rememberDeadline,Date.parse(row.expiresAt));};
+ eventTarget?.addEventListener?.('storage',storageChanged);
  async function transport(path,{method='GET',body,signal}={}){
   if(!base)throw problem('NOT_READY','Cloud 2 is not configured.');
+  const deadline=rememberChoice?rememberDeadline:normalDeadline;
+  if(deadline!==null&&deadline<=now()||restoredUser&&expectedUser()&&restoredUser!==expectedUser()){reset();throw problem('UNAUTHORIZED','Sign in to Cloud 2 again.');}
   const requestEpoch=epoch,controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
   const timer=setTimeout(()=>controller.abort(),timeout);
   try{
@@ -61,6 +95,7 @@ export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=g
    if(!response.ok){
     const codes={401:'UNAUTHORIZED',403:'FORBIDDEN',502:'UNAVAILABLE',503:'UNAVAILABLE',504:'UNAVAILABLE'};
     const code=result?.code==='not_enrolled'?'NOT_ENROLLED':result?.code==='not_ready'?'NOT_READY':codes[response.status]||'REQUEST_FAILED';
+    if(response.status===401||response.status===403&&['NOT_ENROLLED','POLICY_REFRESH_REQUIRED','GUEST_ACCESS_EXPIRED','GUEST_ACCESS_NOT_STARTED','OFFLINE_GRANT_EXPIRED'].includes(result?.code))reset();
     throw problem(code,result?.error||'Cloud 2 request failed.',{status:response.status,remoteCode:result?.code,connectionUnavailable:code==='UNAVAILABLE'});
    }
    return result;
@@ -69,43 +104,52 @@ export function createCloud2Adapter({url,fetch:fetcher=globalThis.fetch,origin=g
    throw providerFailure(error);
   }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
  }
- async function refreshSession(signal){
-  if(!verified||Date.parse(verified.session_expires_at)>Date.now()+60000)return;
-  if(!refreshing){const currentEpoch=epoch,task=(async()=>{const result=await transport('session/refresh',{method:'POST',body:{},signal});if(currentEpoch!==epoch)throw problem('CONTEXT_CHANGED','The Cloud 2 account changed.');if(!result?.user||result.user.id!==verified?.userId||!Number.isFinite(Date.parse(result.session_expires_at))||Date.parse(result.session_expires_at)<=Date.now())throw problem('UNAUTHORIZED','Cloud 2 sign-in could not be renewed.');csrf=result.csrf_token;verified={...verified,csrf_token:csrf,session_expires_at:result.session_expires_at};onSession(state());})();refreshing=task;void task.finally(()=>{if(refreshing===task)refreshing=null;}).catch(()=>{});}
-  return refreshing;
+ async function userActivity(){
+  if(!verified||rememberChoice||verified.session_remembered===true||activityPending||now()-lastActivityAttempt<60000)return;
+  const currentEpoch=epoch,user=verified.userId;lastActivityAttempt=now();activityPending=true;
+  try{
+   const result=await transport('session/activity',{method:'POST',body:{}});
+   if(currentEpoch!==epoch)throw problem('CONTEXT_CHANGED','The Cloud 2 account changed.');
+   if(result?.user?.id!==user||result.session_remembered!==false||!Number.isFinite(Date.parse(result.session_expires_at))||Date.parse(result.session_expires_at)<=now())throw problem('UNAUTHORIZED','Cloud 2 sign-in could not be verified.');
+   persistIdentity(result,{allowIdleExtension:true});csrf=result.csrf_token;verified={...verified,csrf_token:csrf,session_expires_at:result.session_expires_at,session_absolute_expires_at:result.session_absolute_expires_at,session_remembered:false};onSession(state());
+  }finally{if(currentEpoch===epoch)activityPending=false;}
  }
+ const trustedInput=event=>{if(event?.isTrusted!==true)return;if(event.type==='scroll'){if(now()-lastTrustedInput>1500)return;}else lastTrustedInput=now();void userActivity().catch(()=>{});};
+ const activityEvents=['pointerdown','keydown','wheel','touchstart','touchmove','scroll'];
+ for(const type of activityEvents)eventTarget?.addEventListener?.(type,trustedInput,{capture:true,passive:true});
  async function status({signal}={}){
   if(!base)return {state:'not_ready'};
-  // Cross-origin cookies are omitted. Only an explicit Connect action can
-  // supply the in-memory bearer required to make this a usable source.
+  // Cross-origin cookies are omitted. A saved bearer remains untrusted until
+  // this fresh status check confirms its current identity and remaining time.
   if(!sameOrigin&&!bearer)return {state:'signed_out'};
   const currentEpoch=epoch;
   const probe=new AbortController(),abort=()=>probe.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)probe.abort();let timer;
   const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{probe.abort();reject(problem('UNAVAILABLE','Cloud 2 status check timed out.',{connectionUnavailable:true}));},Math.min(timeout,5000));});
   try{
-   const result=await Promise.race([(async()=>{await refreshSession(probe.signal);const value=await transport('session/status',{signal:probe.signal});if(probe.signal.aborted)throw problem('UNAVAILABLE','Cloud 2 status check timed out.',{connectionUnavailable:true});return value;})(),deadline]);
+   const result=await Promise.race([(async()=>{const value=await transport('session/status',{signal:probe.signal});if(probe.signal.aborted)throw problem('UNAVAILABLE','Cloud 2 status check timed out.',{connectionUnavailable:true});return value;})(),deadline]);
    if(currentEpoch!==epoch)throw problem('CONTEXT_CHANGED','The Cloud 2 account changed.');
    if(result?.state!=='online'){verified=null;csrf=null;onSession(null);return result;}
-   if(!UUID.test(result.userId||'')||!UUID.test(result.colonyId||'')||result.enrolled!==true||!['owner','manager','editor','viewer'].includes(result.role)||!Number.isFinite(Date.parse(result.session_expires_at))||Date.parse(result.session_expires_at)<=Date.now())throw problem('FORBIDDEN','Cloud 2 identity could not be verified.');
+   if(!UUID.test(result.userId||'')||!UUID.test(result.colonyId||'')||colonyId&&result.colonyId!==colonyId||expectedUser()&&result.userId!==expectedUser()||result.enrolled!==true||!['owner','manager','editor','viewer'].includes(result.role)||!Number.isFinite(Date.parse(result.session_expires_at))||Date.parse(result.session_expires_at)<=now())throw problem('FORBIDDEN','Cloud 2 identity could not be verified.');
    if(!bearer&&(!sameOrigin||typeof result.csrf_token!=='string'||!/^[A-Za-z0-9_-]{32,128}$/.test(result.csrf_token)))throw problem('UNAUTHORIZED','Sign in to Cloud 2 in this app.');
-   csrf=result.csrf_token||null;verified=clone(result);onSession(state());return result;
-  }catch(error){if(currentEpoch===epoch){verified=null;csrf=null;onSession(null);}throw error;}
+   persistIdentity(result);csrf=result.csrf_token||null;verified=clone(result);onSession(state());return result;
+  }catch(error){if(currentEpoch===epoch){if(['UNAUTHORIZED','FORBIDDEN'].includes(error.code))reset();else{verified=null;csrf=null;onSession(null);}}throw error;}
   finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
  }
- function setBearer(value){
+ function setBearer(value,{rememberDevice=false,expiresAt=null}={}){
   if(value!==null&&(typeof value!=='string'||value.length<32||value.length>8192||/[\s\x00-\x1f]/.test(value)))throw new Error('Invalid Cloud 2 session.');
-  epoch++;bearer=value;csrf=null;verified=null;refreshing=null;onSession(null);
+  const deadline=Date.parse(expiresAt);if(typeof rememberDevice!=='boolean'||rememberDevice&&(!opaque(value)||!Number.isFinite(deadline)||deadline<=now()||deadline>now()+7*86400000+60000)||!rememberDevice&&expiresAt!==null&&(!Number.isFinite(deadline)||deadline<=now()||deadline>now()+IDLE_MS+60000))throw new Error('Invalid Cloud 2 sign-in duration.');
+  reset();bearer=value;rememberChoice=rememberDevice;rememberDeadline=rememberDevice?deadline:null;normalDeadline=!rememberDevice&&expiresAt!==null?deadline:null;
  }
- async function request(query,signal){await refreshSession(signal);return transport('request',{method:'POST',body:query,signal});}
- return {idempotentWrites:true,status,getSession:state,setBearer,clear(){epoch++;bearer=null;csrf=null;verified=null;refreshing=null;onSession(null);},
+ const request=(query,signal)=>transport('request',{method:'POST',body:query,signal});
+ return {idempotentWrites:true,status,getSession:state,setBearer,clear:reset,dispose(){eventTarget?.removeEventListener?.('storage',storageChanged);for(const type of activityEvents)eventTarget?.removeEventListener?.(type,trustedInput,{capture:true});reset({forget:false});},
   async read({query,signal}){const value=await request(query,signal);if(!value||!Object.hasOwn(value,'result'))throw problem('UNCONFIRMED','Cloud 2 read could not be confirmed.');return value.result;},
   submit:({operation,signal})=>request({operation_id:operation.operation_id,...operation.request},signal),
-  async receipt({operationId,signal}){await refreshSession(signal);try{return await transport('receipt?'+new URLSearchParams({operation_id:operationId}),{signal});}catch(error){if(error.status===404&&error.remoteCode==='UNKNOWN_OPERATION')return null;throw error;}},
-  async conflicts({signal,after}={}){await refreshSession(signal);return transport('conflicts'+(after?'?'+new URLSearchParams({after}):''),{signal});},
-  async cancel({operationId,reason,signal}){await refreshSession(signal);return transport('cancel',{method:'POST',body:{operation_id:operationId,reason},signal});},
+  async receipt({operationId,signal}){try{return await transport('receipt?'+new URLSearchParams({operation_id:operationId}),{signal});}catch(error){if(error.status===404&&error.remoteCode==='UNKNOWN_OPERATION')return null;throw error;}},
+  conflicts:({signal,after}={})=>transport('conflicts'+(after?'?'+new URLSearchParams({after}):''),{signal}),
+  cancel:({operationId,reason,signal})=>transport('cancel',{method:'POST',body:{operation_id:operationId,reason},signal}),
   activity:body=>transport('request',{method:'POST',body:{route:'rpc/record_app_access',method:'POST',body}}),
-  async sync({signal}={}){await refreshSession(signal);return transport('sync',{method:'POST',body:{},signal});},
-  async signOut(){const currentEpoch=epoch;try{if(verified||bearer)await transport('session/logout',{method:'POST',body:{}});}finally{if(currentEpoch===epoch){epoch++;bearer=null;csrf=null;verified=null;refreshing=null;onSession(null);}}}};
+  sync:({signal}={})=>transport('sync',{method:'POST',body:{},signal}),
+  async signOut(){const currentEpoch=epoch;try{if(verified||bearer)await transport('session/logout',{method:'POST',body:{}});}finally{if(currentEpoch===epoch)reset();}}};
 }
 
 export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},journal=null,uuid=()=>crypto.randomUUID(),primaryPolicy=false,sessionPolicy=false,getSessionCloud=()=>null,onSessionCloud=()=>{}}={}){
@@ -121,7 +165,7 @@ export function createCloudProvider({cloud1,cloud2,getContext,onChange=()=>{},jo
   if(!Object.hasOwn(receipt,'result'))throw problem('WRITE_UNCERTAIN','This write has no verified result. Check its operation before retrying.',{receipt});
   return receipt.result;
  }
- return {...bridge,request,cloud2};
+ return {...bridge,request,cloud2,dispose(){cloud2.dispose?.();bridge.dispose();}};
 }
 
 /** A clicked Connect action opens the NAS as a first-party login surface. */
@@ -138,8 +182,9 @@ export function openCloud2SignIn({url,window:browser=globalThis.window,crypto:cr
    try{
     check();
     if(value.type==='braintime-cloud2-auth-ready'&&Object.keys(value).length===2&&!enrolling){enrolling=true;const token=await getEnrollmentToken();check();if(reset&&!token)throw new Error('Sign in to Cloud 1 before resetting your Cloud 2 password.');if(token&&!finished){resetAuthorized=reset;popup.postMessage({type:'braintime-cloud2-enroll',state,cloud1Token:token,...(reset?{reset:true}:{})},base.origin);}}
-    else if(value.type==='braintime-cloud2-session'&&Object.keys(value).length===3&&typeof value.token==='string'){
-     if(finished)return;if(reset&&!resetAuthorized)throw new Error('Verify Cloud 1 before resetting your Cloud 2 password.');const result=await acceptSession(value.token);check();finish(null,result);
+    else if(value.type==='braintime-cloud2-session'&&[3,5].includes(Object.keys(value).length)&&Object.keys(value).every(key=>['type','state','token','rememberDevice','expiresAt'].includes(key))&&typeof value.token==='string'){
+     const remembered=Object.keys(value).length===5;if(remembered&&(typeof value.rememberDevice!=='boolean'||value.rememberDevice===true&&(!Number.isFinite(Date.parse(value.expiresAt))||Date.parse(value.expiresAt)<=Date.now()||Date.parse(value.expiresAt)>Date.now()+7*86400000+60000)||value.rememberDevice===false&&value.expiresAt!==null&&(!Number.isFinite(Date.parse(value.expiresAt))||Date.parse(value.expiresAt)<=Date.now()||Date.parse(value.expiresAt)>Date.now()+90*60000+60000)))throw new Error('Invalid Cloud 2 remembered sign-in.');
+     if(finished)return;if(reset&&!resetAuthorized)throw new Error('Verify Cloud 1 before resetting your Cloud 2 password.');const result=await acceptSession(value.token,{rememberDevice:remembered&&value.rememberDevice===true,expiresAt:remembered?value.expiresAt:null});check();finish(null,result);
     }
    }catch(error){finish(error);}
   };
