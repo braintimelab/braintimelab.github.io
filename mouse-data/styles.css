@@ -357,3 +357,7 @@
 .animal-card .colony-qr{margin-top:3mm!important}.animal-card .colony-qr-local{display:block;margin-top:3mm;font:8pt Arial,sans-serif;overflow-wrap:anywhere}.animal-card .colony-qr svg{display:block;max-width:none}.animal-card .colony-qr figcaption{margin-top:1mm}.colony-workbench input,.colony-workbench select{max-width:100%}
 @media(max-width:620px){.registration-memory .form-grid{grid-template-columns:1fr}.registration-memory .settings-actions .button{flex:1 1 140px}#main fieldset{min-width:0}#main video{max-width:100%}}
 .animal-card .card-heading span{white-space:normal;overflow-wrap:anywhere;text-align:right;max-width:58%}
+
+/* Keep parent identities and genotype evidence ahead of descendant links. */
+.family-parent-summary-heading{grid-column:1/-1}.family-parent-summary-heading h3,.family-ancestry-heading h3{margin:0;font-size:14px}.family-parent-summary-heading p,.family-ancestry-heading p{margin:6px 0 0}.family-parent-record{display:flex;align-items:baseline;width:100%;padding:8px 0}.family-parent-record+.family-parent-record{border-top:1px solid var(--line)}.family-parent-genotype{display:grid;gap:3px;flex-basis:100%;margin-top:5px}.family-parent-genotype>strong{font-size:14px;overflow-wrap:anywhere}.family-ancestry-heading{padding:16px 20px 0}.family-parent-summary .family-parent-heading>strong{font-size:13px}
+@media(max-width:620px){.family-ancestry-heading{padding:14px 14px 0}}
