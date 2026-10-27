@@ -361,3 +361,7 @@
 /* Keep parent identities and genotype evidence ahead of descendant links. */
 .family-parent-summary-heading{grid-column:1/-1}.family-parent-summary-heading h3,.family-ancestry-heading h3{margin:0;font-size:14px}.family-parent-summary-heading p,.family-ancestry-heading p{margin:6px 0 0}.family-parent-record{display:flex;align-items:baseline;width:100%;padding:8px 0}.family-parent-record+.family-parent-record{border-top:1px solid var(--line)}.family-parent-genotype{display:grid;gap:3px;flex-basis:100%;margin-top:5px}.family-parent-genotype>strong{font-size:14px;overflow-wrap:anywhere}.family-ancestry-heading{padding:16px 20px 0}.family-parent-summary .family-parent-heading>strong{font-size:13px}
 @media(max-width:620px){.family-ancestry-heading{padding:14px 14px 0}}
+
+/* Explicit sign-in duration choice; the default remains unchecked. */
+.remember-device{display:flex!important;align-items:center;gap:8px;font-size:13px;line-height:1.4;cursor:pointer}.remember-device input[type=checkbox]{flex:none;width:16px!important;min-height:16px;height:16px;margin:0;padding:0;accent-color:var(--accent)}
+.remember-help{margin:0;font-size:12px;line-height:1.4;color:var(--muted)}
