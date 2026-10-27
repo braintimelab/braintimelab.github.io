@@ -1,4 +1,6 @@
 import {createSourceReconciliation} from './source-reconciliation.js?v=183';
+import {createLineageRecoveryApply,LINEAGE_RECOVERY_POLICY} from './lineage-recovery-apply.js?v=199';
+import {runLineageRecoveryAnalysis} from './lineage-recovery-worker-client.js?v=199';
 import {prepareOwnerSourceTagReview} from './source-tag-review.js?v=183';
 import {validateSourceReconciliationRecord} from './source-import-validation.js?v=183';
 import {APP_PERMISSION_KEYS,validAppPermissions} from './app-access.js?v=175';
@@ -10,10 +12,14 @@ import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=174';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=174';
+import {createHistoricalSourceRegistration} from './historical-source-registration.js?v=199';
 import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=183';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=174';
 export {getDeferredManagedTables,getDeferredManagedEventTypes};
+let lineageRecoveryController=null,lineageControllerScope=null,lineageArchiveReadCache=null,lineageCapabilityProof=null;
+let historicalSourceRegistration=null,historicalSourceScope=null;
+function clearLineageRecoveryReadState(forgetController=false){lineageArchiveReadCache=null;lineageCapabilityProof=null;lineageRecoveryController?.clear();historicalSourceRegistration?.clear();if(forgetController){historicalSourceRegistration=null;historicalSourceScope=null;}if(forgetController){lineageRecoveryController=null;lineageControllerScope=null;}}
 
 const CONFIG_KEY='mouse-colony.cloud.v1',SESSION_KEY='mouse-colony.session.v1',MODE_KEY='mouse-colony.mode.v1',DEMO_KEY='mouse-colony.trusted-demo.v1';
 const CLOUD_CACHE_KEY='mouse-colony.cloud-cache-context.v1';
@@ -166,7 +172,7 @@ const setupProfileAllowed=p=>!!p?.member&&(p.eligible===true&&p.setup_required==
 const setupBlocksAccess=p=>setupProfileAllowed(p)&&p?.setup_blocks_access!==false;
 const mode=()=>getStorage('localStorage',MODE_KEY)==='cloud'?'cloud':'local';
 function setMode(value){setStorage('localStorage',MODE_KEY,value);}
-function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;managedReadCoverage=null;startupCacheSnapshot=null;}
+function invalidate(){synced=false;baseline=null;baselineIdentity=null;versions=new Map();deferredArchiveState=null;managedReadCoverage=null;startupCacheSnapshot=null;clearLineageRecoveryReadState();}
 function saveSession(s,{passive=false}={}){const before=session(),remembered=readRememberedSession(),sameUser=Boolean(s?.user?.id&&before?.user?.id===s.user.id);if(passive&&(!sameUser||!before?.access_token||(s.rememberDeviceExpiresAt?before.rememberDeviceExpiresAt!==s.rememberDeviceExpiresAt:before.rememberDeviceExpiresAt||before.idleSessionId!==s.idleSessionId)))return false;if(!s||!sameUser||s.passwordRecovery||pendingAccount(s)){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);if(s){s={...s};delete s.rememberDeviceExpiresAt;}}else if(before?.rememberDeviceExpiresAt&&remembered)s={...s,rememberDeviceExpiresAt:remembered.expiresAt};if(!sameUser){setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();}s=withDefaultIdle(s,sameUser?before:null);if(s?.rememberDeviceExpiresAt&&s.rememberDeviceExpiresAt<=Date.now()){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Your remembered sign-in expired. Sign in again.';return false;}if(s?.access_token&&!s.rememberDeviceExpiresAt&&s.idleExpiresAt<=Date.now()){setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Your session expired after 90 minutes without activity. Sign in again.';return false;}if(s&&sessionCloudPolicy)s={...s,sessionCloudId:sameUser&&SESSION_CLOUD_ID.test(before?.sessionCloudId||'')?before.sessionCloudId:SESSION_CLOUD_ID.test(s.sessionCloudId||'')?s.sessionCloudId:crypto.randomUUID()};else if(s&&sameUser&&before.sessionCloudId)s={...s,sessionCloudId:before.sessionCloudId};if(before?.user?.id!==s?.user?.id||Boolean(before?.access_token)!==Boolean(s?.access_token)){providerSessionEpoch++;verifiedIntentPolicy=null;cloud1SessionSuspended=false;}setStorage('sessionStorage',SESSION_KEY,s?JSON.stringify(s):null);if(s?.rememberDeviceExpiresAt&&!persistRememberedSession(s,remembered)){setStorage('localStorage',REMEMBERED_SESSION_KEY,null);setStorage('sessionStorage',SESSION_KEY,null);setStorage('sessionStorage',SESSION_CLOUD_KEY,null);clearDefaultIdle();statusMessage='Could not preserve your remembered sign-in. Sign in again.';return false;}}
 function sessionEpoch(){return String(providerSessionEpoch)+(sessionCloudPolicy?':'+(session()?.sessionCloudId||''):'');}
 function savedSessionCloud(){const c=configuration(),s=session(),r=readJSON('sessionStorage',SESSION_CLOUD_KEY);return sessionCloudPolicy&&c&&s?.user?.id&&SESSION_CLOUD_ID.test(s.sessionCloudId||'')&&r?.schemaVersion===1&&r.url===c.url&&r.colonyId===c.colonyId&&r.userId===s.user.id&&r.sessionCloudId===s.sessionCloudId&&['cloud1','cloud2'].includes(r.source)?r.source:null;}
@@ -403,7 +409,7 @@ async function cloud1Request(route,{method='GET',body,timeoutMs=30000}={}){
   if(!response.ok){const error=apiError(response,result);if(route==='rpc/get_managed_record_page'&&(response.status===404||result?.code==='PGRST202'))error.message='The current-record service is not available. Retry loading.';throw error;}return result;
 }
 function cloud2URL(){return configuration()?.url===PUBLIC_CONFIG.url&&configuration()?.colonyId===PUBLIC_CONFIG.colonyId?PUBLIC_CONFIG.cloud2Url||'':'';}
-function clearOperationalSession(){operationalProvider?.cloud2.clear();operationalProvider?.dispose();operationalProvider=null;operationalConfig=null;cloud2Identity=null;providerSource=null;providerRevision++;cloud2ConflictPage={rows:[],nextAfter:null,binding:null};}
+function clearOperationalSession(){operationalProvider?.cloud2.clear();operationalProvider?.dispose();operationalProvider=null;operationalConfig=null;cloud2Identity=null;providerSource=null;providerRevision++;cloud2ConflictPage={rows:[],nextAfter:null,binding:null};clearLineageRecoveryReadState(true);}
 function connectionChanged(state){
  // A transport interruption suspends editing, but is not an identity or data
  // change. Retain its baseline for a live-verified return to the same server.
@@ -529,6 +535,100 @@ export const previewSourceReconciliation=(raw,{onProgress}={})=>withSourceReconc
 export const applySourceReconciliation=({onProgress}={})=>withSourceReconciliation(controller=>controller.apply(),onProgress);
 export const verifySourceReconciliation=()=>withSourceReconciliation(controller=>controller.verify());
 export const retrySourceReconciliation=({onProgress}={})=>withSourceReconciliation(controller=>controller.retry(),onProgress);
+// A separate policy capability; the independently pinned historical importer
+// above retains its exact bindings and never accepts a generated plan.
+const LINEAGE_SOURCE_TABLES=['parent_observations','parent_links','litter_mice','mating_litters','mating_members','historical_observations'];
+export function getLineageRecoveryCapability(){
+ try{const context=sourceReconciliationContext(),enabled=lineageCapabilityProof?.context===stable(context)&&lineageCapabilityProof.enabled===true,verified=Boolean(synced&&baselineIdentity===syncIdentity());return {canAnalyze:true,canRegisterHistoricalSources:enabled,registrationReason:enabled?'':'The server source-registration guard has not been verified.',canApply:enabled&&verified,source:'cloud1',ownerOnly:true,policy:LINEAGE_RECOVERY_POLICY,reason:!enabled?lineageCapabilityProof?.reason||'The server recovery guard has not been verified.':!verified?'Load and verify the current shared records before applying recovery.':''};}
+ catch{return {canAnalyze:false,canRegisterHistoricalSources:false,registrationReason:'Sign in as an Owner on Cloud 1 to register historical evidence.',canApply:false,source:providerSource||null,ownerOnly:true,policy:LINEAGE_RECOVERY_POLICY,reason:'Sign in as an Owner on Cloud 1 to recover parents.'};}
+}
+async function lineageOwner(){
+ const context=await sourceReconciliationOwner();let value=null,reason='The server recovery guard is unavailable.';
+ try{value=await cloud1Request('rpc/get_parentage_recovery_capability',{method:'POST',body:{p_colony_id:context.colonyId}});}catch{/* Analysis may proceed with authorized full sources; mutation stays disabled. */}
+ checkSourceReconciliationContext(context);const enabled=value?.schema_version===1&&value.colony_id===context.colonyId&&value.policy===LINEAGE_RECOVERY_POLICY&&value.apply_enabled===true&&value.owner_only===true&&value.cloud1_only===true&&value.full_graph_guard===true&&value.registered_history_review===true&&value.source_registration_guard===true;
+ lineageCapabilityProof={context:stable(context),enabled,reason:enabled?'':reason};return context;
+}
+function lineageReadCheck(context,signal){checkSourceReconciliationContext(context);if(signal?.aborted)throw Object.assign(new Error('Parent-recovery analysis was cancelled.'),{name:'AbortError'});}
+async function lineageReadManaged(type,context,{signal,onProgress,eventType=null}={}){
+ const c=configuration(),check=()=>lineageReadCheck(context,signal),read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'}),rows=[],seen=new Set();let cursor=null,limit=250;
+ while(true){check();const result=await readCloudPage(size=>{
+  const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
+  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(eventType)query.set('payload->>event_type',`eq.${eventType}`);
+  return read(`entity_records?${query}`);
+ },limit,check);check();const page=result.page;limit=result.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('A complete parent-recovery record page is unavailable.');
+ for(const value of page){const row=checkedCloudRecord(value,type,c);if(seen.has(row.entity_id)||eventType&&row.payload.event_type!==eventType)throw new Error('The parent-recovery record cursor did not advance.');seen.add(row.entity_id);rows.push(row);}
+ if(rows.length>100000)throw new Error('Parent-recovery records exceed the bounded read limit.');onProgress?.({phase:'records',table:type,completed:rows.length});if(page.length<limit)break;cursor=page.at(-1).entity_id;
+ }
+ // Full identity/version scans include physically archived Mice, unlike the
+ // current-housing view. They guard the prospective graph's entire namespace.
+ const final=new Map();cursor=null;limit=1000;
+ while(true){check();const result=await readCloudPage(size=>{
+  const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
+  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(eventType)query.set('payload->>event_type',`eq.${eventType}`);return read(`entity_records?${query}`);
+ },limit,check);const page=result.page;limit=result.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('The parent-recovery version index is invalid.');for(const value of page){const row=checkedCloudRecord(value,type,c,false);if(final.has(row.entity_id))throw new Error('The parent-recovery version cursor did not advance.');final.set(row.entity_id,row);}if(page.length<limit)break;cursor=page.at(-1).entity_id;
+ }
+ if(rows.length!==final.size||rows.some(r=>final.get(r.entity_id)?.version!==r.version||final.get(r.entity_id)?.archived!==r.archived))throw new Error('Scientific records changed during parent-recovery loading. Analyze again.');check();return rows;
+}
+async function lineageRecoverySnapshot(context,{signal,onProgress}={}){
+ const check=()=>lineageReadCheck(context,signal),progress=value=>{check();try{onProgress?.(Object.freeze(value));}catch{/* Progress cannot change scientific qualification. */}};
+ check();const visibility=await refreshFeeVisibility({notify:false,cloudSource:'cloud1'});check();if(!visibility.owner||!visibility.source_archive_allowed)throw new Error('Complete Owner scientific and source access is required.');
+ const c=configuration(),read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'}),cache=lineageArchiveReadCache?.context===stable(context)?lineageArchiveReadCache:null;
+ const initialHead=await readArchiveHead(c,check,read);check();const sourceTables=[...LINEAGE_SOURCE_TABLES,...['lineage_source_revisions','lineage_source_observations','lineage_identity_bridges'].filter(t=>Object.hasOwn(initialHead.payload.archive_tables||{},t))];
+ const archive=await selectedArchive(c,check,(completed,details)=>progress({phase:'sources',completed,total:details.total}),cache,sourceTables,read);check();
+ const head=archive.find(r=>r.entity_id==='reconstruction');if(head?.payload?.archive_format!==ARCHIVE_MANIFEST_FORMAT)throw new Error('Versioned relationship source chunks are required for parent recovery.');
+ for(const table of LINEAGE_SOURCE_TABLES)if(!Object.hasOwn(head.payload.archive_tables||{},table))throw new Error(`The ${table} relationship source table is unavailable.`);
+ const decoded=await decodeArchive(archive,{tables:sourceTables});check();const chunks=new Map(archive.filter(isArchiveChunk).map(r=>[r.entity_id,r]));
+ const archiveRowRefs=Object.fromEntries(sourceTables.map(table=>[table,head.payload.archive_tables[table].chunk_ids.flatMap(id=>{const r=chunks.get(id);if(!r||r.payload.table!==table)throw new Error('A relationship chunk is missing from its current manifest.');return r.payload.rows.map((_,row_index)=>({kind:'archive_row',table,chunk_id:id,version:r.version,row_index}));})]));
+ const readOptions={signal,onProgress:progress},mice=await lineageReadManaged('mice',context,readOptions),litters=await lineageReadManaged('litters',context,readOptions),matings=await lineageReadManaged('matings',context,readOptions),events=await lineageReadManaged('husbandry_events',context,{...readOptions,eventType:'source_reconciliation_batch'});check();
+ // Recheck Mice after the source/litter reads; the server repeats the complete
+ // version fingerprint under its colony lock at the actual atomic commit.
+ const index=await managedVersionIndex('mice',c,check,read);check();if(index.size!==mice.length||mice.some(r=>index.get(r.entity_id)?.version!==r.version||index.get(r.entity_id)?.archived!==r.archived))throw new Error('The parentage graph changed during analysis. Analyze again.');
+ const finalHead=await readArchiveHead(c,check,read);check();if(finalHead.version!==head.version||stable(finalHead.payload)!==stable(head.payload))throw new Error('Relationship sources changed during analysis. Analyze again.');
+ const records=[...mice,...litters,...matings,...events],tables={...decoded.tables};for(const [type,rows]of [['mice',mice],['litters',litters],['matings',matings],['husbandry_events',events]])tables[type]=rows.map(r=>({...clone(r.payload),...(r.archived?{archived:true}:{})}));
+ const managedRecordRefs=Object.fromEntries(['mice','litters','matings','husbandry_events'].map(type=>[type,Object.fromEntries(records.filter(r=>r.entity_type===type).map(r=>[r.entity_id,{kind:'managed_record',entity_type:type,entity_id:r.entity_id,version:r.version}]))]));
+ lineageArchiveReadCache={context:stable(context),records:new Map(archive.map(r=>[recordKey(r),r])),versions:new Map(archive.map(r=>[recordKey(r),r.version]))};
+ return {colonyId:context.colonyId,readContext:clone(context),mice,records,archiveManifest:head,archiveChunks:[...chunks.values()],dataset:{schema_version:decoded.schema_version,sources:clone(decoded.sources||[]),tables,source_archive_deferred:await deferredMarker(head,sourceTables)},engineOptions:{fullEvidence:true,archiveRowRefs,managedRecordRefs,archiveManifestRef:{kind:'managed_record',entity_type:'archive',entity_id:'reconstruction',version:head.version}}};
+}
+function lineageController(){
+ const scope=stable(sourceReconciliationContext());if(lineageControllerScope!==scope){lineageRecoveryController=null;lineageControllerScope=scope;}
+ if(!lineageRecoveryController)lineageRecoveryController=createLineageRecoveryApply({buildReport:(snapshot,options={})=>runLineageRecoveryAnalysis(snapshot.dataset,{...snapshot.engineOptions,scope:options.scope||'stock'},{signal:options.signal,onProgress:options.onProgress,isCurrent:()=>{try{checkSourceReconciliationContext(snapshot.readContext);return true;}catch{return false;}}}),io:{
+  verifyOwner:lineageOwner,checkContext:checkSourceReconciliationContext,readSnapshot:lineageRecoverySnapshot,
+  async recoverPending(context){checkSourceReconciliationContext(context);const service=provider(),pending=service.getState().operations.filter(r=>r.source==='cloud1'&&['submitting','uncertain','queued'].includes(r.outcome));if(pending.length>50)throw new Error('Review the pending Cloud1 operations before starting parent recovery.');let found=null;for(const entry of pending){const operation=await service.restoreOperation(entry.operationId,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);if(!operation||operation.request?.body?.p_changes?.some(r=>r.entity_type==='mice'||r.entity_type==='archive')&&!operation.request.body.p_changes.some(r=>r.payload?.parentage_policy===LINEAGE_RECOVERY_POLICY))throw Object.assign(new Error('An earlier Cloud 1 save must be verified in Clouds before starting parent recovery.'),{lineageRecoveryBlocked:true,operationId:entry.operationId});if(!operation.request?.body?.p_changes?.some(r=>r.payload?.parentage_policy===LINEAGE_RECOVERY_POLICY))continue;if(found)throw new Error('Several parent-recovery operations require receipt review.');const receipt=await service.verify(entry.operationId);checkSourceReconciliationContext(context);found={operation,receipt};}return found;},
+  async submit(operation,context){try{checkSourceReconciliationContext(context);await lineageOwner();checkSourceReconciliationContext(context);if(!getLineageRecoveryCapability().canApply)throw new Error('The verified server recovery guard is required before applying.');}catch(error){error.lineageRecoveryNotSubmitted=true;throw error;}const result=await provider().submit(operation,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);return result;},
+  async verify(id,context){checkSourceReconciliationContext(context);const result=await provider().verify(id);checkSourceReconciliationContext(context);return result;},
+  async retry(id,context){checkSourceReconciliationContext(context);await lineageOwner();checkSourceReconciliationContext(context);if(!getLineageRecoveryCapability().canApply)throw new Error('The verified server recovery guard is required before retrying.');const prior=provider().getState().operations.find(r=>r.operationId===id);if(prior?.source!=='cloud1')throw new Error('The original Cloud1 recovery command is unavailable. Verify its receipt.');const result=await provider().retry(id);checkSourceReconciliationContext(context);return result;},
+  invalidate(){invalidate();statusMessage='Parent recovery was confirmed. Pull fresh scientific records before editing.';}
+ }});return lineageRecoveryController;
+}
+async function withLineageRecovery(run){const scope=stable({generation:authGeneration,context:exportContext()});if(activeDatasetSaves.has(scope))throw new Error('Another save or source load is in progress.');activeDatasetSaves.add(scope);try{return await run(lineageController());}finally{activeDatasetSaves.delete(scope);}}
+export function getPendingLineageRecovery(){try{return lineageControllerScope===stable(sourceReconciliationContext())?lineageRecoveryController?.getPendingOutcome()||null:null;}catch{return null;}}
+export function clearLineageRecovery(){clearLineageRecoveryReadState();}
+export const restoreLineageRecoveryOutcome=()=>withLineageRecovery(controller=>controller.restorePending());
+export const analyzeLineageRecovery=options=>withLineageRecovery(controller=>controller.analyze(options));
+export const previewLineageRecovery=options=>withLineageRecovery(controller=>controller.preview({...options,analysisId:options?.report?.analysisId||options?.analysisId}));
+export const applyLineageRecovery=options=>withLineageRecovery(controller=>controller.apply(options));
+export const verifyLineageRecovery=()=>withLineageRecovery(controller=>controller.verify());
+export const retryLineageRecovery=options=>withLineageRecovery(controller=>controller.retry(options));
+/* A separate source-only importer. It does not call the biological apply controller. */
+async function historicalSourceOwner(){const context=await lineageOwner();checkSourceReconciliationContext(context);if(!getLineageRecoveryCapability().canRegisterHistoricalSources)throw new Error('The verified server source-registration guard is required before loading historical evidence.');const policy=await refreshFeeVisibility({notify:false,cloudSource:'cloud1'});checkSourceReconciliationContext(context);if(!policy.owner||!policy.source_archive_allowed)throw new Error('Sign in as an Owner on Cloud 1 to register historical evidence.');return context;}
+async function historicalSourceSnapshot(context,{signal,onProgress}={}){const check=()=>lineageReadCheck(context,signal),c=configuration(),read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'});check();const records=await selectedArchive(c,check,(completed,details)=>{try{onProgress?.({phase:'sources',completed,total:details.total});}catch{}},null,null,read);check();const known=new Set(records.map(r=>r.entity_id)),orphans=(records.archive_versions||[]).map(([key])=>key.slice(8)).filter(id=>!known.has(id));if(records.length+orphans.length>100000)throw new Error('The complete source inventory exceeds its bounded read limit.');for(let offset=0;offset<orphans.length;offset+=3){const ids=orphans.slice(offset,offset+3),q=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',entity_id:`in.(${ids.join(',')})`,limit:String(ids.length)}),page=await read(`entity_records?${q}`);check();if(!Array.isArray(page)||page.length!==ids.length)throw new Error('The complete source inventory is unavailable.');for(const value of page){const r=checkedCloudRecord(value,'archive',c);if(!ids.includes(r.entity_id)||known.has(r.entity_id))throw new Error('The source inventory contains duplicate or unrelated records.');known.add(r.entity_id);records.push(r);}}const index=await managedVersionIndex('archive',c,check,read);check();if(index.size!==records.length||records.some(r=>index.get(r.entity_id)?.version!==r.version||index.get(r.entity_id)?.archived!==r.archived))throw new Error('The full source inventory changed during loading. Preview again.');await decodeArchive(records);check();return {colonyId:c.colonyId,archiveRecords:records};}
+function historicalSourceController(){const scope=stable(sourceReconciliationContext());if(historicalSourceScope!==scope){historicalSourceRegistration=null;historicalSourceScope=scope;}if(!historicalSourceRegistration)historicalSourceRegistration=createHistoricalSourceRegistration({io:{
+ verifyOwner:historicalSourceOwner,verifyOwnerRead:lineageOwner,checkContext:checkSourceReconciliationContext,readSnapshot:historicalSourceSnapshot,
+ async recoverPending(context){checkSourceReconciliationContext(context);const service=provider(),entries=service.getState().operations.filter(r=>r.source==='cloud1'&&['submitting','uncertain','queued','conflict','rejected'].includes(r.outcome));if(entries.length>1)throw new Error('Review pending Cloud 1 operations in Clouds before loading historical evidence.');if(!entries.length)return null;const entry=entries[0],operation=await service.restoreOperation(entry.operationId,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);return {operation:null,operationId:entry.operationId,phase:'unknown'};},
+ async requireNoPending(context){checkSourceReconciliationContext(context);const service=provider();for(const entry of service.getState().operations.filter(r=>r.source==='cloud1'&&['submitting','uncertain','queued','conflict','rejected'].includes(r.outcome))){const operation=await service.restoreOperation(entry.operationId,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);if(!operation||operation.request?.route==='rpc/save_records')throw Object.assign(new Error('Verify the earlier Cloud 1 save in Clouds before loading historical evidence.'),{historicalSourceBlocked:true,operationId:entry.operationId});}},
+ async submit(operation,context){try{checkSourceReconciliationContext(context);await historicalSourceOwner();checkSourceReconciliationContext(context);}catch(error){error.historicalSourceNotSubmitted=true;throw error;}const result=await provider().submit(operation,{requiredSource:'cloud1'});checkSourceReconciliationContext(context);return result;},
+ async verify(id,context){checkSourceReconciliationContext(context);const result=await provider().verify(id);checkSourceReconciliationContext(context);return result;},
+ async retry(id,context){checkSourceReconciliationContext(context);await historicalSourceOwner();checkSourceReconciliationContext(context);const result=await provider().retry(id);checkSourceReconciliationContext(context);return result;},
+ onApplied(){invalidate();statusMessage='Historical source evidence was registered. Reload parent recovery to review the evidence; no parents were changed.';}
+ }});return historicalSourceRegistration;}
+async function withHistoricalSourceRegistration(run){const scope=stable({generation:authGeneration,context:exportContext()});if(activeDatasetSaves.has(scope))throw new Error('Another save or source load is in progress.');activeDatasetSaves.add(scope);try{return await run(historicalSourceController());}finally{activeDatasetSaves.delete(scope);}}
+export function getPendingHistoricalSourceRegistration(){try{return historicalSourceScope===stable(sourceReconciliationContext())?historicalSourceRegistration?.getPending()||null:null;}catch{return null;}}
+export function clearHistoricalSourceRegistration(){historicalSourceRegistration?.clear();}
+export const restoreHistoricalSourceRegistrationOutcome=()=>withHistoricalSourceRegistration(controller=>controller.restorePending());
+export const previewHistoricalSourceRegistration=options=>withHistoricalSourceRegistration(controller=>controller.preview(options));
+export const applyHistoricalSourceRegistration=options=>withHistoricalSourceRegistration(controller=>controller.apply(options));
+export const verifyHistoricalSourceRegistration=()=>withHistoricalSourceRegistration(controller=>controller.verify());
+export const retryHistoricalSourceRegistration=options=>withHistoricalSourceRegistration(controller=>controller.retry(options));
 export async function syncCloud2(){const service=provider();if(!service)throw new Error('Cloud 2 is not configured.');await service.cloud2.sync();return service.refresh();}
 function adoptCloud2Identity(identity){
  assertGuestAvailability(identity);
@@ -1169,18 +1269,18 @@ async function incrementalManaged(type,c,check,reuse,restricted=false,read=reque
 // Only the manifest-selected chunks are needed to reconstruct a workspace.
 // Keep a small version index for old immutable chunks so a later archive edit
 // can safely reuse a previously staged chunk without blindly recreating it.
-async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
+async function selectedArchive(c,check,onLoaded,reuse=null,tables=null,read=request){
   const fields='colony_id,entity_type,entity_id,payload,version,archived';
   const query=(select,limit,filter)=>new URLSearchParams({select,colony_id:`eq.${c.colonyId}`,entity_type:'eq.archive',order:'entity_id.asc',limit:String(limit),...(filter?{entity_id:filter}:{})});
   const valid=(row,payload=false)=>{
     if(!row||typeof row.colony_id!=='string'||row.colony_id.toLowerCase()!==c.colonyId.toLowerCase()||row.entity_type!=='archive'||typeof row.entity_id!=='string'||!(row.entity_id==='reconstruction'||/^chunk:[a-f0-9]{64}$/.test(row.entity_id))||!Number.isSafeInteger(row.version)||row.version<1||typeof row.archived!=='boolean'||payload&&(!row.payload||typeof row.payload!=='object'||Array.isArray(row.payload)))throw new Error('Cloud page contains an invalid or unrelated archive record.');
     return row;
   };
-  let headPage=(await readCloudPage(size=>request(`entity_records?${query(reuse?'colony_id,entity_type,entity_id,version,archived':fields,size,'eq.reconstruction')}`),1,check)).page;
+  let headPage=(await readCloudPage(size=>read(`entity_records?${query(reuse?'colony_id,entity_type,entity_id,version,archived':fields,size,'eq.reconstruction')}`),1,check)).page;
   if(!Array.isArray(headPage)||headPage.length!==1)throw new Error('Cloud import is incomplete: its reconstruction manifest is missing or duplicated. Finish or retry the initial upload before pulling.');
   const headIndex=valid(headPage[0],!reuse);let head=reuse?reusableRecord(reuse,headIndex,c):headIndex;const headReused=Boolean(reuse&&head);
   if(!head){
-    headPage=(await readCloudPage(size=>request(`entity_records?${query(fields,size,'eq.reconstruction')}`),1,check)).page;
+    headPage=(await readCloudPage(size=>read(`entity_records?${query(fields,size,'eq.reconstruction')}`),1,check)).page;
     if(!Array.isArray(headPage)||headPage.length!==1)throw new Error('The reconstruction manifest changed during loading. Pull again.');
     head=valid(headPage[0],true);if(head.version!==headIndex.version||head.archived!==headIndex.archived)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   }
@@ -1200,7 +1300,7 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   onLoaded(1,{total,reused:Number(headReused)});
   const indexed=new Map();let cursor=null,limit=1000;
   while(true){
-    const loaded=await readCloudPage(size=>request(`entity_records?${query('colony_id,entity_type,entity_id,version,archived',size,cursor===null?null:`gt.${cursor}`)}`),limit,check);const page=loaded.page;limit=loaded.limit;
+    const loaded=await readCloudPage(size=>read(`entity_records?${query('colony_id,entity_type,entity_id,version,archived',size,cursor===null?null:`gt.${cursor}`)}`),limit,check);const page=loaded.page;limit=loaded.limit;
     if(!Array.isArray(page)||page.length>limit)throw new Error('The archive version index is invalid.');
     for(const row of page){valid(row);if(indexed.has(row.entity_id))throw new Error('The archive version cursor did not advance.');indexed.set(row.entity_id,row);}
     if(page.length<limit)break;cursor=page.at(-1).entity_id;
@@ -1215,7 +1315,7 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   async function worker(){
     try{while(true){active();const batch=batches[nextBatch++];if(!batch)return;let offset=0,size=batch.length;
       while(offset<batch.length){
-        const loaded=await readCloudPage(n=>request(`entity_records?${query(fields,n,`in.(${batch.slice(offset,offset+n).join(',')})`)}`),Math.min(size,batch.length-offset),active);size=loaded.limit;
+        const loaded=await readCloudPage(n=>read(`entity_records?${query(fields,n,`in.(${batch.slice(offset,offset+n).join(',')})`)}`),Math.min(size,batch.length-offset),active);size=loaded.limit;
         const wanted=batch.slice(offset,offset+size),page=loaded.page,seen=new Set();
         if(!Array.isArray(page)||page.length!==wanted.length)throw new Error('A referenced archive chunk is missing; pull was not saved.');
         for(const row of page){valid(row,true);if(!wanted.includes(row.entity_id)||seen.has(row.entity_id)||row.archived||row.version!==indexed.get(row.entity_id)?.version)throw new Error('A referenced archive chunk is invalid or changed; pull was not saved.');seen.add(row.entity_id);chunks.set(row.entity_id,row);}
@@ -1226,7 +1326,7 @@ async function selectedArchive(c,check,onLoaded,reuse=null,tables=null){
   // Three small requests at a time bound load and memory while avoiding one
   // serial network round trip for every three archive blocks.
   await Promise.all(Array.from({length:Math.min(3,batches.length)},()=>worker()));check();
-  const finalPage=(await readCloudPage(size=>request(`entity_records?${query('colony_id,entity_type,entity_id,version,archived',size,'eq.reconstruction')}`),1,check)).page;
+  const finalPage=(await readCloudPage(size=>read(`entity_records?${query('colony_id,entity_type,entity_id,version,archived',size,'eq.reconstruction')}`),1,check)).page;
   if(!Array.isArray(finalPage)||finalPage.length!==1)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const finalHead=valid(finalPage[0]);if(finalHead.entity_id!=='reconstruction'||finalHead.archived||finalHead.version!==head.version)throw new Error('The reconstruction manifest changed during loading. Pull again.');
   const result=[head,...ordered.map(id=>chunks.get(id))];result.reused=Number(headReused)+ordered.length-needed.length;result.archive_versions=[...indexed.values()].map(row=>[`archive:${row.entity_id}`,row.version]);return result;

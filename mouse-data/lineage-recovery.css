@@ -1,0 +1,44 @@
+#lineage-recovery-dialog {
+  width: min(1000px, calc(100vw - 24px));
+  max-width: 1000px;
+  overflow: auto;
+}
+#lineage-recovery-dialog > .dialog-content {
+  padding: 0;
+  max-height: calc(100dvh - 40px);
+}
+.lineage-recovery-panel { min-width: 0; }
+.lineage-recovery-panel > .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface);
+}
+.lineage-recovery-panel .actions,
+.lineage-recovery-panel .settings-actions,
+.lineage-recovery-panel .toolbar { flex-wrap: wrap; gap: 10px; }
+.lineage-recovery-panel label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+.lineage-recovery-panel .toolbar label { flex-wrap: wrap; }
+.lineage-recovery-panel .button { min-height: 40px; white-space: normal; }
+.lineage-recovery-panel input[type="checkbox"] { width: 18px; height: 18px; flex: none; }
+.lineage-recovery-panel input[type="search"] { width: min(330px, 100%); }
+.lineage-recovery-panel select { max-width: 100%; }
+.lineage-recovery-panel .table-scroll { overflow-x: auto; max-width: 100%; }
+.lineage-recovery-panel th { text-align: left; }
+.lineage-recovery-panel p,
+.lineage-recovery-panel code,
+.lineage-recovery-panel .record-link { overflow-wrap: anywhere; }
+.lineage-recovery-panel details { margin-top: 12px; }
+.lineage-recovery-panel summary { cursor: pointer; min-height: 40px; padding: 8px 0; }
+.lineage-recovery-panel progress { width: 100%; }
+@media (max-width: 620px) {
+  #lineage-recovery-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 20px); }
+  .lineage-recovery-panel > .panel-head { padding: 14px; }
+  .lineage-recovery-panel > .panel-body { padding: 14px; }
+  .lineage-recovery-panel .actions .button { flex: 1 1 140px; }
+  .lineage-recovery-panel .toolbar label { width: 100%; }
+}
