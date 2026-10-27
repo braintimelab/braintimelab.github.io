@@ -246,6 +246,7 @@ const icons = {
 };
 const titles = {overview:'Animal Overview',today:'Today',workbench:'Batch workbench',genotyping:'Genotype results',care:'Parents & foster care',scan:'Scan a card',mice:'Mice',strains:'Strains',matings:'Breeding',litters:'Litters',cages:'Cages',family:'Family tree',planner:'Planning',experiments:'Experiments',iacuc:'IACUC',housing:'Housing & light',locobox:'Locobox',cryo:'Cryopreservation',fees:'LAC fees',review:'Review',brainbot:'Braintime Bot (BB)',archive:'Source archive',settings:'Settings'};
 let accessLogsCleanup=null,labUserDirectoryRequest=0,historyLoadState=null,historyLoadFailure=null,managedLoadState=null,managedLoadFailure=null;
+let managedRetryPending=false;
 const managedViewKey=()=>JSON.stringify([route,detail?.type,detail?.id,cageDate]);
 function pendingManaged(requirements){return pendingManagedNeeds(requirements,{tables:store.getDeferredManagedTables?.(dataset)||[],eventTypes:store.getDeferredManagedEventTypes?.(dataset,{eventTypes:requirements.eventTypes})||[]});}
 async function loadManagedRecords(requirements,{expectedView=null}={}){
@@ -276,11 +277,18 @@ function managedRouteGate(){
  return true;
 }
 async function retryManagedRecords(){
+ if(managedRetryPending)return;
  if(historyDraftOpen()){showToast('Save or discard changes before loading more records.',true);return;}
- if(managedLoadState||historyLoadState||startupLoading||cachedPreview)return;
- managedLoadFailure=null;
- if(cloud.mode==='cloud'&&!cloudReady){await loadSharedColony({preserveView:true,confirm:false,throwOnError:true});return;}
- render();
+ if(managedLoadState||historyLoadState||manualPullPending||startupPreparing)return;
+ managedRetryPending=true;
+ try{
+  managedLoadFailure=null;
+  // Restart only the cancellable opening read. It keeps the signed-in account
+  // and cached preview; stale opening work cannot adopt a new edit baseline.
+  if(cachedPreview||startupLoading){await start();return;}
+  if(cloud.mode==='cloud'&&!cloudReady){await loadSharedColony({preserveView:true,confirm:false,throwOnError:true});return;}
+  render();
+ }finally{managedRetryPending=false;}
 }
 const deferredHistoryTables=()=>store.getDeferredHistoryTables?.(dataset)||[];
 const historyViewKey=()=>JSON.stringify([route,detail?.type,detail?.id,archiveTable]);
