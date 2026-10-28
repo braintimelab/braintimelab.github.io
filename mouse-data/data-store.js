@@ -550,24 +550,30 @@ async function lineageOwner(){
 }
 function lineageReadCheck(context,signal){checkSourceReconciliationContext(context);if(signal?.aborted)throw Object.assign(new Error('Parent-recovery analysis was cancelled.'),{name:'AbortError'});}
 async function lineageReadManaged(type,context,{signal,onProgress,eventType=null}={}){
+ const scanAllEvents=type==='husbandry_events'&&eventType==='source_reconciliation_batch';
+ const queryEventType=scanAllEvents?null:eventType;
  const c=configuration(),check=()=>lineageReadCheck(context,signal),read=(route,options={})=>request(route,{...options,cloudSource:'cloud1'}),rows=[],seen=new Set();let cursor=null,limit=250;
  while(true){check();const result=await readCloudPage(size=>{
   const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
-  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(eventType)query.set('payload->>event_type',`eq.${eventType}`);
+  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(queryEventType)query.set('payload->>event_type',`eq.${queryEventType}`);
   return read(`entity_records?${query}`);
  },limit,check);check();const page=result.page;limit=result.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('A complete parent-recovery record page is unavailable.');
- for(const value of page){const row=checkedCloudRecord(value,type,c);if(seen.has(row.entity_id)||eventType&&row.payload.event_type!==eventType)throw new Error('The parent-recovery record cursor did not advance.');seen.add(row.entity_id);rows.push(row);}
- if(rows.length>100000)throw new Error('Parent-recovery records exceed the bounded read limit.');onProgress?.({phase:'records',table:type,completed:rows.length});if(page.length<limit)break;cursor=page.at(-1).entity_id;
+ for(const value of page){const row=checkedCloudRecord(value,type,c);if(seen.has(row.entity_id)||queryEventType&&row.payload.event_type!==queryEventType)throw new Error('The parent-recovery record cursor did not advance.');seen.add(row.entity_id);rows.push(row);}
+ if(rows.length>100000)throw new Error('Parent-recovery records exceed the bounded read limit.');onProgress?.({phase:'records',stage:'payload',table:type,completed:rows.length});if(scanAllEvents?page.length===0:page.length<limit)break;cursor=page.at(-1).entity_id;
  }
  // Full identity/version scans include physically archived Mice, unlike the
  // current-housing view. They guard the prospective graph's entire namespace.
  const final=new Map();cursor=null;limit=1000;
  while(true){check();const result=await readCloudPage(size=>{
   const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
-  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(eventType)query.set('payload->>event_type',`eq.${eventType}`);return read(`entity_records?${query}`);
- },limit,check);const page=result.page;limit=result.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('The parent-recovery version index is invalid.');for(const value of page){const row=checkedCloudRecord(value,type,c,false);if(final.has(row.entity_id))throw new Error('The parent-recovery version cursor did not advance.');final.set(row.entity_id,row);}if(page.length<limit)break;cursor=page.at(-1).entity_id;
+  if(cursor!==null)query.set('entity_id',`gt.${cursor}`);if(queryEventType)query.set('payload->>event_type',`eq.${queryEventType}`);return read(`entity_records?${query}`);
+ },limit,check);const page=result.page;limit=result.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('The parent-recovery version index is invalid.');for(const value of page){const row=checkedCloudRecord(value,type,c,false);if(final.has(row.entity_id))throw new Error('The parent-recovery version cursor did not advance.');final.set(row.entity_id,row);}if(scanAllEvents&&final.size>100000)throw new Error('Parent-recovery records exceed the bounded read limit.');if(scanAllEvents)onProgress?.({phase:'records',stage:'versions',table:type,completed:final.size});if(scanAllEvents?page.length===0:page.length<limit)break;cursor=page.at(-1).entity_id;
  }
- if(rows.length!==final.size||rows.some(r=>final.get(r.entity_id)?.version!==r.version||final.get(r.entity_id)?.archived!==r.archived))throw new Error('Scientific records changed during parent-recovery loading. Analyze again.');check();return rows;
+ if(rows.length!==final.size||rows.some(r=>final.get(r.entity_id)?.version!==r.version||final.get(r.entity_id)?.archived!==r.archived))throw new Error('Scientific records changed during parent-recovery loading. Analyze again.');check();
+ // The public view's JSON predicate can time out before LIMIT is applied.
+ // Verify every bounded husbandry row and its full version index first, then
+ // select the typed audit events locally. Unrelated rows are never engine evidence.
+ return scanAllEvents?rows.filter(r=>r.payload.event_type===eventType):rows;
 }
 async function lineageRecoverySnapshot(context,{signal,onProgress}={}){
  const check=()=>lineageReadCheck(context,signal),progress=value=>{check();try{onProgress?.(Object.freeze(value));}catch{/* Progress cannot change scientific qualification. */}};
