@@ -13,6 +13,8 @@ import { validateManagerPermissions } from './permissions.js?v=100';
 import { normalizeDataset, ID_FIELDS } from './model.js?v=174';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=174';
 import {createHistoricalSourceRegistration} from './historical-source-registration.js?v=199';
+import {appAllows as familyPedigreeAllowed} from './app-access.js?v=175';
+import {readFamilyPedigree} from './family-pedigree-read.js?v=201';
 import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=183';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=174';
@@ -341,6 +343,40 @@ export function getCloudStatus(){
   const connected=activeCloud==='cloud1'?'Cloud 1 connected.':activeCloud==='cloud2'?'Cloud 2 connected.':'No verified cloud data source is available.';
   const message=/^Cloud(?: [12])? connected\./.test(statusMessage)?(synced?statusMessage.replace(/^Cloud(?: [12])? connected\./,connected):'Pull cloud data before editing.'):statusMessage;
   return {configured:Boolean(c),signedIn:hasLabSession(s),rememberDevice:Boolean(s?.rememberDeviceExpiresAt),rememberDeviceExpiresAt:s?.rememberDeviceExpiresAt??null,sessionIdleExpiresAt:s?.rememberDeviceExpiresAt?null:s?.idleExpiresAt??null,userId:s?.user?.id??null,sessionEpoch:sessionEpoch(),passwordRecovery:s?.passwordRecovery===true,passwordRecoveryUpdated:s?.passwordRecovery===true&&s?.passwordRecoveryUpdated===true,email:s?.user?.email??null,name:typeof s?.user?.user_metadata?.full_name==='string'?s.user.user_metadata.full_name:null,pendingEmail,message:message||(mode()==='cloud'&&!synced?'Pull cloud data before editing.':mode()==='cloud'?connected:'Changes are saved on this device.'),mode:mode(),guestAccessStartsOn:s?.guestAccessStartsOn??null,guestAccessEndsOn:s?.guestAccessEndsOn??null,guestAvailability:guestAvailabilityStatus(s),recoverySource:providerSource,readyForEdits:guestAvailabilityStatus(s)==='active'&&s?.passwordRecovery!==true&&!pendingAccount(s)&&(mode()==='local'||synced&&baselineIdentity===syncIdentity()&&(!connections||!!connections.active)&&(activeCloud!=='cloud1'||!cloud1SessionSuspended)),colonyId:c?.colonyId??null,role:s?.role??null,guestLevel:s?.guestLevel??null,guestPermissions:s?.guestPermissions??{},permissions:s?.permissions??{},...appPermissionFields(s),username:s?.username??null,setupRequired:s?.setupRequired===true,exportLevel:s?.role==='owner'?'max':s?.exportLevel??null,url:c?.url??'',anonKey:c?.anonKey??'',historyPath:c?.historyPath??null,activeCloud,cloud2Configured:!!cloud2URL(),cloudConnections:connections};
+}
+// A Family projection is an independent read-only side snapshot. It never
+// enters baseline/versions, local storage, saves, exports or source coverage.
+export function getFamilyPedigreeReadContext(){
+ const s=session(),c=configuration(),status=getCloudStatus(),source=status.activeCloud;
+ const unavailable=reason=>Object.freeze({available:false,source:source||null,colonyId:c?.colonyId??null,contextKey:null,reason});
+ if(!c||status.mode!=='cloud'||!s?.access_token||!s?.user?.id||!status.signedIn||s.passwordRecovery||pendingAccount(s)||!['owner','manager','editor','viewer'].includes(s.role)||guestAvailabilityStatus(s)!=='active')return unavailable('Sign in with active Family read access to open the full pedigree.');
+ if(!validAppPermissions('mouse',appPermissionFields(s).mousePermissions)||s.guestLevel!=null&&(!isGuest(s)||validateGuestPermissions(s.guestPermissions??{}).length))return unavailable('Family permissions could not be verified. Reconnect to Cloud 1.');
+ if(!familyPedigreeAllowed({...s,...appPermissionFields(s)},'mouse.family.read'))return unavailable('Family read access is not enabled for this account.');
+ if(source!=='cloud1'||cloud1SessionSuspended)return unavailable(source==='cloud2'?'Full pedigree history is currently available on Cloud 1. This Cloud 2 view has not been expanded.':'Reconnect to Cloud 1 to open the full pedigree.');
+ const contextKey=stable({generation:authGeneration,sessionEpoch:sessionEpoch(),providerRevision,retainedSource:providerSource,source,url:c.url,colonyId:c.colonyId,userId:s.user.id,role:s.role,mousePermissions:appPermissionFields(s).mousePermissions,guestLevel:s.guestLevel??null,guestPermissions:s.guestPermissions??{},guestStarts:s.guestAccessStartsOn??null,guestEnds:s.guestAccessEndsOn??null,policy:verifiedIntentPolicy?.policyKey??null});
+ return Object.freeze({available:true,source:'cloud1',colonyId:c.colonyId,contextKey,reason:null});
+}
+export async function readFamilyPedigreeSnapshot({signal,onProgress}={}){
+ const opening=getFamilyPedigreeReadContext();
+ const unavailable=message=>Object.assign(new Error(message),{code:'FAMILY_PEDIGREE_UNAVAILABLE',familyPedigreeUnavailable:true});
+ if(!opening.available)throw unavailable(opening.reason);
+ const current=()=>getFamilyPedigreeReadContext().contextKey;
+ const check=()=>{
+  if(signal?.aborted)throw Object.assign(new Error('Family loading was cancelled.'),{name:'AbortError',code:'FAMILY_PEDIGREE_ABORTED'});
+  if(current()!==opening.contextKey)throw Object.assign(new Error('The account, colony, permissions or source changed during Family loading.'),{code:'FAMILY_PEDIGREE_CONTEXT_CHANGED'});
+ };
+ return readFamilyPedigree({colonyId:opening.colonyId,signal,onProgress,getContext:current,
+  request:async params=>{
+   check();
+   try{
+    const value=await request('rpc/get_family_pedigree_page',{method:'POST',body:params,cloudSource:'cloud1',canCommit:()=>!signal?.aborted&&current()===opening.contextKey});
+    check();return value;
+   }catch(error){
+    check();if(error.status===404)throw unavailable('The full-pedigree read service is not available on Cloud 1 yet. Existing Family records are still available.');
+    throw error;
+   }
+  }
+ });
 }
 async function responseJSON(response){const text=await response.text();if(!text)return null;try{return JSON.parse(text);}catch{throw new Error('The cloud server returned an unreadable response.');}}
 // Bound both headers and body reads. A stalled connection must return control
@@ -1224,15 +1260,22 @@ async function incrementalManaged(type,c,check,reuse,restricted=false,read=reque
   const index=await managedVersionIndex(type,c,check,read,scope,eventTypes),rows=new Map(),pending=[],reused=new Set();
   for(const row of index.values()){const cached=reusableRecord(reuse,row,c);if(cached&&(!restricted||ordinaryManagedRecord(cached))){rows.set(row.entity_id,cached);reused.add(row.entity_id);}else pending.push(row);}
   onVerified(rows.size,index.size);
-  // A newly opened feature may contain many uncached rows. Read bounded RPC
-  // pages instead of issuing hundreds of twenty-ID payload requests.
-  if(scope&&(pending.length>100||pending.length&&!feeVisibility?.source_archive_allowed)){
+  // A newly opened feature may contain many uncached rows. A compact startup
+  // cache is also a poor incremental baseline for a full-table read. When more
+  // than half the live table and over 100 rows are missing, use full keyset
+  // payload pages; nearly complete baselines retain their small ID batches.
+  const fullUnscoped=!scope&&pending.length>100&&pending.length>index.size/2;
+  if(fullUnscoped||scope&&(pending.length>100||pending.length&&!feeVisibility?.source_archive_allowed)){
     const loadedRows=[],seen=new Set();let cursor=null,limit=1000;
     while(true){
-      const loaded=await readCloudPage(size=>read('rpc/get_managed_record_page',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:c.colonyId,p_entity_type:type,p_scope:scope,p_event_types:eventTypes,p_after:cursor,p_limit:size,p_metadata_only:false}}),limit,check);
+      const loaded=await readCloudPage(size=>{
+        if(scope)return read('rpc/get_managed_record_page',{method:'POST',cloudSource:'cloud1',body:{p_colony_id:c.colonyId,p_entity_type:type,p_scope:scope,p_event_types:eventTypes,p_after:cursor,p_limit:size,p_metadata_only:false}});
+        const query=new URLSearchParams({select:'colony_id,entity_type,entity_id,payload,version,archived',colony_id:`eq.${c.colonyId}`,entity_type:`eq.${type}`,order:'entity_id.asc',limit:String(size)});
+        if(cursor!==null)query.set('entity_id',`gt.${cursor}`);return read(`entity_records?${query}`);
+      },limit,check);
       const page=loaded.page;limit=loaded.limit;if(!Array.isArray(page)||page.length>limit)throw new Error('Cloud records were not returned as a valid page.');
       for(const value of page){const row=checkedCloudRecord(value,type,c),expected=index.get(row.entity_id);if(!expected||row.version!==expected.version||row.archived!==expected.archived||seen.has(row.entity_id))throw new Error('Cloud records changed during loading. Retry this view.');seen.add(row.entity_id);loadedRows.push(row);}
-      onVerified(loadedRows.length,index.size);if(page.length<limit)break;cursor=page.at(-1).entity_id;
+      onVerified(loadedRows.length,index.size);if(fullUnscoped?page.length===0:page.length<limit)break;cursor=page.at(-1).entity_id;
     }
     const final=await managedVersionIndex(type,c,check,read,scope,eventTypes);
     if(loadedRows.length!==index.size||final.size!==index.size||[...index].some(([id,row])=>final.get(id)?.version!==row.version||final.get(id)?.archived!==row.archived))throw new Error('Cloud records changed during loading. Retry this view.');
