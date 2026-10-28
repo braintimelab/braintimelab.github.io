@@ -13,6 +13,28 @@ const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value
 const unique=dependencies=>[...new Map(dependencies.map(row=>[row.type+':'+row.id,row])).values()];
 const parentIds=(data,value)=>ids(value).map(id=>resolveMouseSid(data,id));
 
+/** Completion edits existing current records only. A pedigree shadow is never a writable payload; shared
+ * parents never establish a recorded litter. Lifecycle state is retained. */
+export function isUntaggedCompletionRecord(mouse){
+ return Boolean(mouse&&mouse.mouse_sid!=null&&String(mouse.mouse_sid).trim()&&!mouse._derived&&!mouse.history_read_only&&!mouse.source_historical&&!mouse.member_projection&&!mouse.guest_projection&&!/^historical_(?:snapshot|assignment)_projection$/.test(mouse.record_origin||'')&&(mouse.physical_tag==null||typeof mouse.physical_tag==='string'&&!mouse.physical_tag.trim()));
+}
+export function isUntaggedCompletionMouse(mouse){return isUntaggedCompletionRecord(mouse)&&!mouse.archived&&!mouse.app_archived_at;}
+export function untaggedMouseCompletion(dataset,mouseSid){
+ const unavailable={mouseSid:null,litterSid:null,siblingIds:[],reason:'This mouse is unavailable or read-only. Open a current full mouse record to complete its details.'};
+ if(dataset?.history_projection?.read_only||mouseSid==null||!String(mouseSid).trim())return unavailable;
+ const mice=rows(dataset,'mice'),matches=mice.filter(mouse=>String(mouse.mouse_sid)===String(mouseSid));
+ if(matches.length!==1||!isUntaggedCompletionRecord(matches[0]))return unavailable;
+ const mouse=matches[0],result={mouseSid:String(mouse.mouse_sid),litterSid:null,siblingIds:[],reason:'No recorded litter is available. Complete this mouse individually; shared parents do not establish a litter.'};
+ if(mouse.archived||mouse.app_archived_at)return{...result,reason:'This archived mouse can be completed individually. Batch completion uses nonarchived saved litter members.'};
+ if(mouse.litter_sid==null||!String(mouse.litter_sid).trim())return result;
+ const litters=rows(dataset,'litters').filter(litter=>String(litter.litter_sid)===String(mouse.litter_sid));
+ if(litters.length!==1||!available(litters[0])||litters[0]._derived||litters[0].member_projection||litters[0].guest_projection||litters[0].source_historical)return result;
+ try{createLitterRegistrationContext(dataset,{litterSid:String(litters[0].litter_sid)});}catch{return result;}
+ const siblings=mice.filter(row=>String(row.litter_sid)===String(mouse.litter_sid)&&isUntaggedCompletionMouse(row)),siblingIds=siblings.map(row=>String(row.mouse_sid));
+ if(siblingIds.length>MOUSE_BATCH_LIMIT||new Set(siblingIds).size!==siblingIds.length||siblingIds.some(id=>mice.filter(row=>String(row.mouse_sid)===id).length!==1))return{...result,reason:'This litter needs individual review before batch completion. No mice will be created or guessed.'};
+ return{...result,litterSid:String(litters[0].litter_sid),siblingIds,reason:''};
+}
+
 /** Litter identity follows the selected mating, independently of mouse SIDs.
  * Concurrent attempts choose the same next identity and expected_version=0
  * rejects the second creation; this is not a second mouse-ID allocator. */
