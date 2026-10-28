@@ -29,6 +29,7 @@ function host(options={}){
   render:()=>calls.push(['render']),navigate:(...args)=>calls.push(['navigate',...args]),showHelp:(...args)=>calls.push(['help',...args]),
   buildFamilyGenotypes:(dataset,options)=>{calls.push(['classify',dataset,options]);return {animals:[{id:'3',classification:'real full record'}]};},
   renderFamilyExplorer:(...args)=>{calls.push(['explorer',...args]);return ()=>calls.push(['dispose-explorer']);},
+  canCompleteFamilyMouse:()=>false,canReadGuestRoute:()=>false,openFamilyMouseCompletion:()=>{throw new Error('Unexpected completion in the read-only projection host test');},
   managedRouteGate:()=>{calls.push(['managed']);return false;},historyRouteGate:tables=>{calls.push(['history',tables]);return false;},
   store:{getFamilyPedigreeReadContext:()=>({available:true,source:'cloud1',contextKey:scope}),readFamilyPedigreeSnapshot:parameters=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});reads.push({parameters,resolve,reject});return promise;},
    saveDataset:()=>{throw new Error('Unexpected scientific write');},loadDataset:()=>{throw new Error('Unexpected baseline replacement');},queueCache:()=>{throw new Error('Unexpected projection cache');}},
@@ -103,5 +104,5 @@ test('real render stops at pending Family gate before managed/history/lazy secti
  assert.ok(render.indexOf('familyPedigreeRouteGate()')<render.indexOf('sectionRouteGate()'));
 });
 test('Family hooks keep raw identities, account/revision graph context and original full-record classifications',()=>{
- const h=host();h.api.setSnapshot(projected([{mouse_sid:'100000',canonical_sid:'03345'}]));h.api.paint();const hooks=h.calls.find(row=>row[0]==='explorer')[3];hooks.openMouse('100000');assert.deepEqual(h.calls.find(row=>row[0]==='navigate'),['navigate','mice','100000']);hooks.setFocus('100000');assert.equal(hooks.getFocus(),'100000');assert.match(hooks.getGraphContext(),/a{32}$/);assert.equal(hooks.getClassification('3').classification,'real full record');assert.equal(hooks.getClassification('100000'),undefined);assert.equal(h.original.tables.mice[0].mouse_sid,'3');
+ const h=host();h.api.setSnapshot(projected([{mouse_sid:'100000',canonical_sid:'03345'}]));h.api.paint();const hooks=h.calls.find(row=>row[0]==='explorer')[3];assert.equal(hooks.canCompleteMouse(),false);assert.equal(hooks.canCompleteArchived(),false);assert.equal(typeof hooks.loadMouse,'function');hooks.openMouse('100000');assert.deepEqual(h.calls.find(row=>row[0]==='navigate'),['navigate','mice','100000']);hooks.setFocus('100000');assert.equal(hooks.getFocus(),'100000');assert.match(hooks.getGraphContext(),/a{32}$/);assert.equal(hooks.getClassification('3').classification,'real full record');assert.equal(hooks.getClassification('100000'),undefined);assert.equal(h.original.tables.mice[0].mouse_sid,'3');
 });
