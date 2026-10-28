@@ -1,5 +1,6 @@
 /* Protocol records and auditable animal counts. No laboratory data is bundled. */
 import { sampleMouseSids } from './experiment-model.js?v=132';
+import { validateIacucPortalHistoryChange } from './iacuc-portal-usage.js?v=190';
 const list=v=>Array.isArray(v)?v:[];
 const live=r=>r&&!r.app_archived_at&&r.archived!==true;
 const date=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
@@ -46,8 +47,9 @@ export function summarizeIacuc(dataset,protocolId,{today=taipeiToday()}={}){
  return {protocolId,status:protocolDateStatus(p,today),approved,portalUsed,used:used.size,bred:bred.size,breeders:breeders.size,livingAssigned:currentMice.size,cagesAssigned:cages.size,uniqueRecordedAnimals:new Set([...used,...bred]).size,usedIds:[...used],bredIds:[...bred],breederIds:[...breeders],currentMouseIds:[...currentMice],cageIds:[...cages],usedEvidence,bredEvidence,unidentified,review,issues,overAllowance:approved!==null&&used.size>approved};
 }
 export function blankIacucProtocol(){return {schema_version:1,protocol_id:'',number:'',aliases:[],title:'',title_en:'',pi:'',status:'draft',start_date:null,end_date:null,approved_animals:null,allocations:[],source_url:null,source_accessed_at:null,document:null,sections:Object.fromEntries(Object.keys(IACUC_SECTIONS).map(k=>[k,''])),notes:null}}
-export function validateIacucRecord(record,dataset){
- const errors=[],warnings=[],kind=record?.event_type;if(!['iacuc_protocol','iacuc_assignment','iacuc_usage','iacuc_design'].includes(kind))return {errors,warnings};const p=record[kind];if(!p||typeof p!=='object'||Array.isArray(p))return {errors:['The IACUC record is missing its details.'],warnings};if(p.schema_version!==1)errors.push('Unsupported IACUC record version.');
+export function validateIacucRecord(record,dataset,previous=undefined){
+ const before=previous===undefined?list(dataset?.tables?.husbandry_events).find(row=>row.event_id===record?.event_id):previous;
+ const errors=[...validateIacucPortalHistoryChange(before,record).errors],warnings=[],kind=record?.event_type;if(!['iacuc_protocol','iacuc_assignment','iacuc_usage','iacuc_design'].includes(kind))return {errors,warnings};const p=record[kind];if(!p||typeof p!=='object'||Array.isArray(p))return {errors:[...errors,'The IACUC record is missing its details.'],warnings};if(p.schema_version!==1)errors.push('Unsupported IACUC record version.');
  if(record.event_date&&!date(record.event_date))errors.push('Choose a valid record date.');
  if(kind==='iacuc_protocol'){
   if(p.protocol_id!==record.event_id)errors.push('Protocol ID must match its record ID.');if(!string(p.number)||!string(p.title))errors.push('Protocol number and title are required.');

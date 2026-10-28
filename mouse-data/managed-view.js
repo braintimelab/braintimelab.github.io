@@ -15,6 +15,7 @@ const needs=(tables=[],eventTypes=[])=>({tables:distinct(tables),eventTypes:dist
 
 export function managedViewNeeds(route,{detail=null,cageDate=''}={}){
  if(['settings','brainbot','archive'].includes(route))return needs();
+ if(route==='cages'&&detail)return needs([],IACUC);
  if(route==='cages'&&!cageDate)return needs();
  if(route==='cages')return needs(HOUSING,CAGE_HISTORY);
  if(route==='workbench')return needs(['mice','matings','litters','cages','rooms','racks','locations'],[...CARE,...STRAINS,...MOVES,...LIGHT,'iacuc_protocol','iacuc_assignment','iacuc_usage']);
@@ -25,7 +26,7 @@ export function managedViewNeeds(route,{detail=null,cageDate=''}={}){
  if(route==='mice')return needs(detail?[...HOUSING,'matings','litters']:['mice','cages','locations'],detail?[...STRAINS,...LIGHT,...EXPERIMENTS,...IACUC,...SOURCE_ASSOCIATIONS]:STRAINS);
  if(route==='matings')return needs(['mice','matings','litters','cages','locations'],['breeding_options',...STRAINS,...IACUC]);
  if(route==='litters')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...IACUC,...CARE]);
- if(route==='overview')return needs([...HOUSING,'matings','litters'],['breeding_options','cage_summary_options',...STRAINS]);
+ if(route==='overview')return needs([...HOUSING,'matings','litters'],['breeding_options','cage_summary_options',...STRAINS,...IACUC]);
  if(route==='family'||route==='planner')return needs(['mice','matings','litters','cages','locations'],[...STRAINS,...(route==='planner'?['breeding_options','breeding_plan']:[])]);
  if(route==='strains')return needs([],STRAINS);
  if(route==='housing')return needs(HOUSING,[...LIGHT,...MOVES,...SOURCE_ASSOCIATIONS]);
