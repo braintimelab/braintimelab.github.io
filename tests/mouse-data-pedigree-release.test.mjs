@@ -125,7 +125,7 @@ test('install refreshes changed modules even when old exact-URL cache entries ex
  const changed='./family-explorer.js?v='+tag;current.values.set(new URL(changed,scope).href,response('WRONG_CURRENT_EXACT_ALIAS'));
  await h.lifecycle('install');
  for(const name of canonicalNames){const url=new URL('./'+name+'?v='+tag,scope).href;assert.equal(current.values.get(url)?.body,'NETWORK:'+url,name);assert.ok(h.fetches.some(row=>row.url===url&&row.options?.cache==='no-store'));}
- const immutable=new URL('./cloud-bridge.js?v=183',scope).href;assert.equal(current.values.get(immutable).body,'OLD:./cloud-bridge.js?v=183');assert.ok(!h.fetches.some(row=>row.url===immutable));
+ const immutableRef=h.SHELL.find(ref=>new URL(ref,scope).pathname===new URL('./cloud-bridge.js',scope).pathname);assert.ok(immutableRef);assert.ok(!h.REFRESH.includes(immutableRef));const immutable=new URL(immutableRef,scope).href;assert.equal(current.values.get(immutable).body,'OLD:'+immutableRef);assert.ok(!h.fetches.some(row=>row.url===immutable));
  assert.equal(current.values.has('private://user-data'),false);assert.ok(h.fetches.every(row=>h.SHELL.some(ref=>new URL(ref,scope).href===row.url)));assert.ok(h.calls.includes('skipWaiting'));
 });
 
