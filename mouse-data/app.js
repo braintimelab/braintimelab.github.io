@@ -491,7 +491,8 @@ function resetCagesHeader(){
  const exportButton=$('export-button');if(exportButton){exportButton.textContent='Export';exportButton.title='';}
 }
 function renderLineageRecoveryEntry(){
- if(lineageRecoveryMount&&lineageRecoveryMount.context!==workflowContext())closeLineageRecovery({force:true});
+ if(lineageRecoveryMount&&lineageRecoveryMount.context!==lineageRecoveryContext())closeLineageRecovery({force:true});
+ lineageRecoveryMount?.controller?.refreshAvailability?.();
  let entry=$('lineage-recovery-entry');
  if(!entry){const anchor=$('add-button');if(!anchor)return;entry=document.createElement('button');entry.id='lineage-recovery-entry';entry.type='button';entry.className='button secondary';entry.dataset.action='recover-parents';entry.textContent='Recover parents';anchor.insertAdjacentElement('beforebegin',entry);}
  entry.hidden=!dataset||Boolean(detail)||!['family','review'].includes(route)||cloud.passwordRecovery||!canReadGuestRoute(route);
@@ -501,7 +502,7 @@ function renderLineageRecoveryEntry(){
 }
 let sourceReconciliationCleanup=()=>{};
 function render() {
- if(lineageRecoveryMount&&(lineageRecoveryMount.context!==workflowContext()||lineageRecoveryMount.route!==route))closeLineageRecovery({force:true});
+ if(lineageRecoveryMount&&(lineageRecoveryMount.context!==lineageRecoveryContext()||lineageRecoveryMount.route!==route))closeLineageRecovery({force:true});
  if(pendingColonyQr&&!startupLoading&&!cachedPreview&&dataset&&cloud.signedIn&&cloudReady&&!historyDraftOpen())queueMicrotask(()=>void openPendingColonyQr());
  if(workbenchController?.hasDraft?.()){if(workbenchMountContext===workflowContext())workbenchDraft={context:workbenchMountContext,draft:workbenchController.getDraft()};else workbenchDraft=null;}
  workflowCleanup();workflowCleanup=()=>{};workbenchController=null;workbenchMountContext=null;
@@ -562,6 +563,11 @@ async function loadColonyQrForCards(){const context=workflowContext(),snapshot=d
 function qrCardHTML(qr,type,id){try{const baseURL=colonyQrBaseURL(),link=qr.buildColonyQrTarget(dataset,type,id,{...colonyQrScope(),baseURL});return qr.renderColonyQrHTML(link,{baseURL,sizeMm:26});}catch(error){return '<p class="small muted">QR unavailable: '+esc(error.message)+'</p>';}}
 
 function workflowContext(){const status=store.getCloudStatus();return JSON.stringify([status.mode,status.activeCloud,status.url,status.colonyId,status.userId,status.sessionEpoch,status.role,status.signedIn,status.passwordRecovery,status.permissions,status.mousePermissions,status.guestLevel,status.guestPermissions]);}
+// A transport interruption keeps the bound Owner/source identity. The store's
+// active-Cloud1 checks still gate every read, preview and write.
+function lineageRecoveryRetainsCloud1(status){return status.mode==='cloud'&&status.signedIn===true&&status.role==='owner'&&!status.passwordRecovery&&status.activeCloud===null&&status.recoverySource==='cloud1'&&!['signed_out','denied','not_enrolled'].includes(status.cloudConnections?.sources?.cloud1?.state);}
+function lineageRecoveryContext(){const status=store.getCloudStatus(),source=lineageRecoveryRetainsCloud1(status)?'cloud1':status.activeCloud;return JSON.stringify([status.mode,source,status.recoverySource,status.url,status.colonyId,status.userId,status.sessionEpoch,status.role,status.signedIn,status.passwordRecovery,status.permissions,status.mousePermissions,status.guestLevel,status.guestPermissions]);}
+function lineageRecoveryReadFailure(error){return lineageRecoveryRetainsCloud1(store.getCloudStatus())?new Error('Cloud 1 could not finish loading the parentage records. Wait for it to reconnect, then analyze again.'):error;}
 let lineageRecoveryMount=null,lineageRecoveryModule=null;
 function closeLineageRecovery({force=false}={}){
  const mount=lineageRecoveryMount;if(!mount)return;
@@ -571,6 +577,7 @@ function closeLineageRecovery({force=false}={}){
 }
 function lineageRecoveryCapability(){
  const capability=store.getLineageRecoveryCapability?.()||{canAnalyze:false,canApply:false,reason:'Parent recovery is not available in this app version.'};
+ if(lineageRecoveryRetainsCloud1(store.getCloudStatus())){const reason='Cloud 1 is temporarily unavailable. Wait for it to reconnect, then analyze again.';return {...capability,canAnalyze:false,canApply:false,canRegisterHistoricalSources:false,reason,registrationReason:reason};}
  if(!dataset||startupLoading||cachedPreview||historyLoadState||managedLoadState||!cloudReady)return {canAnalyze:false,canApply:false,canRegisterHistoricalSources:false,reason:'Wait for the current shared workspace to finish loading.',registrationReason:'Wait for the current shared workspace to finish loading.'};
  return capability;
 }
@@ -578,10 +585,10 @@ async function openLineageRecovery(){
  if(lineageRecoveryMount){lineageRecoveryMount.dialog.focus();return;}
  if(historyDraftOpen())throw new Error('Save or discard record changes before recovering parents.');
  const capability=lineageRecoveryCapability();if(!capability.canAnalyze)throw new Error(capability.reason||'Reconnect before recovering parents.');
- const context=workflowContext(),openingRoute=route,dialog=document.createElement('dialog');
+ const context=lineageRecoveryContext(),openingRoute=route,dialog=document.createElement('dialog');
  dialog.id='lineage-recovery-dialog';dialog.className='lineage-recovery-dialog';dialog.setAttribute('aria-label','Recover parents');dialog.innerHTML='<div class="dialog-content"><p role="status">Loading parent recovery…</p></div>';
  document.body.appendChild(dialog);const mount={dialog,context,route:openingRoute,controller:null,refreshView:false};lineageRecoveryMount=mount;
- const current=()=>lineageRecoveryMount===mount&&dialog.open&&context===workflowContext()&&route===openingRoute;
+ const current=()=>lineageRecoveryMount===mount&&dialog.open&&context===lineageRecoveryContext()&&route===openingRoute;
  dialog.addEventListener('cancel',event=>{event.preventDefault();closeLineageRecovery();});dialog.showModal();
  try{
   lineageRecoveryModule??=await import('./lineage-recovery-panel.js?v=199');
@@ -591,8 +598,8 @@ async function openLineageRecovery(){
   if(!current()){closeLineageRecovery({force:true});return;}
   dialog.innerHTML='<div class="dialog-content" id="lineage-recovery-content"></div>';
   mount.controller=lineageRecoveryModule.renderLineageRecoveryPanel(dialog.querySelector('#lineage-recovery-content'),{
-   getContext:workflowContext,isCurrent:current,getDataset:()=>dataset,getCapability:lineageRecoveryCapability,
-   analyze:options=>store.analyzeLineageRecovery(options),preview:options=>store.previewLineageRecovery(options),apply:options=>store.applyLineageRecovery(options),verify:()=>store.verifyLineageRecovery(),retry:options=>store.retryLineageRecovery(options),getPendingOutcome:()=>store.getPendingLineageRecovery?.(),
+   getContext:lineageRecoveryContext,isCurrent:current,getDataset:()=>dataset,getCapability:lineageRecoveryCapability,
+   analyze:options=>store.analyzeLineageRecovery(options).catch(error=>{throw lineageRecoveryReadFailure(error);}),preview:options=>store.previewLineageRecovery(options),apply:options=>store.applyLineageRecovery(options),verify:()=>store.verifyLineageRecovery(),retry:options=>store.retryLineageRecovery(options),getPendingOutcome:()=>store.getPendingLineageRecovery?.(),
    onApplied:async()=>{cloudReady=false;mount.refreshView=true;dataset=await store.pullFromCloud({deferHistory:true,currentOnly:true});await refreshCloud({verifyFees:false});cloudReady=true;if(!current())throw new Error('The parent links were saved. Reopen the current colony to verify them.');},
    previewHistoricalSourceRegistration:options=>store.previewHistoricalSourceRegistration(options),applyHistoricalSourceRegistration:options=>store.applyHistoricalSourceRegistration(options),verifyHistoricalSourceRegistration:()=>store.verifyHistoricalSourceRegistration(),retryHistoricalSourceRegistration:options=>store.retryHistoricalSourceRegistration(options),getPendingHistoricalSourceRegistration:()=>store.getPendingHistoricalSourceRegistration?.(),clearHistoricalSourceRegistration:()=>store.clearHistoricalSourceRegistration?.(),
    onHistoricalSourcesRegistered:async()=>{cloudReady=false;mount.refreshView=true;dataset=await store.pullFromCloud({deferHistory:true,currentOnly:true});await refreshCloud({verifyFees:false});cloudReady=true;if(!current())throw new Error('The historical source registration completed. Reopen the current colony to analyze it.');},
