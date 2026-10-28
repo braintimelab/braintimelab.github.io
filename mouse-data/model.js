@@ -1,6 +1,6 @@
 import {validateMouseEntrainment} from './entrainment-history.js?v=132';
 import { validateLocoboxRecord } from './locobox-model.js?v=132';
-import { validateIacucRecord } from './iacuc-model.js?v=132';
+import { validateIacucRecord } from './iacuc-model.js?v=190';
 import { validateLacFeeRecord } from './lac-fee-model.js?v=174';
 import { validateUserAcronym } from './user-acronyms.js?v=100';
 import { validateCageSummaryOptions } from './cage-summary-options.js?v=100';
@@ -334,7 +334,7 @@ export function validateRecord(type,draft,dataset,originalId=null,validationCont
   for(const name of ['sire_sids','dam_sids','male_sids','female_sids'])if(populated(draft[name])&&(!Array.isArray(draft[name])||draft[name].some(id=>typeof id!=='string'||!id.trim())))errors.push(`${name} must contain text identifiers.`);
   validateHousing(type,draft,old,base,errors);
   if(type==='husbandry_events')errors.push(...validateStrainDefinition(draft,old),...validateBreedingOptions(draft,old),...validateCageSummaryOptions(draft,old),...validateUserAcronym(draft,old));
-  if(type==='husbandry_events'){for(const checked of [validateIacucRecord(draft,base),validateLocoboxRecord(draft,base,old),validateMouseEntrainment(draft,base,old)]){errors.push(...checked.errors);warnings.push(...checked.warnings);}}
+  if(type==='husbandry_events'){for(const checked of [validateIacucRecord(draft,base,old),validateLocoboxRecord(draft,base,old),validateMouseEntrainment(draft,base,old)]){errors.push(...checked.errors);warnings.push(...checked.warnings);}}
   if(type==='husbandry_events'){const checked=validateLacFeeRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}
   if(type==='husbandry_events'){const checked=validateExperimentRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}
   if(type==='husbandry_events'){const checked=validateCryoRecord(draft,base,old);errors.push(...checked.errors);warnings.push(...checked.warnings);}

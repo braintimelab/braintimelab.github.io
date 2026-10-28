@@ -365,3 +365,18 @@
 /* Explicit sign-in duration choice; the default remains unchecked. */
 .remember-device{display:flex!important;align-items:center;gap:8px;font-size:13px;line-height:1.4;cursor:pointer}.remember-device input[type=checkbox]{flex:none;width:16px!important;min-height:16px;height:16px;margin:0;padding:0;accent-color:var(--accent)}
 .remember-help{margin:0;font-size:12px;line-height:1.4;color:var(--muted)}
+
+/* Keep IACUC period comparisons readable; narrow screens scroll the table. */
+.iacuc{min-width:0}.iacuc .table-scroll{max-width:100%;overflow-x:auto}
+.iacuc .iacuc-protocol-table{width:100%;min-width:1400px;table-layout:auto}
+.iacuc .iacuc-protocol-table th,.iacuc .iacuc-protocol-table td{max-width:none;vertical-align:top;word-break:normal;overflow-wrap:normal}
+.iacuc .iacuc-protocol-table th:first-child,.iacuc .iacuc-protocol-table td:first-child{min-width:150px;width:150px;white-space:nowrap}
+.iacuc .iacuc-protocol-table th:nth-child(2),.iacuc .iacuc-protocol-table td:nth-child(2){min-width:220px;width:240px}
+.iacuc .iacuc-protocol-table th:nth-child(3),.iacuc .iacuc-protocol-table td:nth-child(3){min-width:90px;width:90px}
+.iacuc .iacuc-protocol-table th:nth-child(4),.iacuc .iacuc-protocol-table td:nth-child(4){min-width:240px;width:280px}
+.iacuc .iacuc-protocol-table th:nth-child(n+5):nth-child(-n+8),.iacuc .iacuc-protocol-table td:nth-child(n+5):nth-child(-n+8){min-width:90px;width:100px;font-variant-numeric:tabular-nums}
+.iacuc .iacuc-protocol-table th:nth-child(9),.iacuc .iacuc-protocol-table td:nth-child(9){min-width:220px;width:250px}
+.iacuc .iacuc-protocol-table th:last-child,.iacuc .iacuc-protocol-table td:last-child{min-width:75px;width:75px;white-space:nowrap}
+.iacuc .iacuc-protocol-table td:nth-child(4)>label{display:grid;gap:4px;min-width:240px}
+.iacuc .iacuc-protocol-table select{width:100%;min-width:240px;max-width:320px}
+.iacuc time,.iacuc-portal-usage time{white-space:nowrap;font-variant-numeric:tabular-nums}

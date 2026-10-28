@@ -10,7 +10,7 @@ import {clearHistoryIndex} from './history-index.js?v=100';
 import { projectLocoboxExport } from './locobox-export.js?v=100';
 import { PUBLIC_CONFIG } from './config.js?v=137';
 import { validateManagerPermissions } from './permissions.js?v=100';
-import { normalizeDataset, ID_FIELDS } from './model.js?v=174';
+import { normalizeDataset, ID_FIELDS } from './model.js?v=190';
 import {encodeArchive,decodeArchive,isArchiveChunk,partitionChanges,MAX_RPC_BYTES,utf8Size,ARCHIVE_MANIFEST_FORMAT} from './archive-format.js?v=174';
 import {createHistoricalSourceRegistration} from './historical-source-registration.js?v=199';
 import {appAllows as familyPedigreeAllowed} from './app-access.js?v=175';
@@ -18,6 +18,7 @@ import {readFamilyPedigree} from './family-pedigree-read.js?v=201';
 import {createCloudProvider,createCloud2Adapter,providerFailure,isCloudRead,CLOUD_COMMAND_KINDS,openCloud2SignIn,cloud1RecoveryQuery} from './cloud-provider.js?v=183';
 import {createIntentJournal} from './cloud-intents.js?v=137';
 import {managedCoverage,checkedManagedCoverage,mergeManagedCoverage,getDeferredManagedTables,getDeferredManagedEventTypes,MANAGED_EVENT_TYPES,currentCacheProjection} from './current-record-scope.js?v=174';
+import {validateIacucPortalHistoryChange} from './iacuc-portal-usage.js?v=190';
 export {getDeferredManagedTables,getDeferredManagedEventTypes};
 let lineageRecoveryController=null,lineageControllerScope=null,lineageArchiveReadCache=null,lineageCapabilityProof=null;
 let historicalSourceRegistration=null,historicalSourceScope=null;
@@ -1768,6 +1769,13 @@ export async function acknowledgeSourceTagReview({issueId,mouseSid,expectedScope
   statusMessage='Source label check saved. Scientific fields were preserved.';
  }finally{activeDatasetSaves.delete(scope);}
 }
+function assertIacucPortalHistoryChanges(beforeRows,afterRows){
+ const previous=new Map((beforeRows||[]).map(row=>[row.event_id,row])),incoming=new Map((afterRows||[]).map(row=>[row.event_id,row]));
+ for(const id of new Set([...previous.keys(),...incoming.keys()])){
+  const checked=validateIacucPortalHistoryChange(previous.get(id),incoming.get(id));
+  if(checked.errors.length)throw new Error(checked.errors.join(' '));
+ }
+}
 async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDependencies=[],requiredSource=null}={}){
  if(isGuest(session())){if(localOnly)throw new Error('Guest changes must be verified by the shared database.');return saveGuestDataset(dataset,{readDependencies});}
   if(!Array.isArray(readDependencies)||readDependencies.length>500)throw new Error('Invalid save dependencies. Reload and review the changes.');
@@ -1792,6 +1800,9 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
   if(localOnly||mode()==='local'){
     const generation=authGeneration,context=exportContext();
     const check=()=>{if(generation!==authGeneration||context!==exportContext()||pendingAccount(session())||session()?.passwordRecovery)throw new Error('The account changed while saving. Review your changes again.');};
+    // Explicit local backup/import replacement retains its separate restore
+    // semantics. Ordinary edits must preserve the recorded snapshot prefix.
+    if(!localOnly){const previous=await local('get',undefined,{check});check();assertIacucPortalHistoryChanges(previous?.tables?.husbandry_events,data.tables.husbandry_events);}
     await local('put',data,{check});check();setStorage('localStorage',CLOUD_CACHE_KEY,null);if(localOnly){setStorage('localStorage',DEMO_KEY,localKind==='demo'?'true':null);setMode('local');invalidate();}statusMessage='Saved on this device.';return;
   }
   if(!synced||!baseline)throw new Error('Pull the latest cloud data before editing.');
@@ -1804,6 +1815,7 @@ async function saveDatasetOnce(dataset,{localOnly=false,localKind=null,readDepen
   await requireEditor();checkSaveEpoch();const policy=await refreshFeeVisibility();checkSaveEpoch();if(!synced||!baseline)throw new Error('Visibility changed. Pull the latest cloud data before editing.');
   if(!policy.source_archive_allowed&&(data.source_archive_restricted!==true||data.source_projection_version!==SOURCE_PROJECTION_VERSION||!data.tables.locations.every(managedLocationPayload)))throw new Error('Source location fields require full financial visibility. Pull the latest cloud data before editing.');
   const incoming=await entityRecords(data),map=new Map(incoming.map(r=>[recordKey(r),r]));
+  assertIacucPortalHistoryChanges([...baseline.values()].filter(row=>row.entity_type==='husbandry_events').map(row=>row.payload),data.tables.husbandry_events);
   for(const [k,r] of baseline)if(!map.has(k)&&!isArchiveChunk(r))throw new Error(`Record ${r.entity_id} was removed. Archive records instead of deleting them.`);
   const pending=incoming.filter(r=>{const old=baseline.get(recordKey(r));return !old||stable(old.payload)!==stable(r.payload)||old.archived!==r.archived;}).map(r=>[r,versions.get(recordKey(r))??0]);
   if(managedReadCoverage&&!managedReadCoverage.full_tables.includes('mice')){
@@ -1902,21 +1914,48 @@ function experimentExportRows(value,keys){
 }
 const IACUC_EXPORT_FIELDS={"inputs":["design","variance","mean1","mean2","effect","sd","sd1","sd2","sdDifference","correlation","alpha","power","allocationRatio","experimentalUnit","animalsPerUnit","technicalReplicates","attrition","maxUnitsPerGroup","n1","n2","target","genotypeProbability","sexProbability","survivalProbability","confidence","maxOffspring","litterSize","littersPerPair"],"results":["status","method","approximate","n1","n2","achieved_power","previous_power","df","critical","noncentrality","standard_error","alpha","target_power","effect","sd_difference","power","sidedness","usable_probability","expected_offspring","expected_offspring_rounded","confidence_offspring","achieved_probability","previous_probability","expected_litters","confidence_litters","expected_pairs","confidence_pairs","expected_unusable_at_confidence_count","breeder_animals","errors","warnings","assumptions"],"cluster":["animalsPerCage","icc","cages_per_group","approximate","power_recomputed","attrition_basis","whole_cage_loss_modeled"],"allocation":["rule","requested_ratio","actual_ratio"],"adjustment":["analyzed_units_per_group","independent_equivalent_units_per_group","experimental_unit","recruited_units_per_group","animals_per_group","total_animals","animals_per_unit","technical_replicates","measurement_count","attrition","attrition_basis","design_effect"],"maximum_checked":["n1","n2","power","offspring","probability"],"protocol":["schema_version","protocol_id","number","aliases","title","title_en","pi","status","start_date","end_date","approved_animals"],"assignment":["schema_version","protocol_id","entity_type","entity_id","purpose","valid_from","valid_to","evidence_status"],"usage":["schema_version","protocol_id","category","mouse_sids","unregistered_count","event_date","experiment_id","litter_sid","evidence_status"],"design":["schema_version","protocol_id","label","title","method","calculated_at"],"allocations":["id","species","strain","approved","portal_used","portal_pending","portal_remaining"]};
 function iacucNumericArrays(value,keys){const result={};for(const key of keys)if(Array.isArray(value?.[key]))result[key]=value[key].filter(v=>typeof v==='number'&&Number.isFinite(v)).slice(0,100);return result;}
+const IACUC_PORTAL_EXPORT_FIELDS=Object.freeze({
+ snapshot:['schema_version','protocol_id','protocol_number','observed_at','as_of_date','coverage','content_sha256'],
+ period:['period_id','period_kind','period_label','scope_label','grant_id','species','unit','start_date','end_date','allowance','used','pending','remaining','used_complete','same_scope','pending_is_disjoint','count_basis','allocation_partition_complete'],
+ breakdown:['axis','label','allowance','used','pending','remaining'],
+ allocation:['allocation_id','ordinal','label','species','unit','allowance','used','pending','remaining','genotype_label','room_label','facility_label']
+});
+function iacucPortalExport(value,{fromDate=null,toDate=null,includeUndated=!fromDate}={}){
+ // Source locators and full evidence stay in the permission-controlled raw
+ // backup. Observation dates fence nested history independently of approval
+ // dates; period dates describe a budget and never widen the export window.
+ const rows=(Array.isArray(value)?value:[]).filter(item=>{
+  if(!item||typeof item!=='object'||Array.isArray(item))return false;
+  const observed=typeof item.observed_at==='string'?item.observed_at.slice(0,10):null;
+  return exportDate(observed)?(!fromDate||observed>=fromDate)&&(!toDate||observed<=toDate):includeUndated;
+ });
+ const selected=rows.slice(-100),items=selected.map(item=>{
+  const snapshot=experimentExportFields(item,IACUC_PORTAL_EXPORT_FIELDS.snapshot),periods=experimentExportRows(item.periods,IACUC_PORTAL_EXPORT_FIELDS.period);
+  const sourcePeriods=(Array.isArray(item.periods)?item.periods:[]).filter(period=>period&&typeof period==='object'&&!Array.isArray(period)).slice(0,100);
+  for(const [index,period]of sourcePeriods.entries()){
+   const breakdowns=experimentExportRows(period.breakdowns,IACUC_PORTAL_EXPORT_FIELDS.breakdown);
+   Object.assign(periods.items[index],{breakdowns:breakdowns.items,breakdown_count:breakdowns.total,breakdowns_truncated:breakdowns.truncated});
+   if(Array.isArray(period.allocations)){const allocations=experimentExportRows(period.allocations,IACUC_PORTAL_EXPORT_FIELDS.allocation);Object.assign(periods.items[index],{allocations:allocations.items,allocation_count:allocations.total,allocations_truncated:allocations.truncated});}
+  }
+  return {...snapshot,periods:periods.items,period_count:periods.total,periods_truncated:periods.truncated,source_details_withheld:true};
+ });
+ return {portal_usage_snapshots:items,portal_usage_snapshot_count:rows.length,portal_usage_snapshots_truncated:items.length<rows.length};
+}
 function iacucDesignPart(value,part){const result=experimentExportFields(value,IACUC_EXPORT_FIELDS[part]);if(!value||typeof value!=='object')return result;
  if(part==='inputs'){if(value.cluster&&typeof value.cluster==='object'&&!Array.isArray(value.cluster))result.cluster=experimentExportFields(value.cluster,IACUC_EXPORT_FIELDS.cluster);}
  else{for(const key of ['allocation','maximum_checked'])if(value[key]&&typeof value[key]==='object'&&!Array.isArray(value[key]))result[key]=experimentExportFields(value[key],IACUC_EXPORT_FIELDS[key]);
   if(value.adjustment&&typeof value.adjustment==='object'&&!Array.isArray(value.adjustment)){result.adjustment={...experimentExportFields(value.adjustment,IACUC_EXPORT_FIELDS.adjustment),...iacucNumericArrays(value.adjustment,['analyzed_units_per_group','independent_equivalent_units_per_group','recruited_units_per_group','animals_per_group','cages_per_group'])};if(value.adjustment.cluster&&typeof value.adjustment.cluster==='object'&&!Array.isArray(value.adjustment.cluster))result.adjustment.cluster={...experimentExportFields(value.adjustment.cluster,IACUC_EXPORT_FIELDS.cluster),...iacucNumericArrays(value.adjustment.cluster,['cages_per_group'])};}
  }return result;
 }
-function projectIacucExport(row){const type=row.event_type,key=type.slice(6),p=row[type]||{},result=experimentExportFields(row,['event_id','event_type','event_date']),nested=experimentExportFields(p,IACUC_EXPORT_FIELDS[key]||[]);result[type]=nested;
- if(key==='protocol'){const rows=experimentExportRows(p.allocations,IACUC_EXPORT_FIELDS.allocations);Object.assign(nested,{allocations:rows.items,allocation_count:rows.total,allocations_truncated:rows.truncated});}
+function projectIacucExport(row,options={}){const type=row.event_type,key=type.slice(6),p=row[type]||{},result=experimentExportFields(row,['event_id','event_type','event_date']),nested=experimentExportFields(p,IACUC_EXPORT_FIELDS[key]||[]);result[type]=nested;
+ if(key==='protocol'){const rows=experimentExportRows(p.allocations,IACUC_EXPORT_FIELDS.allocations);Object.assign(nested,{allocations:rows.items,allocation_count:rows.total,allocations_truncated:rows.truncated});if(Array.isArray(p.portal_usage_snapshots))Object.assign(nested,iacucPortalExport(p.portal_usage_snapshots,options));}
  if(key==='usage'){nested.mouse_count=Array.isArray(p.mouse_sids)?p.mouse_sids.length:0;nested.mouse_sids_truncated=nested.mouse_count>(nested.mouse_sids||[]).length;}
  if(key==='design')for(const [target,part]of [['breeding_inputs','inputs'],['breeding_results','results']])if(p[target]&&typeof p[target]==='object'&&!Array.isArray(p[target]))nested[target]=iacucDesignPart(p[target],part);
  if(key==='design')for(const part of ['inputs','results']){nested[part]=iacucDesignPart(p[part],part);for(const section of ['sample_size','breeding'])if(p[part]?.[section]&&typeof p[part][section]==='object'&&!Array.isArray(p[part][section]))nested[part][section]=iacucDesignPart(p[part][section],part);}
  return result;
 }
-function projectExperimentExport(row){
-  if(['iacuc_protocol','iacuc_assignment','iacuc_usage','iacuc_design'].includes(row.event_type))return projectIacucExport(row);
+function projectExperimentExport(row,options={}){
+  if(['iacuc_protocol','iacuc_assignment','iacuc_usage','iacuc_design'].includes(row.event_type))return projectIacucExport(row,options);
   if(['lac_fee_options','lac_fee_month'].includes(row.event_type)){
     const type=row.event_type,p=row[type]||{},result=experimentExportFields(row,['event_id','event_type','event_date']);
     const keys=type==='lac_fee_options'?['schema_version','effective_from','currency','target_percent','maximum_percent','excluded_room_ids','revision']:['schema_version','month','currency','actual_total','actual_date','actual_basis','paid_date','invoice_reference','revision'];
@@ -1970,7 +2009,7 @@ async function readExportRecords({scope='current_housing',fromDate=null,toDate=n
       const date=exportRecordDate(type,row);
       if(!date){if(start){excluded++;return false}return true}
       return (!start||date>=start)&&date<=end;
-    }).map(row=>type==='husbandry_events'?(row.event_type==='locobox_protocol'?projectLocoboxExport(row,{fromDate:start,toDate:end,includeUndated:!start}):projectExperimentExport(row)):clone(row));}
+    }).map(row=>type==='husbandry_events'?(row.event_type==='locobox_protocol'?projectLocoboxExport(row,{fromDate:start,toDate:end,includeUndated:!start}):projectExperimentExport(row,{fromDate:start,toDate:end,includeUndated:!start})):clone(row));}
     return {dataset:data,metadata:{...permission,export_level:permission.level,scope,from_date:scope==='history'?start:null,to_date:scope==='history'?end:null,excluded_undated:excluded,snapshot_revision:'local',captured_at:new Date().toISOString()}};
   }
   const c=configuration(),rows=[],seen=new Set();let offset=0,metadata=null;
