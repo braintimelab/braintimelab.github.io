@@ -762,7 +762,8 @@ export async function recoverCloudConnection({source=providerSource||'cloud1',ca
 // Shared lab-tool transport; authorization and history limits are enforced again by each RPC.
 const REAGENT_ACTIONS=new Set(['list','save','history','sources','observations','import','record_usage','access','set_access',
  'order_search','order_list','order_submit','order_transition','order_locations','order_set_location','order_import_offers',
- 'sheet_order_preview','sheet_order_commit','sheet_order_list','sheet_order_receive']);
+ 'sheet_order_preview','sheet_order_commit','sheet_order_list','sheet_order_receive','sheet_order_reconcile_arrivals',
+ 'app_order_list','app_order_transition','app_order_assign_applicant','app_order_applicants']);
 export function isReagentsConnectionError(error){if(error?.reagentsAccessChanged===true||error?.guestAccessUnavailable===true||[401,403].includes(error?.status)||['UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED','CONTEXT_CHANGED'].includes(error?.code))return false;return error?.connectionUnavailable===true||error?.statementTimeout===true||['UNAVAILABLE','SOURCE_CHANGED','BACKGROUND_CANCELLED','NOT_READY','WRITE_UNCERTAIN'].includes(error?.code)||[408,429,500,502,503,504].includes(error?.status)||error?.name==='AbortError'||error instanceof TypeError&&/fetch|network|load failed/i.test(error.message);}
 export async function callReagents(action,args={}){
  if(!REAGENT_ACTIONS.has(action)||!args||Array.isArray(args)||typeof args!=='object')throw new Error('Unsupported reagent operation.');
@@ -774,7 +775,7 @@ export async function callReagents(action,args={}){
  const check=()=>{checkIdentity();if(source&&savedSessionCloud()!==source)throw denied('Your session cloud changed. Sign in again.');};
  const accessError=error=>{checkIdentity();if(policy()!==beforePolicy||!isReagentsConnectionError(error))error.reagentsAccessChanged=true;return error;};
  try{const service=provider();if(sessionCloudPolicy&&service&&!source){await service.prepareRead();checkIdentity();source=savedSessionCloud();}await membership({source,check});check();if(policy()!==beforePolicy)throw denied('Your application permissions changed. Reopen Reagents.');}catch(error){throw accessError(error);}
- try{if(action.startsWith('sheet_order_')){const sheetCheck=reagentSheetOwnerFence();sheetCheck();const result=await cloud1Request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},timeoutMs:30000});check();sheetCheck();return result;}const result=await request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},cloudSource:source});check();return result;}
+ try{if(action.startsWith('app_order_')){if(source==='cloud2'||getCloudStatus().activeCloud==='cloud2')throw new Error('App orders are available when Cloud 1 reconnects.');const result=await cloud1Request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},timeoutMs:30000});check();if(policy()!==beforePolicy)throw denied('Your application permissions changed. Reopen Orders.');return result;}if(action.startsWith('sheet_order_')){const sheetCheck=reagentSheetOwnerFence();sheetCheck();const result=await cloud1Request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},timeoutMs:30000});check();sheetCheck();return result;}const result=await request('rpc/reagents_'+action,{method:'POST',body:{...args,p_colony_id:c.colonyId},cloudSource:source});check();return result;}
  catch(error){check();if([401,403].includes(error.status)||['UNAUTHORIZED','FORBIDDEN','NOT_ENROLLED'].includes(error.code)||/session expired|sign.in|permission for this cloud operation/i.test(error.message))error.reagentsAccessChanged=true;throw error;}
 }
 function reagentSheetOwnerFence(){
