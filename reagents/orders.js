@@ -1,6 +1,9 @@
 import {esc,text,validDate,numeric,canViewSection,canWriteOrders,reagentAllows} from './model.js?v=10';
 
 export const ORDER_STATES=Object.freeze({submitted:'Awaiting approval',approved:'Proceed to purchase',ordered:'Awaiting receipt',received:'Received',rejected:'Declined',cancelled:'Cancelled'});
+// Keep historical 7F/Daan positions available below current SH positions.
+const storagePositionGroup=value=>{const label=text(value).trim();return /^SH(?:\b|\d|_)/i.test(label)?0:/^(?:7F|Daan)(?:\b|\d|_)/i.test(label)?2:1;};
+export const compareStoragePositions=(a,b)=>storagePositionGroup(a)-storagePositionGroup(b)||text(a).localeCompare(text(b),'en',{numeric:true,sensitivity:'base'});
 const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'});
 const bounded=(value,label,max=200)=>{const s=text(value).trim();if(s.length>max)throw Error(`${label} is too long.`);return s;};
 export function validatePurchase(values){
@@ -139,7 +142,7 @@ export function createOrdersUI({main,rpc,getPermissions,isCurrent,notify=()=>{},
   try{const result=await call('sheet_order_list',{p_query:'',p_status:'',p_offset:start,p_limit:50});if(version!==sheetGeneration)return;if(permissions().role!=='owner'){clearSheetOrders();return;}sheetLoaded=true;const rows=result.rows||[];sheetOrders=rows;$('sheet-orders-status').textContent=`${Number(result.total||0).toLocaleString()} sheet orders${result.last_import_at?' · Updated '+date(result.last_import_at):''}`;$('sheet-orders-rows').innerHTML=rows.map(sheetRowHTML).join('')||'<tr><td colspan="8">No sheet orders imported.</td></tr>';$('sheet-orders-pages').innerHTML=result.total>50?`<button type="button" data-order-action="sheet-prev" ${start===0?'disabled':''}>← Previous</button><span>${start+1}–${Math.min(start+rows.length,result.total)} of ${result.total}</span><button type="button" data-order-action="sheet-next" ${result.next_offset===null?'disabled':''}>Next →</button>`:'';
   }catch(error){if(active()&&version===sheetGeneration&&permissions().role==='owner'){$('sheet-orders-status').textContent=error.message;$('sheet-orders-rows').innerHTML='<tr><td colspan="8"><button type="button" data-order-action="sheet-refresh">Retry sheet orders</button></td></tr>';$('sheet-orders-pages').innerHTML='';}}
  }
- async function loadLocations(){const result=await call('order_locations');locations=Array.isArray(result.locations)?result.locations.filter(x=>typeof x==='string'&&x.trim()):[];}
+ async function loadLocations(){const result=await call('order_locations');locations=Array.isArray(result.locations)?result.locations.filter(x=>typeof x==='string'&&x.trim()).sort(compareStoragePositions):[];}
  function actionForm(card,row,action){
   const slot=card.querySelector('.order-action-form'),err=card.querySelector('.order-error'),receipt=action==='receipt'||action==='sheet-receipt',sheetReceipt=action==='sheet-receipt';let receiptSubmission=null;err.textContent='';
   const titles={approve:'Approve purchase',reject:'Decline request',purchase:'Record purchase',receipt:'Record arrival','sheet-receipt':'Add arrived sheet order to Inventory',cancel:'Cancel request'};
