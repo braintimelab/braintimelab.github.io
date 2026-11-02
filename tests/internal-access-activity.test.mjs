@@ -95,14 +95,12 @@ test('mounted foreground and online returns revalidate access, while hidden page
  t.mock.method(Date,'now',()=>at);
  const element=id=>{if(!elements.has(id))elements.set(id,{type:id==='login-password'?'password':'',hidden:true,textContent:'',innerHTML:'',dataset:{},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const document={hidden:false,getElementById:element,querySelectorAll:()=>[],addEventListener:(name,fn)=>documentEvents.set(name,fn)};
- const window={location:new URL('https://lab.example/internal/'),addEventListener:(name,fn)=>windowEvents.set(name,fn)};
+ const window={location:new URL('https://lab.example/internal/'),sessionStorage:{getItem:()=> 'synthetic-session-hint'},addEventListener:(name,fn)=>windowEvents.set(name,fn)};
  const store={getCloudStatus:()=>({...current}),subscribeVerifiedMembership(fn){membershipListeners.add(fn);return()=>membershipListeners.delete(fn);},verifyCloudMembership:async()=>{verifications++;return {...current};},recordAppAccess:payload=>{events.push(payload);return {recorded:true};}};
  const source=(await readFile(new URL('../internal/portal.js',import.meta.url),'utf8'))
-  .replace(/^import .*;$/gm,'').replace(/^export /gm,'')
-  .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/,'const PUBLIC_CONFIG=globalThis.testConfig,backupViewerLinkHTML=()=>"";')
-  .replace(/const store = await import\('[^']+'\);/,'const store=globalThis.testStore;');
- const context=vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL,URLSearchParams,guestAllows,createAccessActivity,setTimeout,clearTimeout,testConfig:config,testStore:store});
- vm.runInContext(source,context);await context.mountPortal(document,window);await settle();
+  .replace(/^import .*;$/gm,'').replace(/^export /gm,'');
+ const context=vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL,URLSearchParams,guestAllows,createAccessActivity,setTimeout,clearTimeout});
+ vm.runInContext(source,context);const portal=await context.mountPortal(document,window,{loadStore:()=>store,loadConfig:()=>({PUBLIC_CONFIG:config,backupViewerLinkHTML:()=>''})});t.after(()=>portal.dispose());await settle();
  assert.equal(events.length,1);assert.equal(verifications,1);
  document.hidden=true;documentEvents.get('visibilitychange')();windowEvents.get('focus')();windowEvents.get('online')();await settle();
  assert.equal(verifications,1);assert.equal(events.length,1);

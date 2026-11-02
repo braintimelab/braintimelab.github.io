@@ -4,11 +4,16 @@ import {readFile} from 'node:fs/promises';
 
 const html=await readFile(new URL('../internal/index.html',import.meta.url),'utf8');
 const cards=[...html.matchAll(/<article class="tool-card"([^>]*)>([\s\S]*?)<\/article>/g)];
+const core=html.match(/<div class="tool-grid core-apps"[^>]*>([\s\S]*?)\n      <\/div>/)?.[1];
+const primary=[...core.matchAll(/<article class="tool-card"([^>]*)>([\s\S]*?)<\/article>/g)];
 
-test('Lab tools cards have unique accessible names and concise descriptions tied to the visible heading',()=>{
+test('Workspace presents exactly four central apps with accessible names and descriptions',()=>{
  const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(match=>match[1]);assert.equal(new Set(ids).size,ids.length);
+ assert.match(html,/<title>Braintime Workspace · Braintime Laboratory<\/title>/);
+ assert.match(html,/<h1 id="tools-heading">Braintime Workspace<\/h1>/);
  assert.match(html,/<a class="skip-link" href="#main">/);assert.match(html,/<main id="main"[^>]*tabindex="-1"/);
- assert.match(html,/<section id="tools-panel" hidden aria-labelledby="tools-list-heading">\s*<h2 id="tools-list-heading"/);
+ assert.match(html,/<section id="tools-panel" hidden aria-labelledby="tools-list-heading">/);
+ assert.deepEqual(primary.map(([,a])=>a.match(/aria-label="([^"]+)"/)[1]),['Braintime Boards','Mouse Data','Reagents','Primers']);
  assert.equal(cards.length,6);
  const names=new Set();
  for(const[,attributes,body]of cards){
@@ -18,24 +23,36 @@ test('Lab tools cards have unique accessible names and concise descriptions tied
  }
 });
 
-test('calculator destinations retain passive Disk badges and all analysis links stay together in category 05',()=>{
- const card=cards.find(([,attributes])=>attributes.includes('id="braintime-calculator-tool"'))?.[2];assert.ok(card);assert.match(card,/>05<\/span>/);
- for(const[id,path]of [['open-braintime-calculator','calculator'],['open-qpcr-calculator','qpcr']]){
-  const entry=card.match(new RegExp(`<div class="tool-entry"><a id="${id}"[^>]*href="https://braintimedisk\\.tail933238\\.ts\\.net:10000/${path}/"[^>]*>[^<]+</a><span class="availability">BraintimeDisk</span></div>`));assert.ok(entry,id);
- }
- for(const repository of ['ImagingAnalysis','LocoBox'])assert.ok(card.includes(`https://github.com/JihwanMyung/${repository}`));
- for(const[,body]of card.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g))assert.doesNotMatch(body,/<span class="availability">/);
- assert.match(html,/<article class="tool-card" data-member-document hidden/);
- assert.match(html,/<input id="login-password"[^>]*type="password"/);assert.match(html,/<span class="availability">Cloud 1<\/span>/);
+test('Primers is independent and precedes supporting calculators; qPCR stays with Primers',()=>{
+ const primer=primary.find(([,a])=>a.includes('id="braintime-primers-tool"'))?.[2];assert.ok(primer);assert.match(primer,/>03<\/span>/);
+ assert.match(primer,/id="open-braintime-primers"[^>]*href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/primers\/"/);
+ assert.ok(primer.indexOf('/primers/#catalog')<primer.indexOf('/primers/#design'));
+ assert.match(primer,/id="open-qpcr-calculator"[^>]*href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/qpcr\/"/);
+ const calc=cards.find(([,a])=>a.includes('id="braintime-calculator-tool"'))?.[2];assert.ok(calc);assert.match(calc,/>04<\/span>/);assert.doesNotMatch(calc,/\/primers\/|open-qpcr-calculator/);
+ assert.ok(html.indexOf('id="braintime-primers-tool"')<html.indexOf('id="support-heading"'));
+ assert.ok(html.indexOf('id="support-heading"')<html.indexOf('id="braintime-calculator-tool"'));
+ for(const route of ['circadian','gestation','genotype'])assert.ok(calc.includes(`/calculator/#${route}`));
+ for(const repository of ['ImagingAnalysis','LocoBox'])assert.ok(calc.includes(`https://github.com/JihwanMyung/${repository}`));
+ assert.doesNotMatch(primer,/data-portal-tool=/,'native Primers must not be dispatched through the Reagents handler');
 });
 
-test('loading and Retry hooks remain native while daily shortcuts stay within verified service cards',()=>{
- const progress=html.match(/<progress\b[^>]*id="portal-progress"[^>]*>/)?.[0];assert.ok(progress);assert.doesNotMatch(progress,/\bvalue=/);assert.match(progress,/aria-label="Loading lab tools"/);
+test('Disk is below Experiment sheet inside Boards and is not a standalone card',()=>{
+ const board=primary[0][2];assert.ok(board.indexOf('Experiment sheet')<board.indexOf('https://braintimedisk.tw4.quickconnect.to'));
+ assert.match(board,/href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/"/);
+ assert.match(board,/data-member-document hidden href="https:\/\/docs\.google\.com\/spreadsheets/);
+ assert.ok(!cards.some(([,a])=>a.includes('aria-label="BraintimeDisk"')));
+ assert.equal((html.match(/href="https:\/\/braintimedisk.tw4.quickconnect.to"/g)||[]).length,1);
+ assert.doesNotMatch(board,/data-portal-tool=/,'native Boards must not be dispatched through the Reagents handler');
+});
+
+test('protocol documents remain member-gated and secondary; shortcuts preserve permission checks',()=>{
+ const protocol=cards.find(([,a])=>a.includes('aria-label="Protocols &amp; lab notes"'));assert.ok(protocol);assert.match(protocol[1],/data-member-document hidden/);
+ assert.match(protocol[2],/<details class="protocol-library"><summary>Protocols &amp; references<\/summary>/);
+ assert.match(html,/<input id="login-password"[^>]*type="password"/);
  assert.match(html,/<button id="retry-access"[^>]*type="button" hidden>Retry<\/button>/);
  for(const[tool,routes]of [['mouse-data',['cages','mice']],['reagents',['orders','inventory']]]){
-  const card=cards.find(([,attributes])=>attributes.includes(`aria-label="${tool==='mouse-data'?'Mouse Data':'Reagents'}"`))?.[2];assert.ok(card);
+  const card=primary.find(([,a])=>a.includes(`id="${tool==='mouse-data'?'mouse-data-tool':'reagents-tool'}"`))?.[2];assert.ok(card);
   for(const route of routes)assert.match(card,new RegExp(`<a href="\\.\\./${tool}/#${route}" data-portal-tool="${tool}" data-route="${route}">`));
  }
- const calculator=cards.find(([,attributes])=>attributes.includes('id="braintime-calculator-tool"'))?.[2];for(const route of ['circadian','gestation','genotype'])assert.ok(calculator.includes(`/calculator/#${route}`));
- assert.doesNotMatch(html,/href="https:\/\/braintimedisk[^\"]+\/(?:#|\?open=)(?:calendar|meetings|journal-club)"/);
+ assert.doesNotMatch(html,/https:\/\/braintimemain\./,'this presentation update must not activate Main');
 });

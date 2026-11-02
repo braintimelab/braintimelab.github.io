@@ -17,16 +17,36 @@ export function togglePasswordVisibility(input, button, show = input.type === 'p
 
 /** Small view controller. Authentication, refresh and membership stay in the shared store. */
 export function createPortalController({store, config, location, navigate, onState = () => {}, timers = globalThis, deadlineMs = 45000, isVisible = () => true}) {
-  let generation = 0, pendingCheck = null, pendingAction = null;
+  let generation = 0, pendingCheck = null, pendingAction = null, pendingVerification = null;
   let verifiedIdentity = '';
-  let state = Object.freeze({phase: 'signed-out', busy: false, background: false, message: '', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
-  const identityKey = current => JSON.stringify([current.url, current.colonyId, current.userId, current.sessionEpoch, current.email, current.role, current.signedIn, current.passwordRecovery, current.setupRequired]);
+  let state = Object.freeze({phase: 'signed-out', busy: false, background: false, memberShell: false, message: '', error: false, identity: '', hasSession: false, notice: null, memberDocuments: false, shortcuts: NO_SHORTCUTS});
+  const canonicalIdentity = value => Array.isArray(value) ? value.map(canonicalIdentity)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalIdentity(value[key])])) : value;
+  const identityKey = current => JSON.stringify(canonicalIdentity([current.url, current.colonyId, current.userId, current.sessionEpoch, current.email, current.role,
+    current.signedIn, current.passwordRecovery, current.setupRequired, current.guestLevel, current.exportLevel, current.guestPermissions,
+    current.mousePermissions, current.reagentsPermissions, current.permissions, current.guestAccessStartsOn, current.guestAccessEndsOn, current.guestAvailability]));
+  const accountKey = current => JSON.stringify([current.url, current.colonyId, current.userId, current.sessionEpoch, current.email,
+    current.signedIn, current.passwordRecovery, current.setupRequired]);
   const activity = createAccessActivity({app: 'lab-tools', sections: ['tools'], record: store.recordAppAccess,
     // A data-free membership check verifies portal access even before Mouse Data
     // has selected its dataset mode. Do not load animal records for activity.
     getContext: () => { const current = store.getCloudStatus(); return verifiedIdentity && identityKey(current) === verifiedIdentity ? {...current, mode: 'cloud'} : null; },
     isVisible, setTimer: (fn, delay) => timers.setTimeout(fn, delay), clearTimer: timer => timers.clearTimeout(timer)});
   const stopMembership = store.subscribeVerifiedMembership?.(current => {
+    const observed = store.getCloudStatus();
+    if (state.memberShell && identityKey(observed) !== verifiedIdentity
+      || pendingVerification?.attempt === generation && accountKey(observed) !== pendingVerification.account) {
+      // Revoke the old check at the notification itself, not at a later focus.
+      // Its result cannot republish access for the previous account or policy.
+      generation++;
+      pendingCheck = null;
+      pendingVerification = null;
+      verifiedIdentity = '';
+      activity.reset();
+      publish({phase: observed.passwordRecovery ? 'recovery' : observed.setupRequired || observed.role === 'pending' ? 'setup' : observed.signedIn ? 'checking' : 'signed-out',
+        memberShell: false, identity: '', hasSession: observed.signedIn === true,
+        busy: false, message: 'Your session changed. Check your access again.', error: true});
+    }
     if (state.phase !== 'checking' || !current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
       || current.url !== config.url || current.colonyId !== config.colonyId || identityKey(current) !== identityKey(store.getCloudStatus())) return;
     verifiedIdentity = identityKey(current);
@@ -36,6 +56,10 @@ export function createPortalController({store, config, location, navigate, onSta
   const reagentsURL = () => new URL('../reagents/', location.href).href;
   const publish = update => {
     const next = {...state, ...update};
+    // This preserves layout only. Checking still removes every protected link,
+    // permission shortcut and presence feed until the fresh check completes.
+    next.memberShell = next.phase === 'member' || next.phase === 'checking' && next.memberShell === true
+      && Boolean(verifiedIdentity) && identityKey(store.getCloudStatus()) === verifiedIdentity;
     if (next.phase !== 'checking') next.background = false;
     if (next.phase !== 'member') { next.memberDocuments = false; next.shortcuts = NO_SHORTCUTS; }
     if (!['member', 'checking'].includes(next.phase)) { verifiedIdentity = ''; activity.reset(); }
@@ -59,10 +83,14 @@ export function createPortalController({store, config, location, navigate, onSta
     if (!current.signedIn) return publish({phase: 'signed-out', busy: false, message: '', error: false, identity: '', hasSession: false});
     if (current.passwordRecovery) return publish({phase: 'recovery', busy: false, message: '', error: false, identity: '', hasSession: true});
     if (current.setupRequired || current.role === 'pending') return publish({phase: 'setup', busy: false, message: '', error: false, identity: '', hasSession: true});
-    current = await store.verifyCloudMembership({canCommit: () => attempt === generation});
+    const verification = {attempt, account: accountKey(current)};
+    pendingVerification = verification;
+    try { current = await store.verifyCloudMembership({canCommit: () => attempt === generation}); }
+    finally { if (pendingVerification === verification) pendingVerification = null; }
     if (attempt !== generation) return state;
     if (!current.signedIn || current.passwordRecovery || current.setupRequired || !MEMBER_ROLES.has(current.role)
-      || current.url !== config.url || current.colonyId !== config.colonyId) throw new Error('Your lab access could not be verified. Sign in again.');
+      || current.url !== config.url || current.colonyId !== config.colonyId
+      || identityKey(current) !== identityKey(store.getCloudStatus())) throw new Error('Your lab access could not be verified. Sign in again.');
     verifiedIdentity = identityKey(current);
     const verified = publish({phase: 'member', busy: false, message: '', error: false, identity: current.email || current.username || 'Signed in', hasSession: true, notice: null,
       memberDocuments: current.guestLevel === null && MEMBER_LEVELS.has(current.exportLevel),
@@ -96,10 +124,23 @@ export function createPortalController({store, config, location, navigate, onSta
 
   async function checkAccess() {
     if (pendingAction) return state;
-    if (pendingCheck) return pendingCheck.promise;
-    const check = {attempt: ++generation, promise: null};
+    const current = store.getCloudStatus();
+    const sameMember = Boolean(verifiedIdentity) && identityKey(current) === verifiedIdentity
+      && current.signedIn && !current.passwordRecovery && !current.setupRequired
+      && MEMBER_ROLES.has(current.role) && current.url === config.url && current.colonyId === config.colonyId;
+    if (pendingCheck) {
+      if (!pendingCheck.memberIdentity || identityKey(current) === pendingCheck.memberIdentity) return pendingCheck.promise;
+      // A lifecycle event noticed a different account while the old account's
+      // read was in flight. Its late result must not restore the old shell.
+      generation++;
+      pendingCheck = null;
+      verifiedIdentity = '';
+      publish({memberShell: false, identity: ''});
+    }
+    const keepShell = state.phase === 'member' && sameMember;
+    const check = {attempt: ++generation, promise: null, memberIdentity: keepShell ? verifiedIdentity : ''};
     pendingCheck = check;
-    publish({phase: 'checking', busy: true, background: true, message: 'Checking your session…', error: false, identity: '', notice: null});
+    publish({phase: 'checking', busy: true, background: true, memberShell: keepShell, message: 'Checking your session…', error: false, identity: keepShell ? state.identity : '', notice: null});
     check.promise = (async () => {
       try {
         configure();
@@ -210,7 +251,7 @@ export function createPortalController({store, config, location, navigate, onSta
 }
 
 export async function mountPortal(document, window, {
-  loadStore = () => import('../mouse-data/data-store.js?v=175'),
+  loadStore = () => import('../mouse-data/data-store.js?v=185'),
   loadConfig = () => import('../mouse-data/config.js'),
   timers = globalThis, loadDeadlineMs = 15000
 } = {}) {
@@ -226,10 +267,11 @@ export async function mountPortal(document, window, {
   };
   function render(next) {
       state = next;
-      element('sign-in-panel').hidden = !['signed-out', 'checking'].includes(state.phase);
-      element('tools-panel').hidden = state.phase !== 'member';
+      const memberShell = state.phase === 'member' || state.phase === 'checking' && state.memberShell === true;
+      element('sign-in-panel').hidden = memberShell || !['signed-out', 'checking'].includes(state.phase);
+      element('tools-panel').hidden = !memberShell;
       for (const resource of document.querySelectorAll('[data-member-document]')) resource.hidden = state.phase !== 'member' || state.busy || !state.memberDocuments;
-      element('member-account').hidden = state.phase !== 'member';
+      element('member-account').hidden = !memberShell;
       element('account-panel').hidden = !['setup', 'recovery'].includes(state.phase);
       element('discard-session').hidden = !state.hasSession;
       element('portal-status').textContent = state.message;
@@ -238,6 +280,7 @@ export async function mountPortal(document, window, {
       element('portal-progress').setAttribute('aria-label', state.message || 'Working…');
       element('retry-access').hidden = state.busy || !state.error;
       for (const link of document.querySelectorAll('[data-portal-tool][data-route]')) link.hidden = state.busy || !state.shortcuts[link.dataset.portalTool + ':' + link.dataset.route];
+      for (const link of document.querySelectorAll('[data-portal-tool]')) link.setAttribute('aria-disabled', String(state.phase !== 'member' || state.busy));
       element('member-identity').textContent = state.identity;
       element('main').setAttribute('aria-busy', String(state.busy));
       for (const button of document.querySelectorAll('button')) button.disabled = state.busy && !state.background;
@@ -341,6 +384,7 @@ export async function mountPortal(document, window, {
   element('retry-access').addEventListener('click', () => void facade.checkAccess());
   for (const link of document.querySelectorAll('[data-portal-tool]')) {
     link.addEventListener('click', event => {
+      if (state.phase !== 'member' || state.busy) { event.preventDefault(); return; }
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button > 0) return;
       event.preventDefault();
       const open = link.dataset.portalTool === 'mouse-data' ? facade.openMouseData : facade.openReagents;
@@ -350,7 +394,7 @@ export async function mountPortal(document, window, {
   const concealPassword = () => togglePasswordVisibility(element('login-password'), element('show-password'), false);
 
   const recheck = () => {
-    if (!document.hidden && !state.busy && (controller || hasSessionHint())) void facade.checkAccess();
+    if (!document.hidden && (!state.busy || state.phase === 'checking') && (controller || hasSessionHint())) void facade.checkAccess();
   };
   window.addEventListener('focus', recheck);
   window.addEventListener('pageshow', event => { concealPassword(); if (event.persisted) recheck(); });

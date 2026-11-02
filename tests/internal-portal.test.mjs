@@ -21,10 +21,13 @@ function fixture(options = {}) {
   const store = {
     getCloudStatus: () => ({...status}),
     configureCloud(value) { calls.push(['configure', value]); status = signedOut(); },
-    async verifyCloudMembership() {
+    async verifyCloudMembership({canCommit = () => true} = {}) {
       calls.push(['verify']);
-      if (options.verification) return options.verification();
-      return {...status};
+      const result = options.verification ? await options.verification() : {...status};
+      // The maintained store returns its committed getCloudStatus snapshot.
+      // A cancelled old check must not replace a newer fake session either.
+      if (canCommit() && result?.signedIn) status = {...result};
+      return result;
     },
     async signIn(identifier, password) { calls.push(['signIn', identifier, password]); status = member(options.signedInStatus); },
     async signOut() { calls.push(['signOut']); status = signedOut(); if (options.logoutWait) await options.logoutWait; },
@@ -277,22 +280,28 @@ test('published page starts with tools hidden, accessible labels and a Reagents 
 test('Lab tools presents one service card per app without the cloud-links banner', async () => {
   const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
   assert(!/id="cloud[12]-entry"|class="cloud-options"/.test(html));
-  assert.match(html, /<h3>Lab Boards &amp; Experiments<\/h3>/);
+  assert.match(html, /<h3>Braintime Boards<\/h3>/);
   assert.match(html, /id="lab-notes-tool"/);
-  assert.match(html, /href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/">Lab Boards<\/a>/);
+  assert.match(html, /href="https:\/\/braintimedisk\.tail933238\.ts\.net:10000\/">Open Boards /);
 });
 
-test('the portal imports the same maintained store release as Mouse Data and Reagents', async () => {
-  const [portal, mouse, reagents] = await Promise.all([
-    '../internal/portal.js', '../mouse-data/app.js', '../reagents/app.js'
-  ].map(path => readFile(new URL(path, import.meta.url), 'utf8')));
-  const version = text => text.match(/data-store\.js\?v=(\d+)/)?.[1];
-  assert(version(mouse));
-  assert.equal(version(portal), version(mouse));
-  assert.equal(version(reagents), version(mouse));
-  assert.match(version(mouse), /^\d+$/, 'the verified-membership observer and its consumers share one versioned store instance');
+test('the portal and apps use the same maintained versioned store entrypoint', async () => {
+  const consumers = ['../internal/portal.js', '../mouse-data/app.js', '../reagents/app.js'];
+  const paths = [];
+  for (const consumer of consumers) {
+    const code = await readFile(new URL(consumer, import.meta.url), 'utf8');
+    const ref = code.match(/["']([^"']*data-store\.js\?v=\d+)["']/)?.[1];
+    assert(ref, consumer);
+    const url = new URL(ref, new URL(consumer, import.meta.url));
+    assert.match(url.search, /^\?v=\d+$/);
+    paths.push(url.pathname);
+  }
+  assert.equal(new Set(paths).size, 1, 'separate documents share the maintained store source, with their own cache versions');
+  const shared = await readFile(new URL('../mouse-data/data-store.js', import.meta.url), 'utf8');
+  assert.match(shared, /export (?:async )?function verifyCloudMembership/);
+  assert.match(shared, /export (?:async )?function subscribeVerifiedMembership/);
   const html = await readFile(new URL('../internal/index.html', import.meta.url), 'utf8');
-  assert.match(html, /portal\.js\?v=\d+/, 'portal code has an explicit immutable cache URL');
+  assert.match(html, /portal\.js\?v=\d+/);
 });
 
 test('opening Reagents independently rechecks live access and fails closed after revocation', async () => {

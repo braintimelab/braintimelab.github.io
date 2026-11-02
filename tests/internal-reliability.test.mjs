@@ -37,7 +37,12 @@ function fixture({status = member(), verify, login, logout, reset, email} = {}) 
   const store = {
     getCloudStatus: () => ({...current}),
     configureCloud() { throw Error('The existing lab configuration must be retained'); },
-    async verifyCloudMembership() { calls.push(['verify']); return verify ? verify() : {...current}; },
+    async verifyCloudMembership({canCommit = () => true} = {}) {
+      calls.push(['verify']); const result = verify ? await verify() : {...current};
+      // Mirror the real store's committed status, retaining its canCommit fence.
+      if (canCommit() && result?.signedIn) current = {...result};
+      return result;
+    },
     async signIn(identifier, password) { calls.push(['login', identifier]); if (login) await login(identifier, password); else current = member({email: identifier}); },
     async signOut() { calls.push(['logout']); current = signedOut(); if (logout) await logout(); },
     async requestPasswordReset(identifier) { calls.push(['reset', identifier]); if (reset) return reset(); },
@@ -177,12 +182,10 @@ async function mounted() {
   let status = signedOut(), verify = async () => status;
   const store = {getCloudStatus: () => status, verifyCloudMembership: () => verify()};
   const source = (await readFile(new URL('../internal/portal.js', import.meta.url), 'utf8'))
-    .replace(/^import .*;$/gm, '').replace(/^export /gm, '')
-    .replace(/const \{PUBLIC_CONFIG, backupViewerLinkHTML\} = await import\('[^']+'\);/, 'const PUBLIC_CONFIG = globalThis.testConfig, backupViewerLinkHTML = () => "";')
-    .replace(/const store = await import\('[^']+'\);/, 'const store = globalThis.testStore;');
-  const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout, testConfig: config, testStore: store});
+    .replace(/^import .*;$/gm, '').replace(/^export /gm, '');
+  const context = vm.createContext({createPresence:()=>({refresh(){},clear(){},destroy(){}}),URL, URLSearchParams, guestAllows, createAccessActivity, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout});
   vm.runInContext(source, context);
-  const controller = await context.mountPortal(document, window);
+  const controller = await context.mountPortal(document, window, {loadStore: () => store, loadConfig: () => ({PUBLIC_CONFIG: config, backupViewerLinkHTML: () => ''})});
   return {element, document, documentEvents, windowEvents, controller, setStatus: value => { status = value; }, setVerify: value => { verify = value; }};
 }
 
