@@ -111,12 +111,12 @@ test('every standalone Google sheet link and the full Protocols card start hidde
       standalone++;
     }
   }
-  assert.equal(standalone, 3);
-  assert.equal((html.match(/data-member-document/g) || []).length, 4);
+  assert.equal(standalone, 4);
+  assert.equal((html.match(/data-member-document/g) || []).length, 5);
 });
 
 test('mounted portal hides all document groups for Guests and reveals them only after member verification', async () => {
-  const elements = new Map(), resources = Array.from({length: 4}, () => ({hidden: true}));
+  const elements = new Map(), resources = Array.from({length: 5}, () => ({hidden: true}));
   const element = id => {
     if (!elements.has(id)) elements.set(id, {hidden: true, textContent: '', innerHTML: '', dataset: {}, attributes: new Map(),
       setAttribute(name, value) { this.attributes.set(name, value); }, addEventListener() {}});
