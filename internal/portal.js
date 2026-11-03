@@ -53,7 +53,7 @@ export function createPortalController({store, config, location, navigate, onSta
     activity.resume('tools');
   });
   const appURL = () => new URL('../mouse-data/', location.href).href;
-  const reagentsURL = () => new URL('../reagents/', location.href).href;
+  const reagentsURL = () => 'https://braintimedisk.tail933238.ts.net:10000/reagents/';
   const publish = update => {
     const next = {...state, ...update};
     // This preserves layout only. Checking still removes every protected link,
