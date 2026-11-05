@@ -1,0 +1,45 @@
+.launcher-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 22px;
+}
+
+.launcher-choices > :is(a, span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 4px 14px;
+  border: 1px solid #aabdcf;
+  border-radius: 999px;
+  color: #1f4c7d;
+  text-decoration: none;
+  font-weight: 550;
+}
+
+.launcher-choices a:hover {
+  background: #eaf1f7;
+}
+
+.launcher-choices a:focus-visible {
+  outline: 2px solid #24598b;
+  outline-offset: 2px;
+}
+
+.launcher-choices [aria-current="page"] {
+  border-color: #c3c9c6;
+  background: #eeefe9;
+  color: #38464c;
+}
+
+.launcher-status {
+  max-width: 42rem;
+  padding-block: 14px;
+  border-block-start: 1px solid var(--line, #d7d4c7);
+}
+
+.launcher-status h2 {
+  font-size: 17px;
+  margin-block: 0 7px;
+}
