@@ -33,6 +33,19 @@ test('missing required asset fails before changing an existing package',async t=
   assert.equal(await readFile(join(f.destinationRoot,'reagents','app.js'),'utf8'),'Synthetic public asset app.js\n');
 });
 
+test('later app publication preserves the independent entry and refreshes only the Limited HTML',async t=>{
+  const f=await fixture(t);await mkdir(join(f.destinationRoot,'reagents'));
+  const gateway='<!doctype html><body data-app-entry="reagents">Independent routing</body>';
+  await writeFile(join(f.destinationRoot,'reagents','index.html'),gateway);
+  await syncReagentsApp(f);
+  assert.equal(await readFile(join(f.destinationRoot,'reagents','index.html'),'utf8'),gateway);
+  assert.equal(await readFile(join(f.destinationRoot,'reagents','legacy.html'),'utf8'),'Synthetic public asset index.html\n');
+  await writeFile(join(f.source,'web','index.html'),'Updated Limited app HTML');await syncReagentsApp(f);
+  assert.equal(await readFile(join(f.destinationRoot,'reagents','index.html'),'utf8'),gateway);
+  assert.equal(await readFile(join(f.destinationRoot,'reagents','legacy.html'),'utf8'),'Updated Limited app HTML');
+  assert.equal(await readFile(join(f.destinationRoot,'reagents-files.txt'),'utf8'),[...REAGENTS_PUBLIC_FILES,'legacy.html'].sort().join('\n')+'\n');
+});
+
 test('allowed source symlinks and unexpected destination files are rejected, not copied or deleted',async t=>{
   const f=await fixture(t);await rm(join(f.source,'web','model.js'));
   const secret=join(f.source,'secret.json');await writeFile(secret,'PRIVATE-TEST-ROW');await symlink(secret,join(f.source,'web','model.js'));

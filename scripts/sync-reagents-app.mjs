@@ -2,6 +2,7 @@
 import {readFile,writeFile,readdir,lstat,realpath,mkdir} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {retainedAppEntry} from './app-entry-preservation.mjs';
 
 export const REAGENTS_PUBLIC_FILES = Object.freeze([
   'app.js', 'index.html', 'inventory-export.js', 'manifest.webmanifest', 'model.js', 'orders.js', 'styles.css', 'table-sort.js', 'usage.js'
@@ -51,10 +52,13 @@ export async function syncReagentsApp({source,destinationRoot=defaultRoot}) {
     rejectSecrets(bytes,name);
     assets.set(name,bytes);
   }
+  const entry=await retainedAppEntry(output,'reagents');
+  if(entry){assets.set('legacy.html',assets.get('index.html'));assets.set('index.html',entry);}
+  const publicFiles=[...assets.keys()].sort();
   try {
     await ordinary(output,'directory');
     for(const name of await readdir(output)) {
-      if(!REAGENTS_PUBLIC_FILES.includes(name)) throw new Error(`Unexpected file in Reagents package: ${name}`);
+      if(!publicFiles.includes(name)) throw new Error(`Unexpected file in Reagents package: ${name}`);
       await ordinary(join(output,name),'file');
     }
   } catch(error) {
@@ -64,8 +68,8 @@ export async function syncReagentsApp({source,destinationRoot=defaultRoot}) {
   try { await ordinary(manifestPath,'file'); } catch(error) { if(error.code!=='ENOENT') throw error; }
   await mkdir(output,{recursive:true});
   for(const [name,bytes] of assets) await writeFile(join(output,name),bytes);
-  await writeFile(manifestPath,REAGENTS_PUBLIC_FILES.join('\n')+'\n');
-  return {output,files:[...REAGENTS_PUBLIC_FILES]};
+  await writeFile(manifestPath,publicFiles.join('\n')+'\n');
+  return {output,files:publicFiles};
 }
 
 if(process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
