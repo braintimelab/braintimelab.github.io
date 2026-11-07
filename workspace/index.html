@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://braintimemain.tail933238.ts.net:10000 https://braintimedisk.tail933238.ts.net:10000; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#f7f4e7">
+  <title>Braintime Workspace</title>
+  <link rel="icon" href="/mouse-data/icons/braintime-mark.png" type="image/png">
+  <link rel="stylesheet" href="/assets/app-entry.css?v=1">
+  <script type="module" src="/assets/app-entry.mjs?v=2"></script>
+</head>
+<body data-app-entry="workspace">
+  <main class="entry">
+    <a class="brand" href="/" aria-label="Braintime Laboratory home"><img src="/mouse-data/icons/braintime-mark.png" width="46" height="46" alt=""><span>Braintime<small>Laboratory</small></span></a>
+    <h1>Braintime Workspace</h1>
+    <nav aria-label="Choose a server" data-workspace-servers>
+      <a href="https://braintimemain.tail933238.ts.net:10000/workspace/" data-main-entry>Main</a>
+      <a href="https://braintimedisk.tail933238.ts.net:10000/workspace/" data-recovery-entry>Recovery</a>
+      <a href="/internal/limited/" data-limited-entry>Limited</a>
+    </nav>
+    <p id="workspace-entry-status" role="status">Opening Main. Recovery is a read-only backup.</p>
+    <noscript><p>Choose Main or Recovery above to continue.</p></noscript>
+  </main>
+</body>
+</html>
