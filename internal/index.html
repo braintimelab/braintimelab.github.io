@@ -5,17 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://njhetwortngnniyrhcfk.supabase.co https://braintimedisk.tail933238.ts.net:10000; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://braintimemain.tail933238.ts.net:10000; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="theme-color" content="#f7f4e7">
   <title>Braintime Workspace · Braintime Laboratory</title>
   <link rel="icon" href="../mouse-data/icons/braintime-mark.png" type="image/png">
   <link rel="stylesheet" href="./portal.css?v=18">
-  <meta http-equiv="refresh" content="0; url=https://braintimemain.tail933238.ts.net:10000/workspace/">
+  <script type="module" src="./workspace-entry.mjs?v=1"></script>
 </head>
 <body>
   <main class="portal">
     <h1>Braintime Workspace</h1>
-    <p><a class="button primary" href="https://braintimemain.tail933238.ts.net:10000/workspace/">Open Workspace</a></p>
+    <nav class="portal-toolbar" aria-label="Workspace servers" data-workspace-servers>
+      <a class="button primary" href="https://braintimemain.tail933238.ts.net:10000/workspace/" data-main-entry>Main</a>
+      <a class="button secondary" href="https://braintimedisk.tail933238.ts.net:10000/workspace/">Recovery</a>
+      <a class="button secondary" href="./limited/">Limited</a>
+    </nav>
+    <p id="workspace-entry-status" role="status">Recovery opens the read-only backup.</p>
   </main>
   <template id="preserved-legacy-workspace">
   <a class="skip-link" href="#main">Skip to content</a>
