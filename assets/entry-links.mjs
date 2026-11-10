@@ -3,7 +3,8 @@
 // Otherwise they keep their entry page, which still decides Main -> Recovery -> Limited.
 const MAIN = 'https://braintimemain.tail933238.ts.net:10000'; // app-entry.mjs's Main (tested); warmed before it loads
 const APPS = Object.freeze({'/workspace/':'workspace','/boards/':'boards','/mouse-data/':'mouse-data','/reagents/':'reagents',
-  '/primers/':'primers','/calculator/':'calculator','/internal/':'workspace'}); // /internal/ routes exactly like /workspace/
+  '/primers/':'primers','/calculator/':'calculator','/internal/':'workspace', // /internal/ routes exactly like /workspace/
+  '/mouse/':'mouse-data','/animals/':'mouse-data'}); // the short names route exactly like /mouse-data/ (same page)
 const NAMES = Object.freeze({workspace:'Workspace',boards:'Boards','mouse-data':'Mouse Data',reagents:'Reagents',primers:'Primers',calculator:'Calculator'});
 export const FRESH = 45_000; // a verified Main is used for at most 45 s, and never past its status' own 60 s window
 export const PATIENCE = 800; // a plain click waits for the shared probe only while it is younger than this

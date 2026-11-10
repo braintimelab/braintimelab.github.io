@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,readdir} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {openApp,mainReady,mainValidUntil,recoveryReady,destinations,probeMain} from '../assets/app-entry.mjs';
 import {enhanceEntryLinks,FRESH,PATIENCE} from '../assets/entry-links.mjs';
+import {retainedAppEntry} from '../scripts/app-entry-preservation.mjs';
 
 const now=Date.parse('2026-11-08T00:00:00Z');
 const primary={format:'braintime-public-service-status-v2',deploymentId:'61af3893-f1cb-417c-8c7c-2b7cfb0a89fd',cloudId:'cloud1',mode:'primary',generation:'current-primary-generation',captureSha256:'a'.repeat(64),observedAt:new Date(now).toISOString(),service:'ready',authReady:true,dataReady:true,writable:true,acceptances:{identity:'b'.repeat(64),projection:'c'.repeat(64),service:'d'.repeat(64)}};
@@ -19,6 +21,10 @@ function fixture(app='workspace',{search='',hash=''}={}) {
 function run(f,{main=primary,recovery=backup,fetcher,timeout=25}={}) {
   return openApp({...f,timeout,now:()=>now,fetchImpl:async(url,options)=>{f.requests.push({url,options});return fetcher?fetcher(url,options):response(url.includes('braintimemain.')?main:recovery);}});
 }
+// Every public entry page by folder, with the app it opens. /mouse/ and /animals/ are the owner's short names for Mouse Data:
+// the same page as /mouse-data/, which stays for existing links and bookmarks.
+const ENTRY_PAGES=Object.freeze({workspace:'workspace',boards:'boards','mouse-data':'mouse-data',mouse:'mouse-data',animals:'mouse-data',reagents:'reagents',primers:'primers',calculator:'calculator'});
+const ALIASES=['mouse','animals'];
 
 test('all six direct links use their exact Main path and preserve ordinary menu fragments',async()=>{
   const paths={workspace:'/workspace/',boards:'/', 'mouse-data':'/mouse-data/',reagents:'/reagents/',primers:'/primers/',calculator:'/calculator/'};
@@ -79,9 +85,9 @@ test('health probes omit sessions, follow no redirects and use only fixed origin
   for(const {options} of f.requests){assert.equal(options.credentials,'omit');assert.equal(options.cache,'no-store');assert.equal(options.redirect,'error');assert.equal(options.referrerPolicy,'no-referrer');}
 });
 test('public entry pages have usable manual links and no legacy app startup or authentication',async()=>{
-  for(const app of ['workspace','boards','mouse-data','reagents','primers','calculator']){
-    const html=await readFile(new URL('../'+app+'/index.html',import.meta.url),'utf8');
-    assert(html.includes('data-app-entry="'+app+'"'));assert.match(html,/data-main-entry>Main/);assert.match(html,/data-recovery-entry>Recovery/);assert.match(html,/data-limited-entry>Limited/);
+  for(const [folder,app] of Object.entries(ENTRY_PAGES)){
+    const html=await readFile(new URL('../'+folder+'/index.html',import.meta.url),'utf8');
+    assert(html.includes('data-app-entry="'+app+'"'),folder);assert.match(html,/data-main-entry>Main/);assert.match(html,/data-recovery-entry>Recovery/);assert.match(html,/data-limited-entry>Limited/);
     assert(!html.includes('app.js?'));assert(!/<input|<form/.test(html));assert.match(html,/assets\/app-entry.mjs\?v=3/);
   }
   for(const app of ['mouse-data','reagents'])assert.match(await readFile(new URL('../'+app+'/legacy.html',import.meta.url),'utf8'),/app.js\?v=/);
@@ -126,6 +132,37 @@ test('importing app-entry on a page that is not an entry page starts no routing'
   try{const module=await import('../assets/app-entry.mjs?page-without-entry');assert.equal(typeof module.probeMain,'function');}
   finally{delete globalThis.document;delete globalThis.window;}
   assert.deepEqual(seen,[]);
+});
+test('the short names /mouse/ and /animals/ are the Mouse Data entry page, byte for byte, and no app package writes them',async()=>{
+  const read=path=>readFile(new URL('../'+path,import.meta.url)),folder=name=>fileURLToPath(new URL('../'+name+'/',import.meta.url));
+  const page=await read('mouse-data/index.html');
+  assert.match(page.toString('utf8'),/<body data-app-entry="mouse-data">/);
+  for(const alias of ALIASES){
+    assert(page.equals(await read(alias+'/index.html')),alias+'/index.html must stay a copy of mouse-data/index.html');
+    assert.deepEqual((await readdir(folder(alias))).filter(name=>name!=='.DS_Store'),['index.html'],alias); // .DS_Store is git-ignored
+  }
+  // The packaging safeguard (3a2e462) keeps the two entry pages that share a folder with a published Limited app.
+  // No package writes /mouse/ or /animals/, so the safeguard deliberately knows no such app.
+  for(const app of ['mouse-data','reagents'])assert((await retainedAppEntry(folder(app),app))?.equals(await read(app+'/index.html')),app);
+  for(const alias of ALIASES)await assert.rejects(retainedAppEntry(folder(alias),alias),/Unknown public app/);
+});
+test('/mouse/ and /animals/ route exactly like /mouse-data/: Main, then read-only Recovery, then Limited, honouring ?server= and ?choose',async()=>{
+  const routes=async folder=>{
+    const html=await readFile(new URL('../'+folder+'/index.html',import.meta.url),'utf8'),app=html.match(/<body data-app-entry="([^"]+)">/)[1];
+    const manual=Object.fromEntries([...html.matchAll(/<a href="([^"]+)" data-(main|recovery|limited)-entry>/g)].map(([,href,server])=>[server,href]));
+    const up=fixture(app,{hash:'#cages'});await run(up);
+    const down=fixture(app);await run(down,{fetcher:async url=>{if(url.includes('braintimemain.'))throw Error('unavailable');return response(backup);}});
+    const offline=fixture(app);await run(offline,{fetcher:async()=>{throw Error('offline');}});
+    const chosen=fixture(app,{search:'?server=recovery'});await run(chosen);
+    const choose=fixture(app,{search:'?choose'});await run(choose);
+    return {app,manual,main:up.replaced,recoveryLink:up.links.recovery.href,mainDown:down.replaced,bothDown:offline.replaced,
+      serverRecovery:[chosen.replaced,chosen.requests.length],choose:[choose.replaced,choose.requests.length]};
+  };
+  const RECOVERY_ORIGIN='https://braintimedisk.tail933238.ts.net:10000',expected=await routes('mouse-data');
+  assert.deepEqual(expected,{app:'mouse-data',manual:{main:MAIN_ORIGIN+'/mouse-data/',recovery:RECOVERY_ORIGIN+'/mouse-data/',limited:'/internal/limited/'},
+    main:[MAIN_ORIGIN+'/mouse-data/#cages'],recoveryLink:RECOVERY_ORIGIN+'/mouse-data/#cages',mainDown:[RECOVERY_ORIGIN+'/mouse-data/'],bothDown:['/internal/limited/'],
+    serverRecovery:[[RECOVERY_ORIGIN+'/mouse-data/'],0],choose:[[],0]});
+  for(const alias of ALIASES)assert.deepEqual(await routes(alias),expected,alias);
 });
 
 // Public pages: links to the entry pages go straight to Main while a shared probe has just verified it.
@@ -365,6 +402,30 @@ test('all six apps and the /internal/ launcher map to their exact Main destinati
   assert.deepEqual(f.hrefs(),[['workspace'],['boards'],['mouse-data','#cages'],['reagents'],['primers'],['calculator'],['workspace'],['workspace','#access_token=secret']].map(([app,hash])=>destinations(app,hash).main));
   f.emit('pageshow',{persisted:true});assert.deepEqual(f.hrefs(),hrefs);
 });
+test('links to the short names /mouse/ and /animals/ take the fast path exactly like /mouse-data/, and otherwise keep their own entry page',async()=>{
+  const hrefs=['/mouse/','/animals/#mice','mouse/index.html','../animals/','https://braintimelab.github.io/mouse/','/mouse-data/'];
+  const f=site(hrefs,{base:'https://braintimelab.github.io/members.html'});assert.equal(f.count,hrefs.length);
+  f.hover(f.links[0]);await f.advance(0);assert.equal(f.requests.length,1);
+  assert.deepEqual(f.hrefs(),['','#mice','','','',''].map(hash=>destinations('mouse-data',hash).main));
+  assert.equal(f.links[1].getAttribute('href'),MAIN_ORIGIN+'/mouse-data/#mice');
+  f.fire(f.links[1],'contextmenu');assert.equal(f.links[1].getAttribute('href'),'/animals/#mice'); // Copy Link gives the short public address
+  f.emit('pageshow',{persisted:true});assert.deepEqual(f.hrefs(),hrefs);
+  for(const href of ['/mouse/','/animals/']){
+    // A click held for the probe opens Mouse Data on Main once it is verified...
+    const answer=deferred(),held=site([href],{fetcher:()=>answer.promise});held.fire(held.links[0],'touchstart');await held.advance(80);
+    assert(held.fire(held.links[0],'click').defaultPrevented);assert.equal(held.body[0].textContent,'Opening Mouse Data…');
+    answer.resolve(response(primary));await held.advance(0);assert.deepEqual(held.assigned,[MAIN_ORIGIN+'/mouse-data/'],href);
+    // ...and otherwise the short entry page itself, which then decides Main -> Recovery -> Limited like /mouse-data/.
+    const hung=site([href],{fetcher:()=>new Promise(()=>{})});hung.hover(hung.links[0]);await hung.advance(300);
+    assert(hung.fire(hung.links[0],'click').defaultPrevented);await hung.advance(PATIENCE-300);
+    assert.deepEqual(hung.assigned,['https://braintimelab.github.io'+href],href);hung.emit('pagehide');
+    const down=site([href],{fetcher:async()=>{throw Error('Main is down');}});down.hover(down.links[0]);await down.advance(0);
+    assert.deepEqual(down.hrefs(),[href]);assert(!down.fire(down.links[0],'click').defaultPrevented,href);
+  }
+  // Only the two exact folders are short entries; an explicit server choice, other paths and downloads keep their navigation.
+  const other=site(['/mouse/?server=recovery','/animals/?choose','/mouse/legacy.html','/mice/','/animal/','https://example.test/mouse/',{href:'/animals/',download:''}]);
+  assert.equal(other.count,0);for(const link of other.links)assert.deepEqual(link.types(),[]);
+});
 test('the fast path sends no credentials and never touches cookies or browser storage',async()=>{
   const f=site(undefined,{navigation:true});f.hover(f.links[0]);await f.advance(0);f.fire(f.links[0],'click');f.fire(f.links[0],'contextmenu');await f.advance(FRESH);f.emit('pageshow',{persisted:true});
   for(const {options} of f.requests){assert.equal(options.credentials,'omit');assert.equal(options.cache,'no-store');assert.equal(options.redirect,'error');assert.equal(options.referrerPolicy,'no-referrer');}
@@ -380,11 +441,11 @@ test('the homepage loads the fast path as a module, with its links and no inline
 });
 // Pages whose links reach an app entry page or /internal/, and those that load the fast path for them.
 async function publicLinks(){
-  const {readdir}=await import('node:fs/promises'),root=new URL('../',import.meta.url),skip=/^(assets|tests|scripts|sql|prev|mouse-data|reagents|internal|workspace|boards|primers|calculator|1LED-1PIR-11-14)\//;
+  const {readdir}=await import('node:fs/promises'),root=new URL('../',import.meta.url),skip=/^(assets|tests|scripts|sql|prev|mouse-data|mouse|animals|reagents|internal|workspace|boards|primers|calculator|1LED-1PIR-11-14)\//;
   const pages=(await readdir(root,{recursive:true})).filter(path=>path.endsWith('.html')&&!skip.test(path)).sort(),linking=[],wired=[];
   for(const page of pages){
     const html=await readFile(new URL(page,root),'utf8');
-    const entries=[...html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)].map(match=>new URL(match[1],'https://braintimelab.github.io/'+page)).filter(url=>url.origin==='https://braintimelab.github.io'&&!url.search&&/^\/(workspace|boards|mouse-data|reagents|primers|calculator|internal)\/(index\.html)?$/.test(url.pathname));
+    const entries=[...html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)].map(match=>new URL(match[1],'https://braintimelab.github.io/'+page)).filter(url=>url.origin==='https://braintimelab.github.io'&&!url.search&&/^\/(workspace|boards|mouse-data|mouse|animals|reagents|primers|calculator|internal)\/(index\.html)?$/.test(url.pathname));
     const script=html.match(/<script type="module" src="((?:\.\.\/)*)assets\/entry-links\.mjs\?v=1"><\/script>/);
     const noScripts=/http-equiv="Content-Security-Policy"/.test(html)&&!/script-src 'self'/.test(html);
     if(script){assert(entries.length&&!noScripts,page);assert.equal(script[1],'../'.repeat(page.split('/').length-1),page);wired.push(page);}
@@ -402,12 +463,12 @@ test('the homepage is the page that loads the fast path; the pages that link Wor
   assert.match(await readFile(new URL('../internal/workspace-entry.mjs',import.meta.url),'utf8'),/\nexport \* from '\.\.\/assets\/app-entry\.mjs\?v=\d+';\n$/);
 });
 test('entry pages warm Main and Recovery within their CSP and share the v3 module with /internal/',async()=>{
-  for(const app of ['workspace','boards','mouse-data','reagents','primers','calculator']){
-    const html=await readFile(new URL('../'+app+'/index.html',import.meta.url),'utf8');
+  for(const folder of Object.keys(ENTRY_PAGES)){
+    const html=await readFile(new URL('../'+folder+'/index.html',import.meta.url),'utf8');
     const hints=[...html.matchAll(/<link rel="preconnect" href="([^"]+)"( crossorigin)?>/g)].map(match=>[match[1],Boolean(match[2])]);
-    assert.deepEqual(hints,[[MAIN_ORIGIN,true],[MAIN_ORIGIN,false],['https://braintimedisk.tail933238.ts.net:10000',true]],app);
+    assert.deepEqual(hints,[[MAIN_ORIGIN,true],[MAIN_ORIGIN,false],['https://braintimedisk.tail933238.ts.net:10000',true]],folder);
     const csp=html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)[1],connect=csp.match(/connect-src ([^;]+)/)[1].split(' ');
-    for(const [origin] of hints)assert(connect.includes(origin),app);
+    for(const [origin] of hints)assert(connect.includes(origin),folder);
     assert.match(csp,/script-src 'self'; style-src 'self';/);assert(html.indexOf('preconnect')>html.indexOf('Content-Security-Policy'));
   }
   assert.match(await readFile(new URL('../internal/workspace-entry.mjs',import.meta.url),'utf8'),/'\.\.\/assets\/app-entry\.mjs\?v=3'/);
@@ -417,6 +478,6 @@ test('every importer of app-entry.mjs uses one token, so a cached older copy nev
   const {readdir}=await import('node:fs/promises'),root=new URL('../',import.meta.url),tokens=new Map();
   const files=(await readdir(root,{recursive:true})).filter(path=>/\.(html|mjs|js)$/.test(path)&&!/^(tests|node_modules)\//.test(path));
   for(const file of files)for(const match of (await readFile(new URL(file,root),'utf8')).matchAll(/app-entry\.mjs\?v=(\d+)/g))tokens.set(file,[...(tokens.get(file)||[]),match[1]]);
-  assert.deepEqual([...tokens.keys()].sort(),['assets/entry-links.mjs','boards/index.html','calculator/index.html','internal/workspace-entry.mjs','mouse-data/index.html','primers/index.html','reagents/index.html','workspace/index.html']);
+  assert.deepEqual([...tokens.keys()].sort(),['animals/index.html','assets/entry-links.mjs','boards/index.html','calculator/index.html','internal/workspace-entry.mjs','mouse-data/index.html','mouse/index.html','primers/index.html','reagents/index.html','workspace/index.html']);
   assert.deepEqual([...new Set([...tokens.values()].flat())],['3']);
 });
