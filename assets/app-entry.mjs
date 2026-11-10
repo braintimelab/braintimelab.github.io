@@ -23,6 +23,11 @@ export function mainReady(status, now = Date.now()) {
     status.service === 'ready' && status.writable === true;
 }
 
+// The moment (epoch ms) a status that passes mainReady now stops passing it under the clock rule above.
+export function mainValidUntil(status) {
+  return date(status?.observedAt) + MAX_AGE;
+}
+
 export function recoveryReady(status, now = Date.now()) {
   const captured = date(status?.dataCapturedAt), completed = date(status?.backupCompletedAt), valid = date(status?.policyValidUntil);
   return commonReady(status, now) && status.cloudId === 'cloud2' && status.mode === 'full-backup' &&
@@ -38,7 +43,7 @@ function appHash(value = '') {
 }
 
 export function destinations(app, hash = '') {
-  const path = PATHS[app] || PATHS.workspace;
+  const path = Object.hasOwn(PATHS, app) ? PATHS[app] : PATHS.workspace;
   return {main:MAIN+path+appHash(hash), recovery:RECOVERY+path+appHash(hash), limited:'/internal/limited/'};
 }
 
@@ -80,6 +85,11 @@ async function probe(origin, {fetchImpl,timeout,signal,now,validate}) {
   finally { clearTimeout(timer); controller.abort(); signal.removeEventListener('abort',abort); }
 }
 
+// The one Main check, shared with public links (assets/entry-links.mjs): the verified status, or null.
+export function probeMain({fetchImpl,timeout=4000,signal=new AbortController().signal,now=Date.now}) {
+  return probe(MAIN,{fetchImpl,timeout,signal,now,validate:mainReady});
+}
+
 export async function openApp({doc,location,fetchImpl,timeout=4000,now=Date.now}) {
   const nav=doc.querySelector('[data-workspace-servers]'), status=doc.getElementById('workspace-entry-status');
   if (!nav || !status) return;
@@ -98,7 +108,7 @@ export async function openApp({doc,location,fetchImpl,timeout=4000,now=Date.now}
   nav.addEventListener('click',manual,{once:true}); nav.addEventListener('focusin',manual,{once:true});
   status.textContent='Opening Main. Recovery is a read-only backup.';
   // Probe in parallel, prefer Main, and bound the entire decision to four seconds.
-  const main=probe(MAIN,{fetchImpl,timeout,signal:controller.signal,now,validate:mainReady});
+  const main=probeMain({fetchImpl,timeout,signal:controller.signal,now});
   const recovery=probe(RECOVERY,{fetchImpl,timeout,signal:controller.signal,now,validate:recoveryReady});
   try {
     const primary=await main;
@@ -117,4 +127,5 @@ export async function openApp({doc,location,fetchImpl,timeout=4000,now=Date.now}
 
 // Compatibility for bookmarks to the earlier /internal/ launcher.
 export const openMain = openApp;
-if(typeof document!=='undefined')void openApp({doc:document,location:window.location,fetchImpl:window.fetch.bind(window)});
+// Only entry pages route; public pages import this module for its checks alone.
+if(typeof document!=='undefined'&&document.body?.dataset.appEntry)void openApp({doc:document,location:window.location,fetchImpl:window.fetch.bind(window)});

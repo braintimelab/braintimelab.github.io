@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {openApp,mainReady,recoveryReady,destinations} from '../assets/app-entry.mjs';
+import {openApp,mainReady,mainValidUntil,recoveryReady,destinations,probeMain} from '../assets/app-entry.mjs';
 
 const now=Date.parse('2026-11-08T00:00:00Z');
 const primary={format:'braintime-public-service-status-v2',deploymentId:'61af3893-f1cb-417c-8c7c-2b7cfb0a89fd',cloudId:'cloud1',mode:'primary',generation:'current-primary-generation',captureSha256:'a'.repeat(64),observedAt:new Date(now).toISOString(),service:'ready',authReady:true,dataReady:true,writable:true,acceptances:{identity:'b'.repeat(64),projection:'c'.repeat(64),service:'d'.repeat(64)}};
@@ -96,4 +96,33 @@ test('the already-installed legacy Mouse worker fetches the new gateway before a
   listeners.get('fetch')({request:{method:'GET',url:scope},respondWith(value){pending=value;},waitUntil(value){background=value;}});
   const actual=await pending;await background;
   assert.equal(requested,1);assert.match(await actual.text(),/data-app-entry="mouse-data"/);
+});
+
+const MAIN_ORIGIN='https://braintimemain.tail933238.ts.net:10000';
+test('probeMain is the entry pages\' own Main check: fixed URL, no session, the same validation',async()=>{
+  const requests=[];const fetchImpl=async(url,options)=>{requests.push({url,options});return response(primary);};
+  assert.deepEqual(await probeMain({fetchImpl,now:()=>now}),primary);
+  assert.deepEqual(requests.map(r=>r.url),[MAIN_ORIGIN+'/workspace/status']);
+  for(const key of ['credentials','cache','redirect','referrerPolicy'])assert.equal(requests[0].options[key],{credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'}[key]);
+  for(const patch of [{writable:false},{cloudId:'cloud2'},{observedAt:'2026-11-07T00:00:00Z'}])assert.equal(await probeMain({fetchImpl:async()=>response({...primary,...patch}),now:()=>now}),null);
+  assert.equal(await probeMain({fetchImpl:async()=>{throw Error('offline');},now:()=>now}),null);
+  assert.equal(await probeMain({fetchImpl:()=>new Promise(()=>{}),timeout:10,now:()=>now}),null);
+  const controller=new AbortController(),pending=probeMain({fetchImpl:()=>new Promise(()=>{}),signal:controller.signal,now:()=>now});controller.abort();assert.equal(await pending,null);
+});
+test('mainValidUntil is the moment mainReady stops accepting a status, also with a skewed clock',()=>{
+  for(const offset of [0,-40_000,30_000]){
+    const status={...primary,observedAt:new Date(now+offset).toISOString()},until=mainValidUntil(status);
+    assert.equal(until,now+offset+60_000);assert(mainReady(status,until));assert(!mainReady(status,until+1));
+  }
+  assert(Number.isNaN(mainValidUntil({...primary,observedAt:'bad'})));
+});
+test('destinations never resolve inherited names to a path',()=>{
+  for(const app of ['__proto__','constructor','toString','hasOwnProperty','valueOf'])assert.deepEqual(destinations(app,'#cages'),destinations('workspace','#cages'),app);
+});
+test('importing app-entry on a page that is not an entry page starts no routing',async()=>{
+  const seen=[];globalThis.document={body:{dataset:{}},querySelector:()=>{seen.push('query');return null;},getElementById:()=>{seen.push('status');return null;}};
+  globalThis.window={location:{search:'',hash:'',replace:()=>seen.push('replace')},fetch:()=>seen.push('fetch')};
+  try{const module=await import('../assets/app-entry.mjs?page-without-entry');assert.equal(typeof module.probeMain,'function');}
+  finally{delete globalThis.document;delete globalThis.window;}
+  assert.deepEqual(seen,[]);
 });
