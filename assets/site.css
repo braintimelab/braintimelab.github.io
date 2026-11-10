@@ -67,3 +67,8 @@
 
 /* Publication years use the same text scale as the publication-index sentence. */
 .publications-page .section-nav a,.publications-page .publication-year h2{font-size:inherit}
+
+/* App links that briefly wait for Main show a busy cursor and a short status (assets/entry-links.mjs). */
+a[aria-busy="true"]{cursor:progress;opacity:.72}
+.entry-link-status{position:fixed;z-index:40;left:50%;bottom:24px;transform:translateX(-50%);padding:9px 18px;border-radius:999px;background:var(--ink);color:var(--white);font-size:.95rem;line-height:1.4;box-shadow:0 6px 24px rgba(23,29,34,.2)}
+.entry-link-status:empty{padding:0;box-shadow:none}
