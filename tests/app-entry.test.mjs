@@ -82,7 +82,7 @@ test('public entry pages have usable manual links and no legacy app startup or a
   for(const app of ['workspace','boards','mouse-data','reagents','primers','calculator']){
     const html=await readFile(new URL('../'+app+'/index.html',import.meta.url),'utf8');
     assert(html.includes('data-app-entry="'+app+'"'));assert.match(html,/data-main-entry>Main/);assert.match(html,/data-recovery-entry>Recovery/);assert.match(html,/data-limited-entry>Limited/);
-    assert(!html.includes('app.js?'));assert(!/<input|<form/.test(html));assert.match(html,/assets\/app-entry.mjs\?v=2/);
+    assert(!html.includes('app.js?'));assert(!/<input|<form/.test(html));assert.match(html,/assets\/app-entry.mjs\?v=3/);
   }
   for(const app of ['mouse-data','reagents'])assert.match(await readFile(new URL('../'+app+'/legacy.html',import.meta.url),'utf8'),/app.js\?v=/);
 });
@@ -400,4 +400,23 @@ test('the homepage is the page that loads the fast path; the pages that link Wor
   const internal=await readFile(new URL('../internal/index.html',import.meta.url),'utf8');
   assert.match(internal,/<body data-app-entry="workspace">/);assert.match(internal,/<script type="module" src="\.\/workspace-entry\.mjs\?v=\d+"><\/script>/);
   assert.match(await readFile(new URL('../internal/workspace-entry.mjs',import.meta.url),'utf8'),/\nexport \* from '\.\.\/assets\/app-entry\.mjs\?v=\d+';\n$/);
+});
+test('entry pages warm Main and Recovery within their CSP and share the v3 module with /internal/',async()=>{
+  for(const app of ['workspace','boards','mouse-data','reagents','primers','calculator']){
+    const html=await readFile(new URL('../'+app+'/index.html',import.meta.url),'utf8');
+    const hints=[...html.matchAll(/<link rel="preconnect" href="([^"]+)"( crossorigin)?>/g)].map(match=>[match[1],Boolean(match[2])]);
+    assert.deepEqual(hints,[[MAIN_ORIGIN,true],[MAIN_ORIGIN,false],['https://braintimedisk.tail933238.ts.net:10000',true]],app);
+    const csp=html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)[1],connect=csp.match(/connect-src ([^;]+)/)[1].split(' ');
+    for(const [origin] of hints)assert(connect.includes(origin),app);
+    assert.match(csp,/script-src 'self'; style-src 'self';/);assert(html.indexOf('preconnect')>html.indexOf('Content-Security-Policy'));
+  }
+  assert.match(await readFile(new URL('../internal/workspace-entry.mjs',import.meta.url),'utf8'),/'\.\.\/assets\/app-entry\.mjs\?v=3'/);
+});
+test('every importer of app-entry.mjs uses one token, so a cached older copy never meets newer code',async()=>{
+  // Bump the token everywhere at once whenever app-entry.mjs changes, and never reuse one for different bytes.
+  const {readdir}=await import('node:fs/promises'),root=new URL('../',import.meta.url),tokens=new Map();
+  const files=(await readdir(root,{recursive:true})).filter(path=>/\.(html|mjs|js)$/.test(path)&&!/^(tests|node_modules)\//.test(path));
+  for(const file of files)for(const match of (await readFile(new URL(file,root),'utf8')).matchAll(/app-entry\.mjs\?v=(\d+)/g))tokens.set(file,[...(tokens.get(file)||[]),match[1]]);
+  assert.deepEqual([...tokens.keys()].sort(),['assets/entry-links.mjs','boards/index.html','calculator/index.html','internal/workspace-entry.mjs','mouse-data/index.html','primers/index.html','reagents/index.html','workspace/index.html']);
+  assert.deepEqual([...new Set([...tokens.values()].flat())],['3']);
 });
